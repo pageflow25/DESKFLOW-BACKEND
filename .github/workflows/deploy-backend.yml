@@ -5,6 +5,7 @@ on:
     branches: [ "main" ]
     paths:
       - '.github/workflows/deploy-backend.yml' # Ou se mudar este arquivo
+      
 
 jobs:
   update-server:
