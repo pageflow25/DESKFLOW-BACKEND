@@ -4,7 +4,6 @@ on:
   push:
     branches: [ "main" ]
     paths:
-      - 'backend/**'                    # Só roda se mudar algo na pasta backend
       - '.github/workflows/deploy-backend.yml' # Ou se mudar este arquivo
 
 jobs:
@@ -15,10 +14,10 @@ jobs:
       - name: Checkout Seguro do Código
         run: |
           # Garante que o git confia na pasta (evita erro de ownership)
-          git config --global --add safe.directory C:/DeskflowBackend
+          git config --global --add safe.directory C:\DESKFLOW\DESKFLOW-BACKEND
           
           # Vai para a pasta oficial do servidor
-          Set-Location C:\DeskflowBackend
+          Set-Location C:\DESKFLOW\DESKFLOW-BACKEND
           
           # Baixa as atualizações sem perguntar nada
           git fetch origin main
@@ -28,7 +27,7 @@ jobs:
       - name: Atualizar Dependências (Python)
         run: |
           Write-Host "Verificando bibliotecas novas..."
-          Set-Location C:\DeskflowBackend
+          Set-Location C:\DESKFLOW\DESKFLOW-BACKEND
           # Usa o Python do ambiente virtual para instalar requisitos
           .\venv\Scripts\python -m pip install -r backend/requirements.txt
         shell: powershell
