@@ -1,0 +1,53 @@
+name: Deploy Backend Intranet
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'backend/**'                    # Só roda se mudar algo na pasta backend
+      - '.github/workflows/deploy-backend.yml' # Ou se mudar este arquivo
+
+jobs:
+  update-server:
+    runs-on: self-hosted                # <--- Manda o comando para o seu servidor Windows
+    
+    steps:
+      - name: Checkout Seguro do Código
+        run: |
+          # Garante que o git confia na pasta (evita erro de ownership)
+          git config --global --add safe.directory C:/DeskflowBackend
+          
+          # Vai para a pasta oficial do servidor
+          Set-Location C:\DeskflowBackend
+          
+          # Baixa as atualizações sem perguntar nada
+          git fetch origin main
+          git reset --hard origin/main
+        shell: powershell
+
+      - name: Atualizar Dependências (Python)
+        run: |
+          Write-Host "Verificando bibliotecas novas..."
+          Set-Location C:\DeskflowBackend
+          # Usa o Python do ambiente virtual para instalar requisitos
+          .\venv\Scripts\python -m pip install -r backend/requirements.txt
+        shell: powershell
+
+      - name: Reiniciar Serviço Backend
+        run: |
+          Write-Host "Reiniciando o serviço DeskflowBackend..."
+          Restart-Service DeskflowBackend
+          
+          # Espera 5 segundos para o serviço respirar
+          Start-Sleep -Seconds 5
+          
+          # Verifica se voltou
+          $service = Get-Service DeskflowBackend
+          Write-Host "Status atual: $($service.Status)"
+          
+          if ($service.Status -ne 'Running') {
+            Write-Error "CRÍTICO: O serviço caiu após o deploy!"
+            exit 1
+          }
+          Write-Host "Deploy concluído com sucesso!"
+        shell: powershell
