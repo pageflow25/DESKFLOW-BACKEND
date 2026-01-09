@@ -29,7 +29,7 @@ jobs:
           Write-Host "Verificando bibliotecas novas..."
           Set-Location C:\DESKFLOW\DESKFLOW-BACKEND
           # Usa o Python do ambiente virtual para instalar requisitos
-          .\venv\Scripts\python -m pip install -r backend/requirements.txt
+          .\venv\Scripts\python -m pip install -r requirements.txt
         shell: powershell
 
       - name: Reiniciar Serviço Backend
