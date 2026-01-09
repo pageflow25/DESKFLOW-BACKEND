@@ -1,3 +1,4 @@
+# version: '1.0'
 name: Deploy Backend Intranet
 
 on:
