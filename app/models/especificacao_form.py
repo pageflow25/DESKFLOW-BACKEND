@@ -22,11 +22,40 @@ class EspecificacaoForm(Base):
     quantidade = Column(Integer, nullable=False, default=1, comment="Quantidade do item")
     grupo = Column(String(100), nullable=True, comment="Agrupamento lógico dos itens (principal, unidade, capa, miolo, etc.)")
     
+    # Relacionamento com produto
+    id_produto = Column(
+        Integer,
+        nullable=True,
+        comment="FK para bremen_itens.id_produto"
+    )
+    
+    # Especificações de tamanho
+    largura = Column(String(50), nullable=True, comment="Largura do item")
+    altura = Column(String(50), nullable=True, comment="Altura do item")
+    
+    # Especificações de material
+    gramatura_miolo = Column(String(50), nullable=True, comment="Gramatura do miolo")
+    id_gramatura = Column(
+        Integer,
+        ForeignKey('bremen_gramatura.id', ondelete='SET NULL', onupdate='CASCADE'),
+        nullable=True,
+        comment="FK para tabela de gramaturas catalogadas"
+    )
+    id_papel = Column(
+        Integer,
+        ForeignKey('bremen_tamanho_papel.id', ondelete='SET NULL', onupdate='CASCADE'),
+        nullable=True,
+        comment="FK para tamanhos de papel"
+    )
+    
+    # Cores
+    corfrente = Column(Integer, nullable=True, comment="Número de cores da frente")
+    corverso = Column(Integer, nullable=True, comment="Número de cores do verso")
+    
     # Especificações de produção
     formato = Column(String(100), nullable=True, comment="Formato do item")
     cor_impressao = Column(String(100), nullable=True, comment="Cor da impressão")
     impressao = Column(String(100), nullable=True, comment="Tipo de impressão")
-    gramatura = Column(String(50), nullable=True, comment="Gramatura do papel")
     papel_adesivo = Column(Boolean, default=False, nullable=True, comment="Se utiliza papel adesivo")
     tipo_adesivo = Column(String(100), nullable=True, comment="Tipo do adesivo")
     grampos = Column(String(100), nullable=True, comment="Tipo de grampos")
@@ -39,6 +68,25 @@ class EspecificacaoForm(Base):
     acabamento = Column(String(100), nullable=True, comment="Tipo de acabamento")
     tipo_papel = Column(String(100), nullable=True, comment="Tipo do papel")
     laminacao = Column(String(100), nullable=True, comment="Tipo de laminação")
+    
+    # Metadados
+    metadados = Column(Text, nullable=True, comment="Dados adicionais em formato JSON")
+    obs = Column(Text, nullable=True, comment="Observações gerais")
+    
+    # Relacionamentos com tabelas
+    formulario_id = Column(
+        Integer,
+        ForeignKey('formularios.id', ondelete='CASCADE', onupdate='CASCADE'),
+        nullable=True
+    )
+    
+    criado_em = Column(DateTime, server_default=func.now(), nullable=False)
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    # Nota: Relacionamentos definidos abaixo na seção final do model
+
+    def __repr__(self):
+        return f"<EspecificacaoForm(id={self.id}, nome_item='{self.nome_item}', id_produto={self.id_produto})>"
     livreto = Column(String(100), nullable=True, comment="Indica se o item possui livreto ou informações do livreto")
     corte = Column(String(100), nullable=True, comment="Tipo de corte ou acabamento especial do item")
     altura = Column(String(50), nullable=True, comment="Altura do item em milímetros")

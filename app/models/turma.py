@@ -12,10 +12,13 @@ class Turma(Base):
     ano = Column(String(10), nullable=True, comment="Ano letivo da turma")
     turno = Column(String(50), nullable=True, comment="Turno da turma (matutino, vespertino, noturno, etc.)")
     area = Column(String(100), nullable=True, comment="Área/categoria da turma (ex: Ensino Fundamental, Infantil, etc.)")
-    id_unidade_escolar = Column(Integer, ForeignKey('unidades_escolares.id', ondelete='CASCADE'), nullable=False, comment="ID da unidade escolar à qual a turma pertence")
+    id_unidade_escolar = Column(Integer, ForeignKey('unidades_escolares.id', ondelete='CASCADE', onupdate='CASCADE'), nullable=False, comment="ID da unidade escolar à qual a turma pertence")
     criado_em = Column(DateTime, server_default=func.now(), nullable=False)
     atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
     
     # Relacionamentos
     unidade_escolar = relationship("UnidadeEscolar", back_populates="turmas")
     distribuicoes = relationship("DistribuicaoMaterial", back_populates="turma")
+    
+    def __repr__(self):
+        return f"<Turma(id={self.id}, nome='{self.nome}', unidade_escolar_id={self.id_unidade_escolar})>"

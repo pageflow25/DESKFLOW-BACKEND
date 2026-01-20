@@ -3,7 +3,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import JSONResponse, FileResponse
 from sqlalchemy.orm import Session
 from ..config.database import get_db
-from ..schemas.orcamento import OrcamentoRequest, OrcamentoListResponse
+from ..schemas.orcamento import EnviarOrcamentoRequest, ProcessamentoResultado
 from ..controllers.orcamento_controller import OrcamentoController
 from ..services.auth_service import verify_token
 from ..services.arquivo_orcamento_service import ArquivoOrcamentoService
@@ -38,17 +38,18 @@ def verify_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
     return token_data
 
 
-@router.post("/gerar", response_model=OrcamentoListResponse)
+@router.post("/gerar", response_model=ProcessamentoResultado)
 async def gerar_orcamento(
-    request: OrcamentoRequest,
+    request: EnviarOrcamentoRequest,
     db: Session = Depends(get_db),
     user_data: dict = Depends(verify_admin)
 ):
     """
-    Endpoint para gerar orçamento baseado nos filtros fornecidos
+    Gera orçamento, envia para API externa Bremen e salva resposta no banco.
+    Opcionalmente aprova a proposta automaticamente.
     Apenas administradores podem acessar
     """
-    return await OrcamentoController.gerar_orcamento(db, request)
+    return await OrcamentoController.enviar_orcamento_api(db, request)
 
 
 @router.get("/arquivos/listar")

@@ -228,6 +228,7 @@ SELECT json_build_object(
         'itens', COALESCE(
             json_agg(
                 json_build_object(
+                    '_id_distribuicao', ip.id_distribuicao,
                     'id_produto', ip.id_produto,
                     'descricao', ip.nome_arquivo,
                     'quantidade', ip.quantidade_total,
@@ -398,7 +399,7 @@ SELECT json_build_object(
             ), '[]'::json
         )
     )
-)
+) as orcamento
 FROM itens_produto ip
 GROUP BY ip.unidade_id, ip.cliente_id, ip.tipo_agrupamento
 ORDER BY ip.unidade_id, ip.tipo_agrupamento DESC;

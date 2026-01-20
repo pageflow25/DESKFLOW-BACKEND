@@ -20,8 +20,8 @@ class ComponenteInfo(BaseModel):
     largura: Optional[float] = None
     quantidade_paginas: Optional[int] = None
     gramaturasubstratoimpressao: Optional[float] = None
-    corfrente: Optional[str] = None
-    corverso: Optional[str] = None
+    corfrente: Optional[int] = None
+    corverso: Optional[int] = None
     perguntas_componente: List[dict] = []
 
 
@@ -64,3 +64,48 @@ class OrcamentoListResponse(BaseModel):
     total_unidades: int
     arquivo: Optional[str] = None
     mensagem: str = "Orçamento gerado com sucesso"
+
+
+# ============================================
+# Schemas para integração com API externa
+# ============================================
+
+class EnviarOrcamentoRequest(BaseModel):
+    """Request para enviar orçamento à API externa"""
+    escola_id: int = Field(..., gt=0, description="ID da escola")
+    ids_produtos: List[int] = Field(..., min_length=1, description="Lista de IDs de produtos")
+    datas_saida: List[date] = Field(..., min_length=1, description="Lista de datas de saída")
+    divisoes_logistica: Optional[List[str]] = Field(None, description="Divisões logísticas (opcional)")
+    dias_uteis_filtro: Optional[List[int]] = Field(None, description="Dias úteis (opcional)")
+    aprovar_automaticamente: bool = Field(False, description="Se deve aprovar a proposta automaticamente")
+    data_entrega: Optional[str] = Field(None, description="Data de entrega para aprovação (ISO format)")
+
+
+class ItemAPIResponse(BaseModel):
+    """Item retornado pela API externa"""
+    id: int
+    data_entrega: Optional[str] = None
+
+
+class OrcamentoAPIData(BaseModel):
+    """Dados retornados pela API de orçamento"""
+    id_orcamento: int
+    gerar_op: Optional[bool] = None
+    itens: List[ItemAPIResponse] = []
+
+
+class OrcamentoAPIResponse(BaseModel):
+    """Response da API externa de orçamento"""
+    identifier: str = "PageFlow"
+    data: OrcamentoAPIData
+
+
+class ProcessamentoResultado(BaseModel):
+    """Resultado do processamento de orçamentos"""
+    total: int
+    enviados: int
+    aprovados: int
+    salvos: int
+    erros: List[str] = []
+    detalhes: List[dict] = []
+

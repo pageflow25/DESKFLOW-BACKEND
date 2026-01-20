@@ -17,7 +17,7 @@ class ArquivoPdf(Base):
     pares = Column(Integer, nullable=True, comment="Identificador para vincular miolos e capas - mesmo valor indica um par")
     id_componente = Column(
         Integer, 
-        ForeignKey('bremen_componentes.id_componente', ondelete='SET NULL'), 
+        ForeignKey('bremen_componentes.id_componente', ondelete='SET NULL', onupdate='CASCADE'), 
         nullable=True,
         comment="Referência ao componente Bremen associado ao arquivo PDF"
     )
