@@ -19,6 +19,7 @@ from .bremen_tamanho_papel import BremenTamanhoPapel
 from .calc_bremen_escola import CalcBremenEscola
 from .status_deskflow_pedido import StatusDeskflowPedido
 from .orcamento_api import OrcamentoAPI
+from .orcamento_faturamento import OrcamentoFaturamento
 from .aprovacao_api import AprovacaoAPI
 from .historico_processamento import HistoricoProcessamento
 
@@ -43,6 +44,7 @@ __all__ = [
     "CalcBremenEscola",
     "StatusDeskflowPedido",
     "OrcamentoAPI",
+    "OrcamentoFaturamento",
     "AprovacaoAPI",
     "HistoricoProcessamento"
 ]
