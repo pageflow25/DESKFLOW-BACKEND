@@ -75,6 +75,14 @@ class BremenItem(Base):
         cascade="all, delete-orphan"
     )
     
+    gramaturas_capa = relationship(
+        "BremenGramaturaCapa",
+        back_populates="item",
+        foreign_keys="BremenGramaturaCapa.id_item",
+        primaryjoin="BremenItem.id_produto == BremenGramaturaCapa.id_item",
+        cascade="all, delete-orphan"
+    )
+    
     perguntas = relationship(
         "BremenPergunta",
         back_populates="item",
@@ -90,43 +98,13 @@ class BremenItem(Base):
         primaryjoin="BremenItem.id_produto == EspecificacaoForm.id_produto"
     )
     
-    def __repr__(self):
-        return f"<BremenItem(id={self.id}, id_produto={self.id_produto}, descricao='{self.descricao}')>"
-    # viewonly=True indica que SQLAlchemy não deve tentar sincronizar mudanças
-    especificacoes = relationship(
-        "EspecificacaoForm",
-        primaryjoin="BremenItem.id_produto == foreign(EspecificacaoForm.id_produto)",
-        back_populates="bremen_item",
-        foreign_keys="EspecificacaoForm.id_produto",
-        viewonly=True,
-        lazy="select"
-    )
-    
-    # Relacionamento com perguntas via id_produto
-    perguntas = relationship(
-        "BremenPergunta",
-        back_populates="item",
-        foreign_keys="BremenPergunta.id_geral",
-        primaryjoin="BremenItem.id_produto == BremenPergunta.id_geral",
-        lazy="select"
-    )
-    
-    # Relacionamento com gramaturas via id_produto
-    gramaturas = relationship(
-        "BremenGramatura",
-        back_populates="item",
-        foreign_keys="BremenGramatura.id_item",
-        primaryjoin="BremenItem.id_produto == BremenGramatura.id_item",
-        lazy="select"
-    )
-    
     # Índices compostos para otimizar queries
     __table_args__ = (
         Index('idx_bremen_itens_id_produto', 'id_produto'),
     )
     
     def __repr__(self):
-        return f"<BremenItem(id={self.id}, id_produto={self.id_produto}, descricao='{self.descricao[:30] if self.descricao else 'N/A'}', categoria='{self.categoria_prod}')>"
+        return f"<BremenItem(id={self.id}, id_produto={self.id_produto}, descricao='{self.descricao[:30] if self.descricao else 'N/A'}', categoria='{self.categoria_Prod}')>"
     
     def to_dict(self):
         """Converte o objeto para dicionário para serialização"""
@@ -134,7 +112,7 @@ class BremenItem(Base):
             'id': self.id,
             'id_produto': self.id_produto,
             'descricao': self.descricao,
-            'categoria_prod': self.categoria_prod,
+            'categoria_Prod': self.categoria_Prod,
             'sub_grupo': self.sub_grupo,
             'is_ativo': self.is_ativo,
             'is_conveniado': self.is_conveniado,

@@ -14,6 +14,7 @@ from .bremen_pergunta import BremenPergunta
 from .bremen_resposta import BremenResposta
 from .bremen_especificacao_detalhe import BremenEspecificacaoDetalhe
 from .bremen_gramatura import BremenGramatura
+from .bremen_gramatura_capa import BremenGramaturaCapa
 from .bremen_tamanho_papel import BremenTamanhoPapel
 from .calc_bremen_escola import CalcBremenEscola
 from .status_deskflow_pedido import StatusDeskflowPedido
@@ -37,6 +38,7 @@ __all__ = [
     "BremenResposta",
     "BremenEspecificacaoDetalhe",
     "BremenGramatura",
+    "BremenGramaturaCapa",
     "BremenTamanhoPapel",
     "CalcBremenEscola",
     "StatusDeskflowPedido",

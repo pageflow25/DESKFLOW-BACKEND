@@ -83,59 +83,6 @@ class EspecificacaoForm(Base):
     criado_em = Column(DateTime, server_default=func.now(), nullable=False)
     atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
     
-    # Nota: Relacionamentos definidos abaixo na seção final do model
-
-    def __repr__(self):
-        return f"<EspecificacaoForm(id={self.id}, nome_item='{self.nome_item}', id_produto={self.id_produto})>"
-    livreto = Column(String(100), nullable=True, comment="Indica se o item possui livreto ou informações do livreto")
-    corte = Column(String(100), nullable=True, comment="Tipo de corte ou acabamento especial do item")
-    altura = Column(String(50), nullable=True, comment="Altura do item em milímetros")
-    largura = Column(String(50), nullable=True, comment="Largura do item em milímetros")
-    gramatura_miolo = Column(String(50), nullable=True, comment="Gramatura do miolo informada no formulário")
-    
-    # Campos específicos do modelo comercial
-    origem_dados = Column(String(100), nullable=True, comment="Origem dos dados (manual, importado, etc.)")
-    grupos_vinculados = Column(Text, nullable=True, comment="JSON com os grupos vinculados e seus arquivos")
-    metadados = Column(Text, nullable=True, comment="Dados adicionais em formato JSON")
-    
-    # Relacionamento com Bremen
-    id_produto = Column(
-        Integer, 
-        nullable=True, 
-        index=True,
-        comment="FK para bremen_itens.id_produto - relacionamento lógico com BremenItem"
-    )
-    
-    # Relacionamento com gramatura e papel
-    id_gramatura = Column(
-        Integer,
-        ForeignKey('bremen_gramatura.id', ondelete='SET NULL', onupdate='CASCADE'),
-        nullable=True,
-        index=True,
-        comment="FK para bremen_gramatura"
-    )
-    
-    id_papel = Column(
-        Integer,
-        ForeignKey('bremen_tamanho_papel.id', ondelete='SET NULL', onupdate='CASCADE'),
-        nullable=True,
-        index=True,
-        comment="FK para bremen_tamanho_papel"
-    )
-    
-    # Chave estrangeira para formulário
-    formulario_id = Column(
-        Integer, 
-        ForeignKey('formularios.id', ondelete='CASCADE', onupdate='CASCADE'), 
-        nullable=False,
-        index=True,
-        comment="ID do formulário ao qual esta especificação pertence"
-    )
-    
-    # Timestamps
-    criado_em = Column(DateTime, server_default=func.now(), nullable=False)
-    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
-    
     # Relacionamentos
     formulario = relationship("Formulario", back_populates="especificacoes")
     
@@ -155,15 +102,12 @@ class EspecificacaoForm(Base):
     )
     
     # Relacionamento lógico (sem FK) com BremenItem via id_produto
-    bremen_item = relationship(
+    item = relationship(
         "BremenItem",
-        # Mark EspecificacaoForm.id_produto as the foreign column to disambiguate direction
         primaryjoin="foreign(EspecificacaoForm.id_produto) == BremenItem.id_produto",
-        remote_side="BremenItem.id_produto",
         back_populates="especificacoes",
-        foreign_keys="EspecificacaoForm.id_produto",
-        viewonly=True,
-        uselist=False
+        foreign_keys=[id_produto],
+        viewonly=True
     )
     
     # Relacionamentos com gramatura e papel
@@ -185,6 +129,6 @@ class EspecificacaoForm(Base):
         back_populates="especificacao",
         cascade="all, delete-orphan"
     )
-    
+
     def __repr__(self):
         return f"<EspecificacaoForm(id={self.id}, nome_item='{self.nome_item}', formulario_id={self.formulario_id})>"

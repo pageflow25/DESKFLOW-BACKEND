@@ -62,22 +62,3 @@ class Escola(Base):
     
     def __repr__(self):
         return f"<Escola(id={self.id}, nome='{self.nome}', tipo='{self.tipo_escola}')>"
-    
-    # Uma escola pode ter muitas unidades escolares
-    unidades = relationship(
-        "UnidadeEscolar",
-        back_populates="escola",
-        cascade="all, delete-orphan",
-        foreign_keys="UnidadeEscolar.escola_id"
-    )
-    
-    # Uma escola pode ter muitos clientes (se houver modelo Cliente)
-    # Descomente se o modelo Cliente existir
-    # clientes = relationship(
-    #     "Cliente",
-    #     back_populates="escola",
-    #     foreign_keys="Cliente.escola_id"
-    # )
-    
-    def __repr__(self):
-        return f"<Escola(id={self.id}, nome='{self.nome}', codigo='{self.codigo}')>"
