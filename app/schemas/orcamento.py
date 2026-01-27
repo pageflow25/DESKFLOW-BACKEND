@@ -109,3 +109,43 @@ class ProcessamentoResultado(BaseModel):
     erros: List[str] = []
     detalhes: List[dict] = []
 
+
+class AprovacaoRequest(BaseModel):
+    """Request para aprovação manual de orçamento"""
+    data_entrega: str = Field(..., description="Data de entrega no formato ISO (ex: 2026-01-15T12:00:00.000-03:00)")
+
+
+class StatusDistribuicaoResponse(BaseModel):
+    """Response com status de uma distribuição"""
+    distribuicao_id: int
+    unidade_escolar_id: int
+    unidade_nome: str
+    item_nome: Optional[str] = None
+    quantidade: int
+    status_codigo: Optional[str] = None
+    status_descricao: Optional[str] = None
+    status_distribuicao: str
+    id_orcamento: Optional[int] = None
+    id_ops: Optional[int] = None
+    tem_orcamento: bool
+    foi_aprovado: bool
+
+
+class StatusEscolaResponse(BaseModel):
+    """Response com status geral da escola"""
+    escola_id: int
+    total_distribuicoes: int
+    distribuicoes: List[StatusDistribuicaoResponse]
+
+
+class FluxoOrcamentoRequest(BaseModel):
+    """Request para definir o fluxo de processamento"""
+    tipo_fluxo: str = Field(..., description="Tipo do fluxo: 'com_distribuicao_sem_faturamento' ou 'outro'")
+    escola_id: int = Field(..., gt=0, description="ID da escola")
+    ids_produtos: List[int] = Field(..., min_length=1, description="Lista de IDs de produtos")
+    datas_saida: List[date] = Field(..., min_length=1, description="Lista de datas de saída")
+    divisoes_logistica: Optional[List[str]] = Field(None, description="Divisões logísticas (opcional)")
+    dias_uteis_filtro: Optional[List[int]] = Field(None, description="Dias úteis (opcional)")
+    aprovar_automaticamente: bool = Field(False, description="Se deve aprovar automaticamente")
+    data_entrega: Optional[str] = Field(None, description="Data de entrega para aprovação (ISO format)")
+
