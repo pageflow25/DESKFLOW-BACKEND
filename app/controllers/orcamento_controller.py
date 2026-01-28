@@ -111,11 +111,12 @@ class OrcamentoController:
                     # Extrair itens
                     itens = api_service.extrair_itens_orcamento(resposta_api)
                     
-                    # Salvar na tabela orcamento_api
+                    # Salvar na tabela orcamento_api (um registro por item)
                     if idx < len(distribuicoes):
                         distribuicao = distribuicoes[idx]
                         
-                        orcamento_api = OrcamentoService.salvar_orcamento_api(
+                        # Retorna lista de registros salvos (um por item)
+                        registros_orcamento = OrcamentoService.salvar_orcamento_api(
                             db=db,
                             distribuicao_id=distribuicao.id,
                             id_orcamento=id_orcamento,
@@ -139,6 +140,7 @@ class OrcamentoController:
                             "distribuicao_id": distribuicao.id,
                             "id_orcamento": id_orcamento,
                             "itens_count": len(itens),
+                            "registros_criados": len(registros_orcamento),
                             "status": "sucesso"
                         })
                         
@@ -147,10 +149,10 @@ class OrcamentoController:
                             logger.info(f"FASE 02 - Aprovando orçamento {id_orcamento}")
                             
                             try:
-                                # Aprover orçamento
+                                # Aprovar orçamento - busca itens da tabela orcamento_api
                                 resposta_aprovacao = await api_service.aprovar_orcamento(
+                                    db=db,
                                     id_orcamento=id_orcamento,
-                                    itens=itens,
                                     data_entrega=request.data_entrega
                                 )
                                 resultado.aprovados += 1

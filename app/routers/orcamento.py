@@ -5,7 +5,10 @@ from sqlalchemy.orm import Session
 from ..config.database import get_db
 from ..schemas.orcamento import (
     ProcessamentoResultado,
-    FluxoOrcamentoRequest
+    FluxoOrcamentoRequest,
+    OrcamentoRequest,
+    OrcamentoListResponse,
+    GerarOrcamentoCompleto
 )
 from ..controllers.orcamento_controller import OrcamentoController
 from ..services.auth_service import verify_token
@@ -39,6 +42,97 @@ def verify_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
         )
     
     return token_data
+
+
+@router.post("/gerar", response_model=ProcessamentoResultado)
+async def gerar_orcamento(
+    request: GerarOrcamentoCompleto,
+    db: Session = Depends(get_db),
+    user_data: dict = Depends(verify_admin)
+):
+    """
+    Gera orçamento com fluxo completo (FASE 01 + FASE 02)
+    
+    Executa:
+    1. Geração de orçamentos via API Bremen (FASE 01)
+    2. Salvamento na tabela orcamento_api
+    3. Aprovação automática dos orçamentos (FASE 02) 
+    4. Salvamento na tabela aprovacao_api
+    5. Atualização de status e histórico
+    
+    Args:
+        request: Dados para geração e processamento do orçamento
+        
+    Returns:
+        ProcessamentoResultado com detalhes do processamento completo
+    """
+    try:
+        logger.info(f"Usuário {user_data.get('username')} iniciando fluxo completo para escola {request.escola_id}")
+        
+        # Se data_entrega não foi fornecida, usar data padrão (hoje + 7 dias)
+        data_entrega = request.data_entrega
+        if not data_entrega and request.aprovar_automaticamente:
+            from datetime import datetime, timedelta
+            data_futura = datetime.now() + timedelta(days=7)
+            data_entrega = data_futura.strftime("%Y-%m-%dT12:00:00.000-03:00")
+            logger.info(f"Data de entrega não fornecida, usando padrão: {data_entrega}")
+        
+        # Converter para FluxoOrcamentoRequest
+        fluxo_request = FluxoOrcamentoRequest(
+            tipo_fluxo=request.tipo_fluxo,
+            escola_id=request.escola_id,
+            ids_produtos=request.ids_produtos,
+            datas_saida=request.datas_saida,
+            divisoes_logistica=request.divisoes_logistica,
+            dias_uteis_filtro=request.dias_uteis_filtro,
+            aprovar_automaticamente=request.aprovar_automaticamente,
+            data_entrega=data_entrega
+        )
+        
+        # Executar fluxo completo
+        return await OrcamentoController.processar_orcamento_com_distribuicao(
+            db=db,
+            request=fluxo_request
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro no fluxo completo de orçamento: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro interno: {str(e)}"
+        )
+
+
+@router.post("/gerar-simples", response_model=OrcamentoListResponse)
+async def gerar_orcamento_simples(
+    request: OrcamentoRequest,
+    db: Session = Depends(get_db),
+    user_data: dict = Depends(verify_admin)
+):
+    """
+    Gera orçamento com base nos filtros fornecidos (apenas geração local, sem envio para API)
+    
+    Args:
+        request: Dados para geração do orçamento (escola_id, ids_produtos, datas_saida, etc.)
+        
+    Returns:
+        OrcamentoListResponse com orçamentos gerados
+    """
+    try:
+        logger.info(f"Usuário {user_data.get('username')} gerando orçamento simples para escola {request.escola_id}")
+        
+        return await OrcamentoController.gerar_orcamento(db=db, request=request)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao gerar orçamento simples: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro interno: {str(e)}"
+        )
 
 
 @router.post("/processar", response_model=ProcessamentoResultado)

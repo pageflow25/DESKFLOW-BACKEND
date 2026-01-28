@@ -149,3 +149,53 @@ class FluxoOrcamentoRequest(BaseModel):
     aprovar_automaticamente: bool = Field(False, description="Se deve aprovar automaticamente")
     data_entrega: Optional[str] = Field(None, description="Data de entrega para aprovação (ISO format)")
 
+
+class GerarOrcamentoCompleto(BaseModel):
+    """Request para gerar orçamento com fluxo completo"""
+    escola_id: int = Field(..., gt=0, description="ID da escola")
+    ids_produtos: List[int] = Field(..., min_length=1, description="Lista de IDs de produtos")
+    datas_saida: List[date] = Field(..., min_length=1, description="Lista de datas de saída")
+    divisoes_logistica: Optional[List[str]] = Field(None, description="Lista de divisões logísticas (opcional)")
+    dias_uteis_filtro: Optional[List[int]] = Field(None, description="Lista de dias úteis (opcional)")
+    
+    # Parâmetros para o fluxo completo
+    executar_fluxo_completo: bool = Field(True, description="Se deve executar o fluxo completo (geração + aprovação)")
+    tipo_fluxo: str = Field(default="com_distribuicao_sem_faturamento", description="Tipo do fluxo de processamento")
+    aprovar_automaticamente: bool = Field(True, description="Se deve aprovar automaticamente")
+    data_entrega: Optional[str] = Field(None, description="Data de entrega para aprovação (formato ISO)")
+
+
+# ============================================
+# Schemas para persistência no banco
+# ============================================
+
+class ItemAprovacaoPayload(BaseModel):
+    """Item enviado para aprovação da proposta"""
+    id: int = Field(..., description="ID do item do orçamento")
+    data_entrega: str = Field(..., description="Data de entrega no formato ISO (ex: 2026-01-15T12:00:00.000-03:00)")
+
+
+class AprovacaoPropostaPayload(BaseModel):
+    """Payload enviado para API de aprovação da proposta"""
+    identifier: str = Field(default="PageFlow", description="Sistema de origem")
+    gerar_op: bool = Field(default=True, description="Se deve gerar OP automaticamente")
+    id_orcamento: int = Field(..., description="ID do orçamento a ser aprovado")
+    itens: List[ItemAprovacaoPayload] = Field(..., description="Lista de itens aprovados com data de entrega")
+
+
+class OrcamentoAPICreateData(BaseModel):
+    """Dados para criação de registro na tabela orcamento_api"""
+    distribuicao_material_id: int = Field(..., description="ID da distribuição de material vinculada")
+    id_orcamento: int = Field(..., description="ID do orçamento retornado pela API")
+    itens: List[dict] = Field(default=[], description="Array de itens do orçamento em formato JSON")
+    resposta_api: dict = Field(default={}, description="Resposta completa da API de criação de orçamento")
+
+
+class AprovacaoAPICreateData(BaseModel):
+    """Dados para criação de registro na tabela aprovacao_api"""
+    distribuicao_material_id: int = Field(..., description="ID da distribuição de material vinculada")
+    id_orcamento: int = Field(..., description="ID do orçamento aprovado")
+    id_ops: Optional[int] = Field(None, description="ID das OPs (Ordens de Produção) geradas")
+    pedidos: List[dict] = Field(default=[], description="Array de pedidos gerados na aprovação")
+    resposta_api: dict = Field(default={}, description="Resposta completa da API de aprovação")
+

@@ -26,21 +26,12 @@ class DistribuicaoMaterial(Base):
     descricao_material = Column(Text, nullable=True, comment="Descrição específica do material para esta unidade")
     observacoes = Column(Text, nullable=True, comment="Observações específicas para esta distribuição")
     status_distribuicao = Column(
-        SQLEnum(StatusDistribuicao),
+        String(50),
         nullable=False,
-        default=StatusDistribuicao.PENDENTE,
+        default="pendente",
         comment="Status da distribuição para esta unidade"
     )
-    data_previsao_entrega = Column(DateTime, nullable=True, comment="Data prevista para entrega na unidade")
     data_saida = Column(String(255), nullable=True, comment="Data real da saída do material da unidade")
-    endereco_entrega = Column(Text, nullable=True, comment="Endereço específico para entrega (se diferente do cadastro da unidade)")
-    responsavel_recebimento = Column(String(255), nullable=True, comment="Nome do responsável pelo recebimento na unidade")
-    telefone_contato = Column(String(20), nullable=True, comment="Telefone de contato para entrega")
-    codigo_rastreamento = Column(String(100), nullable=True, comment="Código de rastreamento do envio")
-    valor_unitario = Column(DECIMAL(10, 2), nullable=True, comment="Valor unitário do material")
-    valor_total = Column(DECIMAL(10, 2), nullable=True, comment="Valor total para esta distribuição (quantidade × valor unitário)")
-    ordem_producao = Column(Integer, nullable=True, comment="Ordem de produção/prioridade (1 = mais prioritário)")
-    lote_producao = Column(String(50), nullable=True, comment="Identificador do lote de produção")
     arquivo_pdf_id = Column(
         Integer,
         ForeignKey('arquivo_pdfs.id', ondelete='SET NULL', onupdate='CASCADE'),
@@ -71,11 +62,7 @@ class DistribuicaoMaterial(Base):
         nullable=True,
         comment="ID da turma que receberá o material (se aplicável)"
     )
-    area = Column(
-        String(100),
-        nullable=True,
-        comment="Área de ensino para distribuição por turma (ex: 'Educação Infantil', 'Ensino Fundamental', etc.)"
-    )
+    # Campos para integração DeskFlow
     status_id = Column(
         Integer,
         ForeignKey('status_deskflow_pedido.id', ondelete='SET NULL', onupdate='CASCADE'),
@@ -96,7 +83,7 @@ class DistribuicaoMaterial(Base):
     especificacao = relationship("EspecificacaoForm", back_populates="distribuicoes")
     arquivo_pdf = relationship("ArquivoPdf")
     status_deskflow = relationship("StatusDeskflowPedido", back_populates="distribuicoes")
-    orcamento_api = relationship("OrcamentoAPI", back_populates="distribuicao_material", uselist=False)
+    orcamento_api = relationship("OrcamentoAPI", back_populates="distribuicao_material")
     orcamento_faturamento = relationship("OrcamentoFaturamento", back_populates="distribuicao_material", uselist=False)
     aprovacao_api = relationship("AprovacaoAPI", back_populates="distribuicao_material", uselist=False)
     historico_processamento = relationship("HistoricoProcessamento", back_populates="distribuicao_material")
@@ -108,8 +95,6 @@ class DistribuicaoMaterial(Base):
         Index('idx_distribuicao_turma', 'id_turma'),
         Index('idx_distribuicao_especificacao', 'especificacao_form_id'),
         Index('idx_distribuicao_status', 'status_distribuicao'),
-        Index('idx_distribuicao_entrega', 'data_previsao_entrega'),
-        Index('idx_distribuicao_lote', 'lote_producao'),
     )
     
     def __repr__(self):
