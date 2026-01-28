@@ -97,6 +97,7 @@ class DistribuicaoMaterial(Base):
     arquivo_pdf = relationship("ArquivoPdf")
     status_deskflow = relationship("StatusDeskflowPedido", back_populates="distribuicoes")
     orcamento_api = relationship("OrcamentoAPI", back_populates="distribuicao_material", uselist=False)
+    orcamento_faturamento = relationship("OrcamentoFaturamento", back_populates="distribuicao_material", uselist=False)
     aprovacao_api = relationship("AprovacaoAPI", back_populates="distribuicao_material", uselist=False)
     historico_processamento = relationship("HistoricoProcessamento", back_populates="distribuicao_material")
     
