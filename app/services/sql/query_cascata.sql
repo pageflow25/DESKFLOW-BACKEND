@@ -36,6 +36,7 @@ WITH dados_normalizados AS (
         ON e.id_produto = b.id_produto
     WHERE UPPER(f.tipo_formulario) = UPPER(:tipo_formulario)
         AND uc.escola_id = :escola_id
+        AND distri.status_id = 1
 ),
 
 -- NÍVEL 4: ARQUIVOS

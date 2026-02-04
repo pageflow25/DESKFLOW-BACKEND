@@ -1,15 +1,11 @@
 import httpx
 import json
-from typing import Dict, Any, List, Optional
-from datetime import datetime, date
+from typing import Dict, Any, List
 from sqlalchemy.orm import Session
 from ..config.logging_config import get_logger
 from ..config.settings import get_settings
 from ..models.orcamento_api import OrcamentoAPI
-from ..schemas.orcamento import (
-    OrcamentoResponse, OrcamentoAPIResponse, ItemAPIResponse, OrcamentoAPIData,
-    ItemAprovacaoPayload, AprovacaoPropostaPayload
-)
+from ..schemas.orcamento import OrcamentoResponse
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -129,19 +125,6 @@ class OrcamentoAPIService:
             
         Returns:
             Dict com resposta da API de aprovação
-            
-        Payload enviado (montado a partir da tabela orcamento_api):
-            {
-                "identifier": "PageFlow",
-                "data": {
-                    "id_orcamento": 2324,
-                    "gerar_op": true,
-                    "itens": [
-                        {"id": 26439, "data_entrega": "2026-01-15T12:00:00.000-03:00"},
-                        {"id": 26440, "data_entrega": "2026-01-15T12:00:00.000-03:00"}
-                    ]
-                }
-            }
         """
         logger.info(f"Aprovando orçamento {id_orcamento} na API Bremen")
         
@@ -203,24 +186,6 @@ class OrcamentoAPIService:
             raise
         except Exception as e:
             logger.error(f"Erro ao aprovar orçamento: {str(e)}")
-            raise
-    
-    def formatar_data_entrega(self, data: date, hora: str = "12:00:00") -> str:
-        """
-        Formata data de entrega para o formato ISO esperado pela API
-        
-        Args:
-            data: Data de entrega
-            hora: Hora no formato HH:MM:SS
-            
-        Returns:
-            String da data no formato ISO com timezone
-        """
-        try:
-            data_str = f"{data.isoformat()}T{hora}.000-03:00"
-            return data_str
-        except Exception as e:
-            logger.error(f"Erro ao formatar data de entrega: {str(e)}")
             raise
     
     def extrair_itens_orcamento(self, resposta_api: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -294,36 +259,3 @@ class OrcamentoAPIService:
         except Exception as e:
             logger.error(f"Erro ao extrair pedidos da aprovação: {str(e)}")
             return []
-    
-    def preparar_itens_para_aprovacao(
-        self, 
-        itens: List[Dict[str, Any]], 
-        data_entrega: str
-    ) -> List[Dict[str, Any]]:
-        """
-        Prepara lista de itens no formato esperado pela API de aprovação
-        
-        Args:
-            itens: Lista de itens do orçamento
-            data_entrega: Data de entrega no formato ISO
-            
-        Returns:
-            Lista de itens formatados para aprovação
-            
-        Exemplo de retorno:
-            [
-                {"id": 21893, "data_entrega": "2026-01-15T12:00:00.000-03:00"},
-                {"id": 21894, "data_entrega": "2026-01-15T12:00:00.000-03:00"}
-            ]
-        """
-        itens_aprovacao = []
-        
-        for item in itens:
-            item_id = item.get('id')
-            if item_id:
-                itens_aprovacao.append({
-                    "id": item_id,
-                    "data_entrega": data_entrega
-                })
-        
-        return itens_aprovacao

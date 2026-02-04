@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional, Any
+from typing import List, Optional
 from datetime import date
 
 
@@ -66,40 +66,6 @@ class OrcamentoListResponse(BaseModel):
     mensagem: str = "Orçamento gerado com sucesso"
 
 
-# ============================================
-# Schemas para integração com API externa
-# ============================================
-
-class EnviarOrcamentoRequest(BaseModel):
-    """Request para enviar orçamento à API externa"""
-    escola_id: int = Field(..., gt=0, description="ID da escola")
-    ids_produtos: List[int] = Field(..., min_length=1, description="Lista de IDs de produtos")
-    datas_saida: List[date] = Field(..., min_length=1, description="Lista de datas de saída")
-    divisoes_logistica: Optional[List[str]] = Field(None, description="Divisões logísticas (opcional)")
-    dias_uteis_filtro: Optional[List[int]] = Field(None, description="Dias úteis (opcional)")
-    aprovar_automaticamente: bool = Field(False, description="Se deve aprovar a proposta automaticamente")
-    data_entrega: Optional[str] = Field(None, description="Data de entrega para aprovação (ISO format)")
-
-
-class ItemAPIResponse(BaseModel):
-    """Item retornado pela API externa"""
-    id: int
-    data_entrega: Optional[str] = None
-
-
-class OrcamentoAPIData(BaseModel):
-    """Dados retornados pela API de orçamento"""
-    id_orcamento: int
-    gerar_op: Optional[bool] = None
-    itens: List[ItemAPIResponse] = []
-
-
-class OrcamentoAPIResponse(BaseModel):
-    """Response da API externa de orçamento"""
-    identifier: str = "PageFlow"
-    data: OrcamentoAPIData
-
-
 class ProcessamentoResultado(BaseModel):
     """Resultado do processamento de orçamentos"""
     total: int
@@ -108,34 +74,6 @@ class ProcessamentoResultado(BaseModel):
     salvos: int
     erros: List[str] = []
     detalhes: List[dict] = []
-
-
-class AprovacaoRequest(BaseModel):
-    """Request para aprovação manual de orçamento"""
-    data_entrega: str = Field(..., description="Data de entrega no formato ISO (ex: 2026-01-15T12:00:00.000-03:00)")
-
-
-class StatusDistribuicaoResponse(BaseModel):
-    """Response com status de uma distribuição"""
-    distribuicao_id: int
-    unidade_escolar_id: int
-    unidade_nome: str
-    item_nome: Optional[str] = None
-    quantidade: int
-    status_codigo: Optional[str] = None
-    status_descricao: Optional[str] = None
-    status_distribuicao: str
-    id_orcamento: Optional[int] = None
-    id_ops: Optional[int] = None
-    tem_orcamento: bool
-    foi_aprovado: bool
-
-
-class StatusEscolaResponse(BaseModel):
-    """Response com status geral da escola"""
-    escola_id: int
-    total_distribuicoes: int
-    distribuicoes: List[StatusDistribuicaoResponse]
 
 
 class FluxoOrcamentoRequest(BaseModel):
@@ -163,39 +101,3 @@ class GerarOrcamentoCompleto(BaseModel):
     tipo_fluxo: str = Field(default="com_distribuicao_sem_faturamento", description="Tipo do fluxo de processamento")
     aprovar_automaticamente: bool = Field(True, description="Se deve aprovar automaticamente")
     data_entrega: Optional[str] = Field(None, description="Data de entrega para aprovação (formato ISO)")
-
-
-# ============================================
-# Schemas para persistência no banco
-# ============================================
-
-class ItemAprovacaoPayload(BaseModel):
-    """Item enviado para aprovação da proposta"""
-    id: int = Field(..., description="ID do item do orçamento")
-    data_entrega: str = Field(..., description="Data de entrega no formato ISO (ex: 2026-01-15T12:00:00.000-03:00)")
-
-
-class AprovacaoPropostaPayload(BaseModel):
-    """Payload enviado para API de aprovação da proposta"""
-    identifier: str = Field(default="PageFlow", description="Sistema de origem")
-    gerar_op: bool = Field(default=True, description="Se deve gerar OP automaticamente")
-    id_orcamento: int = Field(..., description="ID do orçamento a ser aprovado")
-    itens: List[ItemAprovacaoPayload] = Field(..., description="Lista de itens aprovados com data de entrega")
-
-
-class OrcamentoAPICreateData(BaseModel):
-    """Dados para criação de registro na tabela orcamento_api"""
-    distribuicao_material_id: int = Field(..., description="ID da distribuição de material vinculada")
-    id_orcamento: int = Field(..., description="ID do orçamento retornado pela API")
-    itens: List[dict] = Field(default=[], description="Array de itens do orçamento em formato JSON")
-    resposta_api: dict = Field(default={}, description="Resposta completa da API de criação de orçamento")
-
-
-class AprovacaoAPICreateData(BaseModel):
-    """Dados para criação de registro na tabela aprovacao_api"""
-    distribuicao_material_id: int = Field(..., description="ID da distribuição de material vinculada")
-    id_orcamento: int = Field(..., description="ID do orçamento aprovado")
-    id_ops: Optional[int] = Field(None, description="ID das OPs (Ordens de Produção) geradas")
-    pedidos: List[dict] = Field(default=[], description="Array de pedidos gerados na aprovação")
-    resposta_api: dict = Field(default={}, description="Resposta completa da API de aprovação")
-
