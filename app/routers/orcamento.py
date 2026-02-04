@@ -39,14 +39,19 @@ def verify_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
 
 
 @router.post("/gerar", response_model=ProcessamentoResultado)
-async def gerar_orcamento(
+async def processar_orcamento(
     request: EnviarOrcamentoRequest,
     db: Session = Depends(get_db),
     user_data: dict = Depends(verify_admin)
 ):
     """
-    Gera orçamento, envia para API externa Bremen e salva resposta no banco.
-    Opcionalmente aprova a proposta automaticamente.
+    Novo fluxo: Processa orçamento completo com geração e opcional aprovação
+    
+    - Busca distribuições elegíveis
+    - Gera orçamento via API externa
+    - Salva resultados no banco de dados
+    - Opcionalmente aprova automaticamente
+    
     Apenas administradores podem acessar
     """
     return await OrcamentoController.enviar_orcamento_api(db, request)

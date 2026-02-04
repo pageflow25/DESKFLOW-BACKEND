@@ -6,7 +6,6 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     DB_SSL: bool
 
-
     # Configurações JWT
     SECRET_KEY: str
     ALGORITHM: str
@@ -24,16 +23,19 @@ class Settings(BaseSettings):
     DRIVEHQ_FTP_PASSWORD: str
     DRIVEHQ_BASE_URL: str = "https://www.drivehq.com"
 
-
     # Credenciais Bremen Auth
     DEFAULT_URL: str
     DEFAULT_IDENTIFIER: str
     DEFAULT_USER: str
     DEFAULT_PASSWORD: str
     
-    # Configurações da API Bremen (Orçamento)
+    # Configurações da API DeskFlow (Novo fluxo de orçamento)
+    DESKFLOW_API_URL: str = "http://192.168.1.215:9001"
+    DESKFLOW_API_TOKEN: str = "Bearer ZXlKMGVYQWlPaUpLVjFRaUxDSmhiR2NpT2lKSVV6STFOaUo5LmV5SjFjM1ZoY21sdklqb2ljR0ZuWldac2IzY2lMQ0p1ZFcxbGNtOWZjMlZ5YVdVaU9pSXdNemc1T1NJc0ltVjRjQ0k2TVRjMk9ETTBPRGt6TUgwLkhYUGl1WEoyRUJUa1JDQXZydG9PV2ZVZ1llMHJTNUp6UU9maGo0eG1LVUk="
+    
+    # Compatibilidade com configurações antigas (mantidas para não quebrar)
     BREMEN_API_URL: str = "http://192.168.1.215:9001"
-    BREMEN_API_TOKEN: str = "Bearer ZXlKMGVYQWlPaUpLVjFRaUxDSmhiR2NpT2lKSVV6STFOaUo5LmV5SjFjM1ZoY21sdklqb2ljR0ZuWldac2IzY2lMQ0p1ZFcxbGNtOWZjMlZ5YVdVaU9pSXdNemc1T1NJc0ltVjRjQ0k2TVRjMk9ETTBPRGt6TUgwLkhYUGl1WEoyRUJUa1JDQXZydG9PV2ZVZ1llMHJTNUp6UU9maGo0eG1LVUk="
+    BREMEN_API_TOKEN: str = "Bearer ZXlKMGVYQWlPaUpLVjFRaUxDSmhiR2NpT2lKSVV6STFOaUo5LmV5SjFjM1ZoY21sdklqb2ljR0ZuWldac2IzY2lMQ0p1ZFcxbGNtOWZjMlZ5YVdVaU9pSXdNemc5T1NJc0ltVjRjQ0k2TVRjMk9ETTBPRGt6TUgwLkhYUGl1WEoyRUJUa1JDQXZydG9PV2ZVZ1llMHJTNUp6UU9maGo0eG1LVUk="
     
     class Config:
         env_file = ".env"

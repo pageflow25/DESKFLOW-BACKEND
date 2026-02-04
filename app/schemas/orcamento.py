@@ -3,14 +3,9 @@ from typing import List, Optional, Any
 from datetime import date
 
 
-class OrcamentoRequest(BaseModel):
-    """Request para gerar orçamento"""
-    escola_id: int = Field(..., gt=0, description="ID da escola")
-    ids_produtos: List[int] = Field(..., min_length=1, description="Lista de IDs de produtos")
-    datas_saida: List[date] = Field(..., min_length=1, description="Lista de datas de saída")
-    divisoes_logistica: Optional[List[str]] = Field(None, description="Lista de divisões logísticas (opcional)")
-    dias_uteis_filtro: Optional[List[int]] = Field(None, description="Lista de dias úteis (opcional)")
-
+# ============================================
+# Schemas para novo fluxo de orçamento
+# ============================================
 
 class ComponenteInfo(BaseModel):
     """Informações do componente"""
@@ -52,26 +47,8 @@ class OrcamentoData(BaseModel):
     itens: List[ItemOrcamento] = []
 
 
-class OrcamentoResponse(BaseModel):
-    """Response com orçamento gerado"""
-    identifier: str = "PageFlow"
-    data: OrcamentoData
-
-
-class OrcamentoListResponse(BaseModel):
-    """Response com lista de orçamentos (um por unidade)"""
-    orcamentos: List[OrcamentoResponse]
-    total_unidades: int
-    arquivo: Optional[str] = None
-    mensagem: str = "Orçamento gerado com sucesso"
-
-
-# ============================================
-# Schemas para integração com API externa
-# ============================================
-
 class EnviarOrcamentoRequest(BaseModel):
-    """Request para enviar orçamento à API externa"""
+    """Request para processar workflow completo de orçamento"""
     escola_id: int = Field(..., gt=0, description="ID da escola")
     ids_produtos: List[int] = Field(..., min_length=1, description="Lista de IDs de produtos")
     datas_saida: List[date] = Field(..., min_length=1, description="Lista de datas de saída")
@@ -80,6 +57,20 @@ class EnviarOrcamentoRequest(BaseModel):
     aprovar_automaticamente: bool = Field(False, description="Se deve aprovar a proposta automaticamente")
     data_entrega: Optional[str] = Field(None, description="Data de entrega para aprovação (ISO format)")
 
+
+class ProcessamentoResultado(BaseModel):
+    """Resultado do processamento de orçamentos"""
+    total: int = Field(description="Total de distribuições encontradas")
+    enviados: int = Field(description="Número de orçamentos enviados para API")
+    aprovados: int = Field(description="Número de orçamentos aprovados")
+    salvos: int = Field(description="Número de registros salvos no banco")
+    erros: List[str] = Field(default_factory=list, description="Lista de erros encontrados")
+    detalhes: List[dict] = Field(default_factory=list, description="Detalhes do processamento de cada distribuição")
+
+
+# ============================================
+# Schemas para respostas da API externa
+# ============================================
 
 class ItemAPIResponse(BaseModel):
     """Item retornado pela API externa"""
@@ -98,14 +89,4 @@ class OrcamentoAPIResponse(BaseModel):
     """Response da API externa de orçamento"""
     identifier: str = "PageFlow"
     data: OrcamentoAPIData
-
-
-class ProcessamentoResultado(BaseModel):
-    """Resultado do processamento de orçamentos"""
-    total: int
-    enviados: int
-    aprovados: int
-    salvos: int
-    erros: List[str] = []
-    detalhes: List[dict] = []
 
