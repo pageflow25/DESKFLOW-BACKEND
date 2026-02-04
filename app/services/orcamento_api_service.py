@@ -84,6 +84,7 @@ class OrcamentoAPIService:
             
             # Fazer requisição para API Bremen
             url = f"{self.api_base_url}/api/v1/orcamento"
+            logger.info(f"Conectando à API Bremen: {url}")
             
             async with httpx.AsyncClient(timeout=self.api_timeout) as client:
                 response = await client.post(
@@ -98,6 +99,10 @@ class OrcamentoAPIService:
                 logger.info(f"Orçamento enviado com sucesso. ID: {result.get('data', {}).get('id_orcamento')}")
                 return result
                 
+        except httpx.ConnectError as e:
+            logger.error(f"ERRO DE CONEXÃO com API Bremen ({self.api_base_url}): {str(e)}")
+            logger.error("Verifique: 1) Servidor Bremen online? 2) Rede/VPN conectada? 3) IP correto?")
+            raise
         except httpx.HTTPStatusError as e:
             logger.error(f"Erro HTTP ao enviar orçamento: {e.response.status_code} - {e.response.text}")
             raise

@@ -358,31 +358,22 @@ class OrcamentoService:
         Returns:
             List[DistribuicaoMaterial]: Lista de distribuições
         """
-        logger.info(f"Buscando distribuições para escola {escola_id}")
+        from ..models.unidade_escolar import UnidadeEscolar
+        from ..models.especificacao_form import EspecificacaoForm
+        
+        logger.info(f"Buscando distribuições para escola {escola_id} com produtos {ids_produtos}")
         
         try:
-            query = """
-                SELECT DISTINCT dm.*
-                FROM distribuicao_materiais dm
-                JOIN unidades_escolares ue ON ue.id = dm.unidade_escolar_id
-                JOIN especificacoes_form ef ON ef.id = dm.especificacao_form_id
-                WHERE ue.escola_id = :escola_id
-                AND ef.id_produto = ANY(:ids_produtos)
-                AND dm.quantidade > 0
-            """
-            
-            result = db.execute(text(query), {
-                'escola_id': escola_id,
-                'ids_produtos': ids_produtos
-            })
-            
-            distribuicoes = []
-            for row in result:
-                distribuicao = db.query(DistribuicaoMaterial).filter(
-                    DistribuicaoMaterial.id == row.id
-                ).first()
-                if distribuicao:
-                    distribuicoes.append(distribuicao)
+            # Usar ORM diretamente com join - uma única query
+            distribuicoes = db.query(DistribuicaoMaterial).join(
+                UnidadeEscolar, UnidadeEscolar.id == DistribuicaoMaterial.unidade_escolar_id
+            ).join(
+                EspecificacaoForm, EspecificacaoForm.id == DistribuicaoMaterial.especificacao_form_id
+            ).filter(
+                UnidadeEscolar.escola_id == escola_id,
+                EspecificacaoForm.id_produto.in_(ids_produtos),
+                DistribuicaoMaterial.quantidade > 0
+            ).distinct().all()
             
             logger.info(f"Encontradas {len(distribuicoes)} distribuições")
             return distribuicoes
@@ -390,3 +381,4 @@ class OrcamentoService:
         except Exception as e:
             logger.error(f"Erro ao buscar distribuições: {str(e)}")
             raise
+

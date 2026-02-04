@@ -91,13 +91,25 @@ class OrcamentoController:
             orcamentos_locais = await OrcamentoController.gerar_orcamento(db, orcamento_request)
             resultado.total = orcamentos_locais.total_unidades
             
+            logger.info(f"Orçamentos gerados localmente: {resultado.total} unidade(s)")
+            
             # Obter distribuições relevantes
             distribuicoes = OrcamentoService.obter_distribuicoes_por_escola(
                 db, request.escola_id, request.ids_produtos
             )
             
+            logger.info(f"Distribuições encontradas: {len(distribuicoes)}")
+            logger.info(f"Orçamentos a enviar para API: {len(orcamentos_locais.orcamentos)}")
+            
+            if not orcamentos_locais.orcamentos:
+                logger.warning("ATENÇÃO: Lista de orçamentos está vazia! Nenhum orçamento será enviado à API.")
+                resultado.erros.append("Nenhum orçamento gerado para enviar à API")
+                return resultado
+            
             # Enviar cada orçamento para a API externa
             for idx, orcamento in enumerate(orcamentos_locais.orcamentos):
+                logger.info(f"Enviando orçamento {idx + 1}/{len(orcamentos_locais.orcamentos)} para API Bremen...")
+
                 try:
                     # Enviar orçamento para API
                     resposta_api = await api_service.enviar_orcamento(orcamento)

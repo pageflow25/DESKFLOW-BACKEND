@@ -16,21 +16,22 @@ ssl_mode = "require" if settings.DB_SSL else "disable"
 
 engine = create_engine(
     settings.DATABASE_URL,
-    pool_pre_ping=True,  # Testa conexões antes de usar
-    pool_recycle=300,    # Recicla conexões a cada 5 minutos
-    pool_size=10,        # Pool de 10 conexões
-    max_overflow=20,     # Até 20 conexões adicionais
-    echo=False,          # Desabilitar logs automáticos do SQLAlchemy
+    pool_pre_ping=True,      # Testa conexões antes de usar - ESSENCIAL
+    pool_recycle=60,         # Recicla conexões a cada 60s (antes era 300s)
+    pool_size=10,            # Pool de 10 conexões
+    max_overflow=20,         # Até 20 conexões adicionais
+    pool_timeout=60,         # Timeout de 60s para obter conexão do pool
+    echo=False,              # Desabilitar logs automáticos do SQLAlchemy
     # Configurações de conexão para PostgreSQL (Render)
     connect_args={
         "sslmode": ssl_mode,
-        "options": "-c timezone=America/Sao_Paulo",
+        "options": "-c timezone=America/Sao_Paulo -c statement_timeout=120000",  # 120s timeout para statements
         # Keepalive para evitar que conexões SSL sejam fechadas inesperadamente
         "keepalives": 1,              # Habilita TCP keepalive
-        "keepalives_idle": 30,        # Inicia keepalive após 30s de inatividade
-        "keepalives_interval": 10,    # Intervalo de 10s entre keepalive packets
+        "keepalives_idle": 15,        # Inicia keepalive após 15s de inatividade (antes 30s)
+        "keepalives_interval": 5,     # Intervalo de 5s entre keepalive packets (antes 10s)
         "keepalives_count": 5,        # 5 tentativas antes de considerar conexão morta
-        "connect_timeout": 10         # Timeout de 10s para estabelecer conexão
+        "connect_timeout": 30         # Timeout de 30s para estabelecer conexão (antes 10s)
     }
 )
 
@@ -52,9 +53,16 @@ def get_db():
         db.commit()  # Commit automático se não houver exceção
         logger.debug("Transação confirmada com sucesso")
     except Exception as e:
-        db.rollback()  # Rollback em caso de erro
-        logger.error(f"Erro na transação - Rollback executado: {str(e)}", exc_info=True)
+        logger.warning(f"Erro detectado, executando rollback: {str(e)}")
+        try:
+            db.rollback()  # Rollback em caso de erro
+            logger.debug("Rollback executado com sucesso")
+        except Exception as rollback_error:
+            logger.error(f"Erro ao executar rollback: {str(rollback_error)}")
         raise
     finally:
-        db.close()
-        logger.debug("Sessão do banco de dados fechada")
+        try:
+            db.close()
+            logger.debug("Sessão do banco de dados fechada")
+        except Exception as close_error:
+            logger.error(f"Erro ao fechar sessão: {str(close_error)}")
