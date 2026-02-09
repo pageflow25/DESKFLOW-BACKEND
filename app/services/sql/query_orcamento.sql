@@ -15,7 +15,9 @@ unidades_filtradas AS (
         ue.id,
         ue.cliente_id,
         ue.forma_pagamento,
-        ue.escola_id
+        ue.escola_id,
+        ue.client_id_venda,
+        ue.vendedor_id_venda
     FROM unidades_escolares ue
     CROSS JOIN parametros p
     WHERE ue.escola_id = p.escola_id
@@ -31,6 +33,7 @@ especificacoes_unidade AS (
         ef.id_produto,
         ef.corfrente,
         ef.corverso,
+        bt.idgruposubstratoimpressao,
         COALESCE(bt.altura, NULLIF(ef.altura, '')::numeric) AS altura_mm,
         COALESCE(bt.largura, NULLIF(ef.largura, '')::numeric) AS largura_mm,
         NULLIF(ef.gramatura_miolo, '') AS gramatura_miolo,
@@ -75,8 +78,12 @@ itens_produto AS (
         eu.formulario_id,
         MAX(eu.especificacao_id) AS especificacao_id,
         MAX(eu.id_produto) AS id_produto,
+        (SELECT uf.client_id_venda FROM unidades_filtradas uf WHERE uf.id = eu.unidade_id LIMIT 1) AS client_id_venda,
+        (SELECT uf.vendedor_id_venda FROM unidades_filtradas uf WHERE uf.id = eu.unidade_id LIMIT 1) AS vendedor_id_venda,
+        (SELECT uf.forma_pagamento FROM unidades_filtradas uf WHERE uf.id = eu.unidade_id LIMIT 1) AS forma_pagamento_venda,
         
-        MAX(eu.id_distribuicao) AS id_distribuicao, -- PEGA O ID DA DISTRIBUIÇÃO AQUI PARA RELACIONAR COM A TABELA
+        -- PEGA O ID DA DISTRIBUIÇÃO AQUI PARA RELACIONAR COM A TABELA
+        MAX(eu.id_distribuicao) AS id_distribuicao,
         
         (
             UPPER(TRIM(REGEXP_REPLACE(REGEXP_REPLACE(
@@ -114,6 +121,7 @@ itens AS (
         eu.id_produto,
         eu.corfrente,
         eu.corverso,
+        eu.idgruposubstratoimpressao,
         bi.descricao,
         bi.sub_grupo,
         bi."categoria_Prod",
@@ -134,6 +142,7 @@ componentes AS (
         i.id_produto,
         i.corfrente,
         i.corverso,
+        i.idgruposubstratoimpressao,
         i.sub_grupo,
         i."categoria_Prod",
         bc.id AS componente_id,
@@ -223,12 +232,11 @@ SELECT json_build_object(
     'identifier', 'PageFlow',
     'data', json_build_object(
         'id_cliente', ip.cliente_id,
-        'id_vendedor', 2285,
-        'id_forma_pagamento', '11',
+        'id_vendedor', ip.vendedor_id_venda,
+        'id_forma_pagamento', ip.forma_pagamento_venda,
         'itens', COALESCE(
             json_agg(
                 json_build_object(
-                    '_id_distribuicao', ip.id_distribuicao,
                     'id_produto', ip.id_produto,
                     'descricao', ip.nome_arquivo,
                     'quantidade', ip.quantidade_total,
@@ -243,10 +251,12 @@ SELECT json_build_object(
                                 WHEN (comp_sel.is_miolo IS TRUE OR LOWER(COALESCE(comp_sel.descricao, '')) LIKE '%%miolo%%') THEN
                                     json_build_object(
                                         'id', comp_sel.id_componente,
+                                        'id_distribuicao', ip.id_distribuicao,
                                         'descricao', comp_sel.descricao,
                                         'altura', comp_sel.altura,
                                         'largura', comp_sel.largura,
                                         'quantidade_paginas', COALESCE(comp_sel.quantidade_paginas, 0),
+                                        'idgruposubstratoimpressao', comp_sel.idgruposubstratoimpressao,
                                         'gramaturasubstratoimpressao', COALESCE(
                                             comp_sel.gramatura_catalogo,
                                             NULLIF(replace(regexp_replace(comp_sel.gramatura_miolo::text, '[^0-9.,]', '', 'g'), ',', '.'), '')::numeric
@@ -279,6 +289,7 @@ SELECT json_build_object(
                                     json_strip_nulls(
                                         json_build_object(
                                             'id', comp_sel.id_componente,
+                                            'id_distribuicao', ip.id_distribuicao,
                                             'descricao', comp_sel.descricao,
                                             'altura', comp_sel.altura,
                                             'largura', comp_sel.largura,
@@ -329,9 +340,14 @@ SELECT json_build_object(
                                 ELSE
                                     json_build_object(
                                         'id', comp_sel.id_componente,
+                                        'id_distribuicao', ip.id_distribuicao,
                                         'descricao', comp_sel.descricao,
                                         'altura', comp_sel.altura,
                                         'largura', comp_sel.largura,
+                                        'gramaturasubstratoimpressao', 
+                                            CASE WHEN LOWER(comp_sel.descricao) LIKE '%folha%rosto%' 
+                                            THEN COALESCE(comp_sel.gramatura_catalogo, NULLIF(replace(regexp_replace(comp_sel.gramatura_miolo::text, '[^0-9.,]', '', 'g'), ',', '.'), '')::numeric)
+                                            ELSE NULL END,
                                         'perguntas_componente', COALESCE((
                                             SELECT json_agg(
                                                 json_build_object(
@@ -366,6 +382,7 @@ SELECT json_build_object(
                                 comp.especificacao_id,
                                 comp.corfrente,
                                 comp.corverso,
+                                comp.idgruposubstratoimpressao,
                                 comp.sub_grupo,
                                 comp."categoria_Prod",
                                 comp.is_capa,
@@ -399,7 +416,7 @@ SELECT json_build_object(
             ), '[]'::json
         )
     )
-) as orcamento
+)
 FROM itens_produto ip
-GROUP BY ip.unidade_id, ip.cliente_id, ip.tipo_agrupamento
+GROUP BY ip.unidade_id, ip.cliente_id, ip.tipo_agrupamento, ip.client_id_venda, ip.vendedor_id_venda, ip.forma_pagamento_venda
 ORDER BY ip.unidade_id, ip.tipo_agrupamento DESC;

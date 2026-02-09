@@ -1,5 +1,6 @@
 import httpx
 import json
+import asyncio
 from typing import Dict, Any, List
 from sqlalchemy.orm import Session
 from ..config.logging_config import get_logger
@@ -9,6 +10,11 @@ from ..schemas.orcamento import OrcamentoResponse
 
 logger = get_logger(__name__)
 settings = get_settings()
+
+# Configurações de retry
+MAX_RETRIES = 3
+RETRY_DELAY_SECONDS = 5
+REQUEST_DELAY_SECONDS = 2  # Delay entre requisições para não sobrecarregar API
 
 
 class OrcamentoAPIService:
@@ -26,6 +32,84 @@ class OrcamentoAPIService:
             'Authorization': settings.BREMEN_API_TOKEN
         }
     
+    async def _fazer_requisicao_com_retry(
+        self, 
+        url: str, 
+        payload: Dict[str, Any],
+        operacao: str = "requisição"
+    ) -> Dict[str, Any]:
+        """
+        Faz uma requisição POST com retry automático para erros 503.
+        
+        Args:
+            url: URL da API
+            payload: Dados a enviar
+            operacao: Nome da operação (para logs)
+            
+        Returns:
+            Dict com resposta da API
+        """
+        last_error = None
+        
+        for tentativa in range(1, MAX_RETRIES + 1):
+            try:
+                logger.info(f"Tentativa {tentativa}/{MAX_RETRIES} - {operacao}")
+                
+                async with httpx.AsyncClient(timeout=self.api_timeout) as client:
+                    response = await client.post(
+                        url=url,
+                        headers=self.headers,
+                        json=payload
+                    )
+                    
+                    # Se for 503, fazer retry
+                    if response.status_code == 503:
+                        error_msg = response.text
+                        logger.warning(f"API retornou 503 (ocupada). Aguardando {RETRY_DELAY_SECONDS}s antes de tentar novamente...")
+                        logger.debug(f"Resposta 503: {error_msg}")
+                        
+                        if tentativa < MAX_RETRIES:
+                            await asyncio.sleep(RETRY_DELAY_SECONDS * tentativa)  # Backoff exponencial
+                            continue
+                        else:
+                            response.raise_for_status()
+                    
+                    response.raise_for_status()
+                    return response.json()
+                    
+            except httpx.ConnectError as e:
+                last_error = e
+                logger.error(f"ERRO DE CONEXÃO com API Bremen ({self.api_base_url}): {str(e)}")
+                logger.error("Verifique: 1) Servidor Bremen online? 2) Rede/VPN conectada? 3) IP correto?")
+                
+                if tentativa < MAX_RETRIES:
+                    logger.info(f"Aguardando {RETRY_DELAY_SECONDS}s antes de tentar novamente...")
+                    await asyncio.sleep(RETRY_DELAY_SECONDS)
+                    continue
+                raise
+                
+            except httpx.HTTPStatusError as e:
+                last_error = e
+                # Para outros erros HTTP que não sejam 503, não fazer retry
+                if e.response.status_code != 503:
+                    logger.error(f"Erro HTTP: {e.response.status_code} - {e.response.text}")
+                    raise
+                    
+                # 503 já tratado acima
+                raise
+                
+            except Exception as e:
+                last_error = e
+                logger.error(f"Erro ao fazer {operacao}: {str(e)}")
+                
+                if tentativa < MAX_RETRIES:
+                    await asyncio.sleep(RETRY_DELAY_SECONDS)
+                    continue
+                raise
+        
+        # Se chegou aqui, todas as tentativas falharam
+        raise last_error if last_error else Exception("Todas as tentativas falharam")
+    
     async def enviar_orcamento(self, orcamento: OrcamentoResponse) -> Dict[str, Any]:
         """
         Envia orçamento para a API Bremen (FASE 01)
@@ -38,77 +122,56 @@ class OrcamentoAPIService:
         """
         logger.info("Enviando orçamento para API Bremen")
         
-        try:
-            # Converter orcamento para formato da API
-            payload = {
-                "identifier": orcamento.identifier,
-                "data": {
-                    "id_cliente": orcamento.data.id_cliente,
-                    "id_vendedor": orcamento.data.id_vendedor,
-                    "id_forma_pagamento": orcamento.data.id_forma_pagamento,
-                    "itens": [
-                        {
-                            "id_produto": item.id_produto,
-                            "descricao": item.descricao,
-                            "quantidade": item.quantidade,
-                            "usar_listapreco": item.usar_listapreco,
-                            "manter_estrutura_mod_produto": item.manter_estrutura_mod_produto,
-                            "componentes": [
-                                {
-                                    "id": comp.id,
-                                    "descricao": comp.descricao,
-                                    "altura": comp.altura,
-                                    "largura": comp.largura,
-                                    "quantidade_paginas": comp.quantidade_paginas,
-                                    "gramaturasubstratoimpressao": comp.gramaturasubstratoimpressao,
-                                    "corfrente": comp.corfrente,
-                                    "corverso": comp.corverso,
-                                    "perguntas_componente": comp.perguntas_componente
-                                }
-                                for comp in item.componentes
-                            ],
-                            "perguntas_gerais": [
-                                {
-                                    "tipo": pg.tipo,
-                                    "pergunta": pg.pergunta,
-                                    "resposta": pg.resposta,
-                                    "id_pergunta": pg.id_pergunta
-                                }
-                                for pg in item.perguntas_gerais
-                            ]
-                        }
-                        for item in orcamento.data.itens
-                    ]
-                }
+        # Converter orcamento para formato da API
+        payload = {
+            "identifier": orcamento.identifier,
+            "data": {
+                "id_cliente": orcamento.data.id_cliente,
+                "id_vendedor": orcamento.data.id_vendedor,
+                "id_forma_pagamento": orcamento.data.id_forma_pagamento,
+                "itens": [
+                    {
+                        "id_produto": item.id_produto,
+                        "descricao": item.descricao,
+                        "quantidade": item.quantidade,
+                        "usar_listapreco": item.usar_listapreco,
+                        "manter_estrutura_mod_produto": item.manter_estrutura_mod_produto,
+                        "componentes": [
+                            {
+                                "id": comp.id,
+                                "descricao": comp.descricao,
+                                "altura": comp.altura,
+                                "largura": comp.largura,
+                                "quantidade_paginas": comp.quantidade_paginas,
+                                "gramaturasubstratoimpressao": comp.gramaturasubstratoimpressao,
+                                "corfrente": comp.corfrente,
+                                "corverso": comp.corverso,
+                                "perguntas_componente": comp.perguntas_componente
+                            }
+                            for comp in item.componentes
+                        ],
+                        "perguntas_gerais": [
+                            {
+                                "tipo": pg.tipo,
+                                "pergunta": pg.pergunta,
+                                "resposta": pg.resposta,
+                                "id_pergunta": pg.id_pergunta
+                            }
+                            for pg in item.perguntas_gerais
+                        ]
+                    }
+                    for item in orcamento.data.itens
+                ]
             }
-            
-            # Fazer requisição para API Bremen
-            url = f"{self.api_base_url}/api/v1/orcamento"
-            logger.info(f"Conectando à API Bremen: {url}")
-            
-            async with httpx.AsyncClient(timeout=self.api_timeout) as client:
-                response = await client.post(
-                    url=url,
-                    headers=self.headers,
-                    json=payload
-                )
-                
-                response.raise_for_status()
-                result = response.json()
-                
-                logger.info(f"Orçamento enviado com sucesso. ID: {result.get('data', {}).get('id_orcamento')}")
-                return result
-                
-        except httpx.ConnectError as e:
-            logger.error(f"ERRO DE CONEXÃO com API Bremen ({self.api_base_url}): {str(e)}")
-            logger.error("Verifique: 1) Servidor Bremen online? 2) Rede/VPN conectada? 3) IP correto?")
-            raise
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Erro HTTP ao enviar orçamento: {e.response.status_code} - {e.response.text}")
-            raise
-        except Exception as e:
-            logger.error(f"Erro ao enviar orçamento: {str(e)}")
-            raise
+        }
+        
+        url = f"{self.api_base_url}/api/v1/orcamento"
+        logger.info(f"Conectando à API Bremen: {url}")
+        
+        result = await self._fazer_requisicao_com_retry(url, payload, "enviar orçamento")
+        
+        logger.info(f"Orçamento enviado com sucesso. ID: {result.get('data', {}).get('id_orcamento')}")
+        return result
     
     async def aprovar_orcamento(
         self, 
@@ -133,65 +196,48 @@ class OrcamentoAPIService:
         """
         logger.info(f"Aprovando orçamento {id_orcamento} na API Bremen")
         
-        try:
-            # Buscar itens da tabela orcamento_api
-            itens_db = db.query(OrcamentoAPI).filter(
-                OrcamentoAPI.id_orcamento == id_orcamento
-            ).all()
-            
-            if not itens_db:
-                raise ValueError(f"Nenhum item encontrado na tabela orcamento_api para o orçamento {id_orcamento}")
-            
-            logger.info(f"Encontrados {len(itens_db)} itens na tabela orcamento_api para orçamento {id_orcamento}")
-            
-            # Montar lista de itens para aprovação usando id_item da tabela
-            itens_aprovacao = []
-            for item in itens_db:
-                if item.id_item:
-                    itens_aprovacao.append({
-                        "id": item.id_item,
-                        "data_entrega": data_entrega
-                    })
-                    logger.debug(f"Item adicionado para aprovação: id={item.id_item}")
-            
-            if not itens_aprovacao:
-                raise ValueError(f"Nenhum item válido (id_item) encontrado para aprovação do orçamento {id_orcamento}")
-            
-            # Montar payload de aprovação
-            payload = {
-                "identifier": "PageFlow",
-                "data": {
-                    "id_orcamento": id_orcamento,
-                    "gerar_op": gerar_op,
-                    "itens": itens_aprovacao
-                }
+        # Buscar itens da tabela orcamento_api
+        itens_db = db.query(OrcamentoAPI).filter(
+            OrcamentoAPI.id_orcamento == id_orcamento
+        ).all()
+        
+        if not itens_db:
+            raise ValueError(f"Nenhum item encontrado na tabela orcamento_api para o orçamento {id_orcamento}")
+        
+        logger.info(f"Encontrados {len(itens_db)} itens na tabela orcamento_api para orçamento {id_orcamento}")
+        
+        # Montar lista de itens para aprovação usando id_item da tabela
+        itens_aprovacao = []
+        for item in itens_db:
+            if item.id_item:
+                itens_aprovacao.append({
+                    "id": item.id_item,
+                    "data_entrega": data_entrega
+                })
+                logger.debug(f"Item adicionado para aprovação: id={item.id_item}")
+        
+        if not itens_aprovacao:
+            raise ValueError(f"Nenhum item válido (id_item) encontrado para aprovação do orçamento {id_orcamento}")
+        
+        # Montar payload de aprovação
+        payload = {
+            "identifier": "PageFlow",
+            "data": {
+                "id_orcamento": id_orcamento,
+                "gerar_op": gerar_op,
+                "itens": itens_aprovacao
             }
-            
-            logger.info(f"Payload de aprovação montado com {len(itens_aprovacao)} itens")
-            logger.debug(f"Payload de aprovação: {json.dumps(payload, indent=2)}")
-            
-            # Fazer requisição para API Bremen
-            url = f"{self.api_base_url}/api/v1/proposta/aprovar"
-            
-            async with httpx.AsyncClient(timeout=self.api_timeout) as client:
-                response = await client.post(
-                    url=url,
-                    headers=self.headers,
-                    json=payload
-                )
-                
-                response.raise_for_status()
-                result = response.json()
-                
-                logger.info(f"Orçamento {id_orcamento} aprovado com sucesso")
-                return result
-                
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Erro HTTP ao aprovar orçamento: {e.response.status_code} - {e.response.text}")
-            raise
-        except Exception as e:
-            logger.error(f"Erro ao aprovar orçamento: {str(e)}")
-            raise
+        }
+        
+        logger.info(f"Payload de aprovação montado com {len(itens_aprovacao)} itens")
+        logger.debug(f"Payload de aprovação: {json.dumps(payload, indent=2)}")
+        
+        url = f"{self.api_base_url}/api/v1/proposta/aprovar"
+        
+        result = await self._fazer_requisicao_com_retry(url, payload, f"aprovar orçamento {id_orcamento}")
+        
+        logger.info(f"Orçamento {id_orcamento} aprovado com sucesso")
+        return result
     
     def extrair_itens_orcamento(self, resposta_api: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
@@ -249,6 +295,11 @@ class OrcamentoAPIService:
             if 'data' in resposta_api:
                 data = resposta_api['data']
                 
+                # Se data for uma lista, retornar diretamente como pedidos
+                if isinstance(data, list):
+                    logger.debug(f"Campo 'data' é uma lista com {len(data)} itens, usando como pedidos")
+                    return data
+                
                 # Tentar extrair do campo 'pedidos'
                 if 'pedidos' in data:
                     pedidos = data['pedidos']
@@ -264,3 +315,9 @@ class OrcamentoAPIService:
         except Exception as e:
             logger.error(f"Erro ao extrair pedidos da aprovação: {str(e)}")
             return []
+
+
+async def aguardar_entre_requisicoes():
+    """Aguarda um tempo entre requisições para não sobrecarregar a API"""
+    logger.debug(f"Aguardando {REQUEST_DELAY_SECONDS}s antes da próxima requisição...")
+    await asyncio.sleep(REQUEST_DELAY_SECONDS)

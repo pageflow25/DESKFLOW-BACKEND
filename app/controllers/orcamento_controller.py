@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from typing import Dict, Any, List
@@ -108,6 +109,11 @@ class OrcamentoController:
             
             # Enviar cada orçamento para a API externa
             for idx, orcamento in enumerate(orcamentos_locais.orcamentos):
+                # Delay entre requisições para não sobrecarregar a API Bremen
+                if idx > 0:
+                    logger.info("Aguardando 3s antes da próxima requisição...")
+                    await asyncio.sleep(3)
+                
                 logger.info(f"Enviando orçamento {idx + 1}/{len(orcamentos_locais.orcamentos)} para API Bremen...")
 
                 try:
@@ -169,8 +175,17 @@ class OrcamentoController:
                                 )
                                 resultado.aprovados += 1
                                 
+                                # Normalizar resposta: API pode retornar lista ou dict
+                                if isinstance(resposta_aprovacao, list):
+                                    logger.warning(f"Resposta da aprovação veio como lista ({len(resposta_aprovacao)} itens). Normalizando para dict.")
+                                    resposta_aprovacao = {"data": resposta_aprovacao}
+                                
                                 # Extrair dados da aprovação
-                                id_ops = resposta_aprovacao.get('data', {}).get('id_ops')
+                                data_aprovacao = resposta_aprovacao.get('data', {})
+                                if isinstance(data_aprovacao, list):
+                                    id_ops = None
+                                else:
+                                    id_ops = data_aprovacao.get('id_ops')
                                 pedidos = api_service.extrair_pedidos_aprovacao(resposta_aprovacao)
                                 
                                 # Salvar na tabela aprovacao_api

@@ -226,9 +226,17 @@ async def aprovar_orcamento_manual(
             data_entrega=data_entrega
         )
         
+        # Normalizar resposta: API pode retornar lista ou dict
+        if isinstance(resposta_aprovacao, list):
+            resposta_aprovacao = {"data": resposta_aprovacao}
+        
         # Salvar aprovação
         from ..services.orcamento_service import OrcamentoService
-        id_ops = resposta_aprovacao.get('data', {}).get('id_ops')
+        data_aprovacao = resposta_aprovacao.get('data', {})
+        if isinstance(data_aprovacao, list):
+            id_ops = None
+        else:
+            id_ops = data_aprovacao.get('id_ops')
         pedidos = api_service.extrair_pedidos_aprovacao(resposta_aprovacao)
         
         aprovacao_api = OrcamentoService.salvar_aprovacao_api(

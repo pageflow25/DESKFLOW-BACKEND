@@ -62,7 +62,7 @@ class OrcamentoService:
                 data = OrcamentoData(
                     id_cliente=orcamento_data['data'].get('id_cliente'),
                     id_vendedor=orcamento_data['data']['id_vendedor'],
-                    id_forma_pagamento=orcamento_data['data']['id_forma_pagamento'],
+                    id_forma_pagamento=str(orcamento_data['data']['id_forma_pagamento']),  # Converter para string
                     itens=[ItemOrcamento(**item) for item in orcamento_data['data']['itens']]
                 )
                 
@@ -127,6 +127,8 @@ class OrcamentoService:
         logger.info(f"Salvando orçamento API para distribuição {distribuicao_id}")
         logger.debug(f"ID Orçamento: {id_orcamento}, Qtd Itens: {len(itens)}")
         
+        BATCH_SIZE = 5  # Tamanho do lote para commits
+        
         try:
             # Validar dados de entrada
             if not distribuicao_id or distribuicao_id <= 0:
@@ -149,9 +151,11 @@ class OrcamentoService:
                 OrcamentoAPI.distribuicao_material_id == distribuicao_id,
                 OrcamentoAPI.id_orcamento == id_orcamento
             ).delete(synchronize_session=False)
+            db.commit()  # Commit do delete antes de inserir
             
-            # Criar um registro para cada item
-            for item in itens_lista:
+            # Criar um registro para cada item - com commits em lote
+            batch_count = 0
+            for idx, item in enumerate(itens_lista):
                 id_item = item.get('id')
                 
                 if not id_item:
@@ -168,14 +172,24 @@ class OrcamentoService:
                 )
                 db.add(orcamento_api)
                 registros_salvos.append(orcamento_api)
+                batch_count += 1
                 
-                logger.debug(f"Registro criado para item {id_item}")
+                # Commit a cada BATCH_SIZE registros
+                if batch_count >= BATCH_SIZE:
+                    db.commit()
+                    logger.debug(f"Commit em lote - {len(registros_salvos)}/{len(itens_lista)} registros salvos")
+                    batch_count = 0
             
-            db.commit()
+            # Commit final para registros restantes
+            if batch_count > 0:
+                db.commit()
             
             # Refresh dos registros
             for registro in registros_salvos:
-                db.refresh(registro)
+                try:
+                    db.refresh(registro)
+                except Exception:
+                    pass  # Se falhar refresh, não é crítico
             
             logger.info(f"Orçamento API salvo com sucesso - {len(registros_salvos)} registros criados para orçamento {id_orcamento}")
             return registros_salvos
