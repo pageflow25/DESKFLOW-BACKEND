@@ -15,10 +15,12 @@ class OrcamentoRequest(BaseModel):
 class ComponenteInfo(BaseModel):
     """Informações do componente"""
     id: int
+    id_distribuicao: Optional[int] = Field(None, description="ID da distribuição de material (chave para correspondência sequencial)")
     descricao: str
     altura: Optional[float] = None
     largura: Optional[float] = None
     quantidade_paginas: Optional[int] = None
+    idgruposubstratoimpressao: Optional[int] = None
     gramaturasubstratoimpressao: Optional[float] = None
     corfrente: Optional[int] = None
     corverso: Optional[int] = None

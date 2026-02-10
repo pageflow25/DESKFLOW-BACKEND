@@ -255,14 +255,14 @@ SELECT json_build_object(
                                         'descricao', comp_sel.descricao,
                                         'altura', comp_sel.altura,
                                         'largura', comp_sel.largura,
+                                        'corfrente', comp_sel.corfrente,
+                                        'corverso', comp_sel.corverso,
                                         'quantidade_paginas', COALESCE(comp_sel.quantidade_paginas, 0),
                                         'idgruposubstratoimpressao', comp_sel.idgruposubstratoimpressao,
                                         'gramaturasubstratoimpressao', COALESCE(
                                             comp_sel.gramatura_catalogo,
                                             NULLIF(replace(regexp_replace(comp_sel.gramatura_miolo::text, '[^0-9.,]', '', 'g'), ',', '.'), '')::numeric
                                         ),
-                                        'corfrente', comp_sel.corfrente,
-                                        'corverso', comp_sel.corverso,
                                         'perguntas_componente', COALESCE((
                                             SELECT json_agg(
                                                 json_build_object(

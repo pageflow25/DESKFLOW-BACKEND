@@ -8,7 +8,11 @@ from app.config.database import Base
 class AprovacaoAPI(Base):
     """
     Modelo AprovacaoAPI
-    Armazena o retorno da API de aprovação de orçamento (FASE 03 do DeskFlow)
+    Armazena o retorno da API de aprovação de orçamento (FASE 02 do DeskFlow)
+    
+    Cada OP gera uma linha separada na tabela.
+    O id_orcamento se repete para cada OP do mesmo orçamento.
+    O distribuicao_material_id corresponde sequencialmente ao id_distribuicao do request.
     """
     __tablename__ = "aprovacao_api"
     
@@ -23,9 +27,8 @@ class AprovacaoAPI(Base):
         Integer,
         ForeignKey('distribuicao_materiais.id', ondelete='CASCADE', onupdate='CASCADE'),
         nullable=False,
-        unique=True,
         index=True,
-        comment="ID da distribuição de material vinculada a esta aprovação"
+        comment="ID da distribuição de material vinculada a esta aprovação (um por OP)"
     )
     
     id_orcamento = Column(
@@ -39,13 +42,13 @@ class AprovacaoAPI(Base):
         Integer,
         nullable=True,
         index=True,
-        comment="ID das OPs (Ordens de Produção) geradas"
+        comment="Um único ID de OP (Ordem de Produção) — uma linha por OP"
     )
     
     pedidos = Column(
         JSONB,
         nullable=True,
-        comment="Array de pedidos gerados na aprovação em formato JSON"
+        comment="Um único objeto de pedido {id, serie, empresa} em formato JSON"
     )
     
     resposta_api = Column(

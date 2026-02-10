@@ -88,96 +88,90 @@ class OrcamentoService:
     @staticmethod
     def salvar_orcamento_api(
         db: Session, 
-        distribuicao_id: int, 
         id_orcamento: int, 
-        itens: List[Dict[str, Any]], 
+        itens_resposta: List[Dict[str, Any]], 
         resposta_completa: Dict[str, Any],
-        payload_enviado: Optional[Dict[str, Any]] = None
+        payload_enviado: Dict[str, Any]
     ) -> List[OrcamentoAPI]:
         """
         Salva o retorno da API de orçamento na tabela orcamento_api
         
         IMPORTANTE: Cada item do orçamento gera uma linha separada na tabela.
-        O id_orcamento se repete para cada item do mesmo orçamento.
-        
-        Persiste o vínculo entre:
-        - Distribuição de material
-        - Orçamento gerado na API
-        - Item específico do orçamento
-        - Resposta completa da API
+        O distribuicao_material_id vem de componentes[0].id_distribuicao do payload enviado.
+        A correspondência é sequencial: itens[i] do request ↔ itens[i] do response.
         
         Args:
             db: Sessão do banco de dados
-            distribuicao_id: ID da distribuição de material
             id_orcamento: ID do orçamento retornado pela API
-            itens: Lista de itens do orçamento (cada item contém id, descricao, quantidade)
+            itens_resposta: Lista de itens retornados pela API (cada item contém id, descricao, quantidade)
             resposta_completa: Resposta completa da API de criação de orçamento
-            payload_enviado: Payload original enviado para a API (opcional, para debug)
+            payload_enviado: Payload original enviado para a API (contém id_distribuicao nos componentes)
             
         Returns:
             List[OrcamentoAPI]: Lista de registros salvos (um por item)
-            
-        Exemplo de inserts gerados:
-            INSERT INTO orcamento_api (distribuicao_material_id, id_orcamento, id_item, itens, resposta_api)
-            VALUES (123, 2322, 26439, '{"id": 26439, "descricao": "...", "quantidade": 60}', '...');
-            
-            INSERT INTO orcamento_api (distribuicao_material_id, id_orcamento, id_item, itens, resposta_api)
-            VALUES (123, 2322, 26440, '{"id": 26440, "descricao": "...", "quantidade": 65}', '...');
         """
-        logger.info(f"Salvando orçamento API para distribuição {distribuicao_id}")
-        logger.debug(f"ID Orçamento: {id_orcamento}, Qtd Itens: {len(itens)}")
-        
-        BATCH_SIZE = 5  # Tamanho do lote para commits
+        logger.info(f"Salvando orçamento API - ID: {id_orcamento}, Itens: {len(itens_resposta)}")
         
         try:
-            # Validar dados de entrada
-            if not distribuicao_id or distribuicao_id <= 0:
-                raise ValueError(f"ID de distribuição inválido: {distribuicao_id}")
-            
             if not id_orcamento or id_orcamento <= 0:
                 raise ValueError(f"ID de orçamento inválido: {id_orcamento}")
             
-            # Garantir que itens é uma lista válida
-            itens_lista = itens if isinstance(itens, list) else []
-            
-            if not itens_lista:
+            if not itens_resposta:
                 logger.warning(f"Nenhum item para salvar no orçamento {id_orcamento}")
                 return []
             
+            # Extrair id_distribuicao de cada item do payload enviado (correspondência sequencial)
+            itens_payload = payload_enviado.get('data', {}).get('itens', [])
+            
             registros_salvos = []
-            
-            # Deletar registros existentes para esta distribuição e orçamento (para evitar duplicatas)
-            db.query(OrcamentoAPI).filter(
-                OrcamentoAPI.distribuicao_material_id == distribuicao_id,
-                OrcamentoAPI.id_orcamento == id_orcamento
-            ).delete(synchronize_session=False)
-            db.commit()  # Commit do delete antes de inserir
-            
-            # Criar um registro para cada item - com commits em lote
+            BATCH_SIZE = 5
             batch_count = 0
-            for idx, item in enumerate(itens_lista):
-                id_item = item.get('id')
-                
+            
+            for i, item_resposta in enumerate(itens_resposta):
+                id_item = item_resposta.get('id')
                 if not id_item:
-                    logger.warning(f"Item sem ID encontrado, pulando: {item}")
+                    logger.warning(f"Item sem ID encontrado no índice {i}, pulando: {item_resposta}")
                     continue
+                
+                # Buscar id_distribuicao do item correspondente no payload enviado
+                id_distribuicao = None
+                if i < len(itens_payload):
+                    componentes = itens_payload[i].get('componentes', [])
+                    if componentes:
+                        id_distribuicao = componentes[0].get('id_distribuicao')
+                
+                if not id_distribuicao:
+                    logger.error(f"id_distribuicao não encontrado para item índice {i} (id_item={id_item})")
+                    raise ValueError(f"id_distribuicao não encontrado para item índice {i}")
+                
+                # Deletar registro existente para evitar duplicatas
+                db.query(OrcamentoAPI).filter(
+                    OrcamentoAPI.distribuicao_material_id == id_distribuicao,
+                    OrcamentoAPI.id_orcamento == id_orcamento,
+                    OrcamentoAPI.id_item == id_item
+                ).delete(synchronize_session=False)
                 
                 # Criar novo registro para este item
                 orcamento_api = OrcamentoAPI(
-                    distribuicao_material_id=distribuicao_id,
+                    distribuicao_material_id=id_distribuicao,
                     id_orcamento=id_orcamento,
                     id_item=id_item,
-                    itens=item,  # Um objeto por registro, não uma lista
+                    itens=item_resposta,  # Um objeto por registro, não array
                     resposta_api=resposta_completa
                 )
                 db.add(orcamento_api)
                 registros_salvos.append(orcamento_api)
                 batch_count += 1
                 
+                logger.debug(
+                    f"Item {i}: distribuicao_material_id={id_distribuicao}, "
+                    f"id_item={id_item}, descricao={item_resposta.get('descricao', '')[:50]}"
+                )
+                
                 # Commit a cada BATCH_SIZE registros
                 if batch_count >= BATCH_SIZE:
                     db.commit()
-                    logger.debug(f"Commit em lote - {len(registros_salvos)}/{len(itens_lista)} registros salvos")
+                    logger.debug(f"Commit em lote - {len(registros_salvos)}/{len(itens_resposta)} registros salvos")
                     batch_count = 0
             
             # Commit final para registros restantes
@@ -189,9 +183,12 @@ class OrcamentoService:
                 try:
                     db.refresh(registro)
                 except Exception:
-                    pass  # Se falhar refresh, não é crítico
+                    pass
             
-            logger.info(f"Orçamento API salvo com sucesso - {len(registros_salvos)} registros criados para orçamento {id_orcamento}")
+            logger.info(
+                f"Orçamento API salvo com sucesso - {len(registros_salvos)} registros criados "
+                f"para orçamento {id_orcamento}"
+            )
             return registros_salvos
             
         except Exception as e:
@@ -202,88 +199,111 @@ class OrcamentoService:
     @staticmethod
     def salvar_aprovacao_api(
         db: Session, 
-        distribuicao_id: int, 
-        id_orcamento: int, 
-        id_ops: Optional[int], 
-        pedidos: List[Dict[str, Any]], 
+        id_orcamento: int,
         resposta_completa: Dict[str, Any],
-        itens_enviados: Optional[List[Dict[str, Any]]] = None
-    ) -> AprovacaoAPI:
+        distribuicoes_ids: List[int],
+        payload_orcamento: Dict[str, Any]
+    ) -> List[AprovacaoAPI]:
         """
         Salva o retorno da API de aprovação na tabela aprovacao_api
         
-        Persiste o vínculo entre:
-        - Distribuição de material
-        - Orçamento aprovado
-        - OPs geradas
-        - Pedidos criados
-        - Resposta completa da API
+        IMPORTANTE: Cada OP gera uma linha separada na tabela.
+        As OPs vêm como string separada por vírgula em data[0].id_ops.
+        A correspondência é sequencial: OPs[i] ↔ distribuicoes_ids[i].
         
         Args:
             db: Sessão do banco de dados
-            distribuicao_id: ID da distribuição de material
             id_orcamento: ID do orçamento aprovado
-            id_ops: ID das OPs (Ordens de Produção) geradas
-            pedidos: Lista de pedidos gerados na aprovação
             resposta_completa: Resposta completa da API de aprovação
-            itens_enviados: Itens enviados para aprovação (id + data_entrega)
+            distribuicoes_ids: Lista de id_distribuicao na mesma ordem do request original
+            payload_orcamento: Payload original do orçamento (para extrair id_distribuicao se necessário)
             
         Returns:
-            AprovacaoAPI: Registro salvo
-            
-        Exemplo de payload de aprovação enviado:
-            {
-                "identifier": "PageFlow",
-                "data": {
-                    "id_orcamento": 21893,
-                    "gerar_op": true,
-                    "itens": [
-                        {"id": 21893, "data_entrega": "2026-01-15T12:00:00.000-03:00"}
-                    ]
-                }
-            }
+            List[AprovacaoAPI]: Lista de registros salvos (um por OP)
         """
-        logger.info(f"Salvando aprovação API para distribuição {distribuicao_id}")
-        logger.debug(f"ID Orçamento: {id_orcamento}, ID OPs: {id_ops}, Pedidos: {len(pedidos)}")
+        logger.info(f"Salvando aprovação API para orçamento {id_orcamento}")
         
         try:
-            # Validar dados de entrada
-            if not distribuicao_id or distribuicao_id <= 0:
-                raise ValueError(f"ID de distribuição inválido: {distribuicao_id}")
-            
-            # Preparar pedidos para JSONB - garantir que é uma lista válida
-            pedidos_json = pedidos if isinstance(pedidos, list) else []
-            
-            # Verificar se já existe uma aprovação para esta distribuição
-            existing = db.query(AprovacaoAPI).filter(
-                AprovacaoAPI.distribuicao_material_id == distribuicao_id
-            ).first()
-            
-            if existing:
-                # Atualizar existente
-                logger.info(f"Atualizando aprovação existente ID {existing.id}")
-                existing.id_orcamento = id_orcamento
-                existing.id_ops = id_ops
-                existing.pedidos = pedidos_json
-                existing.resposta_api = resposta_completa
-                aprovacao_api = existing
+            # Extrair dados da resposta
+            data = resposta_completa.get('data', [])
+            if isinstance(data, list) and len(data) > 0:
+                data_item = data[0]
+            elif isinstance(data, dict):
+                data_item = data
             else:
-                # Criar novo registro
-                aprovacao_api = AprovacaoAPI(
-                    distribuicao_material_id=distribuicao_id,
+                raise ValueError(f"Formato de resposta de aprovação inesperado: {type(data)}")
+            
+            # Extrair OPs (vem como string separada por vírgula)
+            id_ops_str = data_item.get('id_ops', '')
+            if isinstance(id_ops_str, str):
+                ops = [int(op.strip()) for op in id_ops_str.split(',') if op.strip()]
+            elif isinstance(id_ops_str, int):
+                ops = [id_ops_str]
+            else:
+                ops = []
+            
+            # Extrair pedido (um único objeto)
+            pedidos_lista = data_item.get('pedidos', [])
+            pedido = pedidos_lista[0] if pedidos_lista else {}
+            
+            logger.info(f"OPs extraídas: {ops}, Pedido: {pedido}")
+            logger.info(f"Distribuições IDs para correspondência: {distribuicoes_ids}")
+            
+            if not ops:
+                raise ValueError(f"Nenhuma OP encontrada na resposta de aprovação do orçamento {id_orcamento}")
+            
+            # Deletar registros existentes para este orçamento
+            db.query(AprovacaoAPI).filter(
+                AprovacaoAPI.id_orcamento == id_orcamento
+            ).delete(synchronize_session=False)
+            db.commit()
+            
+            registros_salvos = []
+            
+            # Criar uma linha por OP com correspondência sequencial aos distribuicoes_ids
+            for i, op_id in enumerate(ops):
+                # Correspondência sequencial: OP[i] → distribuicao_id[i]
+                if i < len(distribuicoes_ids):
+                    dist_id = distribuicoes_ids[i]
+                else:
+                    logger.warning(
+                        f"OP índice {i} (id={op_id}) sem distribuição correspondente. "
+                        f"Total OPs: {len(ops)}, Total distribuições: {len(distribuicoes_ids)}"
+                    )
+                    # Usar o último distribuicao_id disponível como fallback
+                    dist_id = distribuicoes_ids[-1] if distribuicoes_ids else None
+                    if not dist_id:
+                        raise ValueError(f"Nenhuma distribuição disponível para OP {op_id}")
+                
+                aprovacao = AprovacaoAPI(
+                    distribuicao_material_id=dist_id,
                     id_orcamento=id_orcamento,
-                    id_ops=id_ops,
-                    pedidos=pedidos_json,
+                    id_ops=op_id,
+                    pedidos=pedido,  # Objeto único, não array
                     resposta_api=resposta_completa
                 )
-                db.add(aprovacao_api)
-                logger.info(f"Criando novo registro de aprovação para distribuição {distribuicao_id}")
+                db.add(aprovacao)
+                registros_salvos.append(aprovacao)
+                
+                logger.debug(
+                    f"OP {i}: distribuicao_material_id={dist_id}, "
+                    f"id_ops={op_id}, pedido={pedido}"
+                )
             
             db.commit()
-            db.refresh(aprovacao_api)
             
-            logger.info(f"Aprovação API salva com sucesso - ID registro: {aprovacao_api.id}, ID OPs: {id_ops}")
-            return aprovacao_api
+            # Refresh dos registros
+            for registro in registros_salvos:
+                try:
+                    db.refresh(registro)
+                except Exception:
+                    pass
+            
+            logger.info(
+                f"Aprovação API salva com sucesso - {len(registros_salvos)} registros criados "
+                f"para orçamento {id_orcamento}"
+            )
+            return registros_salvos
             
         except Exception as e:
             db.rollback()
@@ -318,7 +338,7 @@ class OrcamentoService:
             if not distribuicao:
                 raise ValueError(f"Distribuição {distribuicao_id} não encontrada")
             
-            status_anterior = distribuicao.status_id
+            status_anterior_id = distribuicao.status_id
             
             # Buscar ou criar status
             status = db.query(StatusDeskflowPedido).filter(
@@ -337,11 +357,11 @@ class OrcamentoService:
             # Atualizar status da distribuição
             distribuicao.status_id = status.id
             
-            # Criar histórico
+            # Criar histórico com IDs de status
             historico = HistoricoProcessamento(
                 distribuicao_material_id=distribuicao_id,
-                status_anterior=status_anterior,
-                status_novo=novo_status,
+                status_anterior_id=status_anterior_id,
+                status_novo_id=status.id,
                 mensagem=mensagem,
                 sucesso=sucesso
             )

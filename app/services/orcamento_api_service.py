@@ -114,11 +114,15 @@ class OrcamentoAPIService:
         """
         Envia orçamento para a API Bremen (FASE 01)
         
+        Retorna dict com:
+        - resposta_api: Resposta completa da API
+        - payload_enviado: Payload original enviado (contém id_distribuicao nos componentes)
+        
         Args:
             orcamento: Dados do orçamento para envio
             
         Returns:
-            Dict com resposta da API
+            Dict com { "resposta_api": {...}, "payload_enviado": {...} }
         """
         logger.info("Enviando orçamento para API Bremen")
         
@@ -139,10 +143,12 @@ class OrcamentoAPIService:
                         "componentes": [
                             {
                                 "id": comp.id,
+                                "id_distribuicao": comp.id_distribuicao,
                                 "descricao": comp.descricao,
                                 "altura": comp.altura,
                                 "largura": comp.largura,
                                 "quantidade_paginas": comp.quantidade_paginas,
+                                "idgruposubstratoimpressao": comp.idgruposubstratoimpressao,
                                 "gramaturasubstratoimpressao": comp.gramaturasubstratoimpressao,
                                 "corfrente": comp.corfrente,
                                 "corverso": comp.corverso,
@@ -167,11 +173,19 @@ class OrcamentoAPIService:
         
         url = f"{self.api_base_url}/api/v1/orcamento"
         logger.info(f"Conectando à API Bremen: {url}")
+        logger.debug(f"Payload com {len(payload['data']['itens'])} itens")
         
-        result = await self._fazer_requisicao_com_retry(url, payload, "enviar orçamento")
+        resposta_api = await self._fazer_requisicao_com_retry(url, payload, "enviar orçamento")
         
-        logger.info(f"Orçamento enviado com sucesso. ID: {result.get('data', {}).get('id_orcamento')}")
-        return result
+        id_orcamento = resposta_api.get('data', {}).get('id_orcamento')
+        logger.info(f"Orçamento enviado com sucesso. ID: {id_orcamento}")
+        
+        # Retornar tanto a resposta da API quanto o payload enviado
+        # O payload contém id_distribuicao nos componentes, essencial para a correspondência sequencial
+        return {
+            "resposta_api": resposta_api,
+            "payload_enviado": payload
+        }
     
     async def aprovar_orcamento(
         self, 

@@ -85,7 +85,7 @@ class DistribuicaoMaterial(Base):
     status_deskflow = relationship("StatusDeskflowPedido", back_populates="distribuicoes")
     orcamento_api = relationship("OrcamentoAPI", back_populates="distribuicao_material")
     orcamento_faturamento = relationship("OrcamentoFaturamento", back_populates="distribuicao_material", uselist=False)
-    aprovacao_api = relationship("AprovacaoAPI", back_populates="distribuicao_material", uselist=False)
+    aprovacao_api = relationship("AprovacaoAPI", back_populates="distribuicao_material")
     historico_processamento = relationship("HistoricoProcessamento", back_populates="distribuicao_material")
     
     # Índices

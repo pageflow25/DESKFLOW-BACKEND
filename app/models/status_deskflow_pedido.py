@@ -38,6 +38,19 @@ class StatusDeskflowPedido(Base):
         foreign_keys="[DistribuicaoMaterial.status_id]"
     )
     
+    # Relacionamentos com HistoricoProcessamento
+    historicos_como_status_anterior = relationship(
+        "HistoricoProcessamento",
+        foreign_keys="[HistoricoProcessamento.status_anterior_id]",
+        back_populates="status_anterior"
+    )
+    
+    historicos_como_status_novo = relationship(
+        "HistoricoProcessamento",
+        foreign_keys="[HistoricoProcessamento.status_novo_id]",
+        back_populates="status_novo"
+    )
+    
     def __repr__(self):
         return f"<StatusDeskflowPedido(id={self.id}, codigo='{self.codigo}', descricao='{self.descricao}')>"
     

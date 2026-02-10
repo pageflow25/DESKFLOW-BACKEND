@@ -181,7 +181,10 @@ async def aprovar_orcamento_manual(
     user_data: dict = Depends(verify_admin)
 ):
     """
-    Aprova um orçamento específico manualmente
+    Aprova um orçamento específico manualmente.
+    
+    Busca os itens da tabela orcamento_api e envia para aprovação na API Bremen.
+    Salva 1 linha por OP na tabela aprovacao_api.
     """
     try:
         logger.info(f"Aprovação manual do orçamento {id_orcamento}")
@@ -192,22 +195,25 @@ async def aprovar_orcamento_manual(
                 detail="Data de entrega é obrigatória"
             )
         
-        # Buscar orçamento na tabela orcamento_api
+        # Buscar todos os registros do orçamento na tabela orcamento_api
         from ..models.orcamento_api import OrcamentoAPI
-        orcamento_api = db.query(OrcamentoAPI).filter(
+        registros_orcamento = db.query(OrcamentoAPI).filter(
             OrcamentoAPI.id_orcamento == id_orcamento
-        ).first()
+        ).order_by(OrcamentoAPI.id).all()
         
-        if not orcamento_api:
+        if not registros_orcamento:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Orçamento não encontrado"
             )
         
+        # Extrair distribuicoes_ids na ordem dos registros
+        distribuicoes_ids = [r.distribuicao_material_id for r in registros_orcamento]
+        
         # Verificar se já foi aprovado
         from ..models.aprovacao_api import AprovacaoAPI
         aprovacao_existente = db.query(AprovacaoAPI).filter(
-            AprovacaoAPI.distribuicao_material_id == orcamento_api.distribuicao_material_id
+            AprovacaoAPI.id_orcamento == id_orcamento
         ).first()
         
         if aprovacao_existente:
@@ -217,51 +223,47 @@ async def aprovar_orcamento_manual(
                 "id_ops": aprovacao_existente.id_ops
             }
         
-        # Aprovar orçamento
+        # Aprovar orçamento via API Bremen
         from ..services.orcamento_api_service import OrcamentoAPIService
         api_service = OrcamentoAPIService()
         resposta_aprovacao = await api_service.aprovar_orcamento(
+            db=db,
             id_orcamento=id_orcamento,
-            itens=orcamento_api.itens,
             data_entrega=data_entrega
         )
         
-        # Normalizar resposta: API pode retornar lista ou dict
+        # Normalizar resposta
         if isinstance(resposta_aprovacao, list):
             resposta_aprovacao = {"data": resposta_aprovacao}
         
-        # Salvar aprovação
+        # Salvar aprovação (1 linha por OP)
         from ..services.orcamento_service import OrcamentoService
-        data_aprovacao = resposta_aprovacao.get('data', {})
-        if isinstance(data_aprovacao, list):
-            id_ops = None
-        else:
-            id_ops = data_aprovacao.get('id_ops')
-        pedidos = api_service.extrair_pedidos_aprovacao(resposta_aprovacao)
-        
-        aprovacao_api = OrcamentoService.salvar_aprovacao_api(
+        registros_aprovacao = OrcamentoService.salvar_aprovacao_api(
             db=db,
-            distribuicao_id=orcamento_api.distribuicao_material_id,
             id_orcamento=id_orcamento,
-            id_ops=id_ops,
-            pedidos=pedidos,
-            resposta_completa=resposta_aprovacao
+            resposta_completa=resposta_aprovacao,
+            distribuicoes_ids=distribuicoes_ids,
+            payload_orcamento={}
         )
         
-        # Atualizar status
-        OrcamentoService.atualizar_status_distribuicao(
-            db=db,
-            distribuicao_id=orcamento_api.distribuicao_material_id,
-            novo_status="orcamento_aprovado",
-            mensagem=f"Orçamento aprovado manualmente - OPs: {id_ops}",
-            sucesso=True
-        )
+        # Atualizar status de cada distribuição
+        for dist_id in distribuicoes_ids:
+            try:
+                OrcamentoService.atualizar_status_distribuicao(
+                    db=db,
+                    distribuicao_id=dist_id,
+                    novo_status="orcamento_aprovado",
+                    mensagem=f"Orçamento aprovado manualmente - {len(registros_aprovacao)} OPs",
+                    sucesso=True
+                )
+            except Exception as e:
+                logger.warning(f"Erro ao atualizar status da distribuição {dist_id}: {e}")
         
         return {
             "message": "Orçamento aprovado com sucesso",
             "id_orcamento": id_orcamento,
-            "id_ops": id_ops,
-            "pedidos_count": len(pedidos)
+            "ops_count": len(registros_aprovacao),
+            "distribuicoes_atualizadas": len(distribuicoes_ids)
         }
         
     except HTTPException:
