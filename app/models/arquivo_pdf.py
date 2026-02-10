@@ -8,8 +8,8 @@ class ArquivoPdf(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     nome = Column(String, nullable=False, comment="Nome do arquivo PDF")
-    arquivo = Column(String(500), nullable=True, comment="URL de visualização do arquivo no DriveHQ")
-    caminho_remoto = Column(String(500), nullable=True, comment="Caminho do arquivo no servidor DriveHQ (para exclusão)")
+    arquivo = Column(String(500), nullable=True, comment="URL pública do arquivo no Vercel Blob")
+    caminho_remoto = Column(String(500), nullable=True, comment="URL de download do arquivo no Vercel Blob")
     tamanho = Column(Integer, nullable=True, comment="Tamanho do arquivo em bytes")
     paginas = Column(Integer, nullable=True, comment="Quantidade de páginas do arquivo PDF")
     tipo_arquivo = Column(String, nullable=True, default="miolo", comment="Tipo do arquivo (miolo, capa, etc.)")

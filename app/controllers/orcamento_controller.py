@@ -11,6 +11,7 @@ from ..schemas.orcamento import (
 )
 from ..services.orcamento_service import OrcamentoService
 from ..services.orcamento_api_service import OrcamentoAPIService
+from ..services.download_bremen_service import DownloadBremenService
 from datetime import datetime
 
 
@@ -82,6 +83,7 @@ class OrcamentoController:
             enviados=0,
             aprovados=0,
             salvos=0,
+            downloads=0,
             erros=[],
             detalhes=[]
         )
@@ -262,6 +264,64 @@ class OrcamentoController:
                             
                             resultado.detalhes.append({
                                 "fase": "02_aprovacao",
+                                "id_orcamento": id_orcamento,
+                                "status": "erro",
+                                "erro": str(e)
+                            })
+                    
+                    # ========================================================
+                    # FASE 03 — BAIXAR E ORGANIZAR ARQUIVOS (se configurado)
+                    # ========================================================
+                    if request.baixar_arquivos and resultado.aprovados > 0:
+                        logger.info("=" * 60)
+                        logger.info(f"FASE 03 — Baixando arquivos para orçamento {id_orcamento}")
+                        logger.info("=" * 60)
+                        
+                        # Delay entre fase 2 e fase 3
+                        await asyncio.sleep(2)
+                        
+                        try:
+                            download_service = DownloadBremenService()
+                            resultado_download = await download_service.processar_downloads_por_orcamento(
+                                db=db,
+                                id_orcamento=id_orcamento
+                            )
+                            
+                            resultado.downloads += resultado_download.get("downloads", 0)
+                            
+                            # Atualizar status das distribuições como arquivos_baixados
+                            for dist_id in distribuicoes_ids:
+                                try:
+                                    OrcamentoService.atualizar_status_distribuicao(
+                                        db=db,
+                                        distribuicao_id=dist_id,
+                                        novo_status="arquivos_baixados",
+                                        mensagem=f"Arquivos baixados - {resultado_download.get('downloads', 0)} arquivos",
+                                        sucesso=True
+                                    )
+                                except Exception as e:
+                                    logger.warning(f"Erro ao atualizar status da distribuição {dist_id}: {e}")
+                            
+                            resultado.detalhes.append({
+                                "fase": "03_download",
+                                "id_orcamento": id_orcamento,
+                                "arquivos_baixados": resultado_download.get("downloads", 0),
+                                "total_ops": resultado_download.get("total_ops", 0),
+                                "detalhes_ops": resultado_download.get("detalhes", []),
+                                "status": "sucesso"
+                            })
+                            
+                            if resultado_download.get("erros"):
+                                for erro_dl in resultado_download["erros"]:
+                                    resultado.erros.append(f"FASE 03: {erro_dl}")
+                            
+                        except Exception as e:
+                            error_msg = f"Erro na FASE 03 (download) para orçamento {id_orcamento}: {str(e)}"
+                            logger.error(error_msg)
+                            resultado.erros.append(error_msg)
+                            
+                            resultado.detalhes.append({
+                                "fase": "03_download",
                                 "id_orcamento": id_orcamento,
                                 "status": "erro",
                                 "erro": str(e)

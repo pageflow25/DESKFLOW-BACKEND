@@ -74,6 +74,7 @@ class ProcessamentoResultado(BaseModel):
     enviados: int
     aprovados: int
     salvos: int
+    downloads: int = 0
     erros: List[str] = []
     detalhes: List[dict] = []
 
@@ -88,6 +89,7 @@ class FluxoOrcamentoRequest(BaseModel):
     dias_uteis_filtro: Optional[List[int]] = Field(None, description="Dias úteis (opcional)")
     aprovar_automaticamente: bool = Field(False, description="Se deve aprovar automaticamente")
     data_entrega: Optional[str] = Field(None, description="Data de entrega para aprovação (ISO format)")
+    baixar_arquivos: bool = Field(False, description="Se deve baixar arquivos após aprovação (FASE 03)")
 
 
 class GerarOrcamentoCompleto(BaseModel):
@@ -103,3 +105,4 @@ class GerarOrcamentoCompleto(BaseModel):
     tipo_fluxo: str = Field(default="com_distribuicao_sem_faturamento", description="Tipo do fluxo de processamento")
     aprovar_automaticamente: bool = Field(True, description="Se deve aprovar automaticamente")
     data_entrega: Optional[str] = Field(None, description="Data de entrega para aprovação (formato ISO)")
+    baixar_arquivos: bool = Field(True, description="Se deve baixar arquivos após aprovação (FASE 03)")

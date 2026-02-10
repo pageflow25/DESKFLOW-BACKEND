@@ -86,7 +86,8 @@ async def gerar_orcamento(
             divisoes_logistica=request.divisoes_logistica,
             dias_uteis_filtro=request.dias_uteis_filtro,
             aprovar_automaticamente=request.aprovar_automaticamente,
-            data_entrega=data_entrega
+            data_entrega=data_entrega,
+            baixar_arquivos=request.baixar_arquivos
         )
         
         # Executar fluxo completo
@@ -276,6 +277,101 @@ async def aprovar_orcamento_manual(
         )
 
 
+@router.post("/baixar-arquivos/{id_orcamento}")
+async def baixar_arquivos_orcamento(
+    id_orcamento: int,
+    db: Session = Depends(get_db),
+    user_data: dict = Depends(verify_admin)
+):
+    """
+    FASE 03 — Baixa e organiza os arquivos PDF de um orçamento aprovado.
+    
+    Para cada OP aprovada, baixa os PDFs do Vercel Blob e organiza
+    em pastas nomeadas pelo número da OP.
+    
+    Estrutura gerada:
+        C:/Bremen/OPs/
+        ├── 4777/
+        │   └── ATIV_23_02.PDF
+        ├── 4800/
+        │   ├── BLOCO_ATIVIDADES_CAPA.PDF
+        │   └── BLOCO_ATIVIDADES_MIOLO.PDF
+    
+    Args:
+        id_orcamento: ID do orçamento aprovado
+    """
+    try:
+        logger.info(f"Usuário {user_data.get('username')} iniciando download FASE 03 para orçamento {id_orcamento}")
+        
+        # Verificar se o orçamento foi aprovado
+        from ..models.aprovacao_api import AprovacaoAPI
+        aprovacoes = db.query(AprovacaoAPI).filter(
+            AprovacaoAPI.id_orcamento == id_orcamento
+        ).all()
+        
+        if not aprovacoes:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Orçamento {id_orcamento} não possui aprovações. Execute a FASE 02 primeiro."
+            )
+        
+        # Executar download
+        from ..services.download_bremen_service import DownloadBremenService
+        download_service = DownloadBremenService()
+        resultado = await download_service.processar_downloads_por_orcamento(
+            db=db,
+            id_orcamento=id_orcamento
+        )
+        
+        return {
+            "message": f"Download concluído para orçamento {id_orcamento}",
+            "id_orcamento": id_orcamento,
+            "total_ops": resultado.get("total_ops", 0),
+            "arquivos_baixados": resultado.get("downloads", 0),
+            "erros": resultado.get("erros", []),
+            "detalhes": resultado.get("detalhes", [])
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro no download de arquivos: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro interno: {str(e)}"
+        )
+
+
+@router.get("/downloads/status/{id_orcamento}")
+async def consultar_downloads_orcamento(
+    id_orcamento: int,
+    db: Session = Depends(get_db),
+    user_data: dict = Depends(verify_admin)
+):
+    """
+    Consulta o status dos downloads para um orçamento específico.
+    
+    Retorna a lista de arquivos baixados com detalhes de cada OP.
+    """
+    try:
+        from ..services.download_bremen_service import DownloadBremenService
+        downloads = DownloadBremenService.obter_downloads_por_orcamento(
+            db=db,
+            id_orcamento=id_orcamento
+        )
+        
+        return {
+            "id_orcamento": id_orcamento,
+            "total_downloads": len(downloads),
+            "downloads": downloads
+        }
+        
+    except Exception as e:
+        logger.error(f"Erro ao consultar downloads: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro interno: {str(e)}"
+        )
 @router.get("/status/{escola_id}")
 async def consultar_status_orcamentos(
     escola_id: int,

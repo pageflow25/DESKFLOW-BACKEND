@@ -22,6 +22,7 @@ from .orcamento_api import OrcamentoAPI
 from .orcamento_faturamento import OrcamentoFaturamento
 from .aprovacao_api import AprovacaoAPI
 from .historico_processamento import HistoricoProcessamento
+from .download_bremen import DownloadBremen
 
 __all__ = [
     "Usuario", 
@@ -46,5 +47,6 @@ __all__ = [
     "OrcamentoAPI",
     "OrcamentoFaturamento",
     "AprovacaoAPI",
-    "HistoricoProcessamento"
+    "HistoricoProcessamento",
+    "DownloadBremen"
 ]

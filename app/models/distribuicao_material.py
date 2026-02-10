@@ -87,6 +87,7 @@ class DistribuicaoMaterial(Base):
     orcamento_faturamento = relationship("OrcamentoFaturamento", back_populates="distribuicao_material", uselist=False)
     aprovacao_api = relationship("AprovacaoAPI", back_populates="distribuicao_material")
     historico_processamento = relationship("HistoricoProcessamento", back_populates="distribuicao_material")
+    downloads_bremen = relationship("DownloadBremen", back_populates="distribuicao_material")
     
     # Índices
     __table_args__ = (
