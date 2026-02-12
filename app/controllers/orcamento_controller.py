@@ -209,7 +209,8 @@ class OrcamentoController:
         id_orcamento: int,
         data_entrega: str,
         distribuicoes_ids: List[int],
-        payload_enviado: Dict[str, Any]
+        payload_enviado: Dict[str, Any],
+        gerar_op: bool = True
     ) -> Dict[str, Any]:
         """
         FASE 02 — Aprova um orçamento na API Bremen e salva na tabela aprovacao_api.
@@ -235,7 +236,8 @@ class OrcamentoController:
             resposta_aprovacao = await api_service.aprovar_orcamento(
                 db=db,
                 id_orcamento=id_orcamento,
-                data_entrega=data_entrega
+                data_entrega=data_entrega,
+                gerar_op=gerar_op
             )
 
             # Normalizar resposta (pode vir como lista)
@@ -453,9 +455,11 @@ class OrcamentoController:
 
                     # FASE 02 — Aprovar orçamento (se configurado)
                     if request.data_entrega and request.aprovar_automaticamente:
+                        gerar_op = getattr(request, 'gerar_op', True)
                         fase02 = await OrcamentoController._fase02_aprovar_orcamento(
                             db, api_service, id_orcamento,
-                            request.data_entrega, distribuicoes_ids, payload_enviado
+                            request.data_entrega, distribuicoes_ids, payload_enviado,
+                            gerar_op=gerar_op
                         )
                         resultado.detalhes.append(fase02["detalhe"])
 

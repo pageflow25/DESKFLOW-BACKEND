@@ -336,7 +336,11 @@ class OrcamentoService:
                                     novo_status: str, mensagem: str, 
                                     sucesso: bool = True) -> HistoricoProcessamento:
         """
-        Atualiza o status de uma distribuição e salva no histórico
+        Atualiza o status de uma distribuição e salva no histórico.
+        
+        CASCATA: Também atualiza automaticamente todas as distribuições
+        relacionadas (capa/miolo) que compartilham o mesmo formulario_id 
+        e unidade_escolar_id, mantendo-as sempre sincronizadas.
         
         Args:
             db: Sessão do banco de dados
@@ -346,20 +350,18 @@ class OrcamentoService:
             sucesso: Se a operação foi bem-sucedida
             
         Returns:
-            HistoricoProcessamento: Registro de histórico criado
+            HistoricoProcessamento: Registro de histórico criado para a distribuição principal
         """
         logger.info(f"Atualizando status da distribuição {distribuicao_id} para {novo_status}")
         
         try:
-            # Buscar distribuição
+            # Buscar distribuição principal
             distribuicao = db.query(DistribuicaoMaterial).filter(
                 DistribuicaoMaterial.id == distribuicao_id
             ).first()
             
             if not distribuicao:
                 raise ValueError(f"Distribuição {distribuicao_id} não encontrada")
-            
-            status_anterior_id = distribuicao.status_id
             
             # Buscar ou criar status
             status = db.query(StatusDeskflowPedido).filter(
@@ -375,24 +377,74 @@ class OrcamentoService:
                 db.add(status)
                 db.flush()
             
-            # Atualizar status da distribuição
-            distribuicao.status_id = status.id
+            # Buscar distribuições relacionadas (capa/miolo do mesmo formulário + unidade)
+            distribuicoes_para_atualizar = [distribuicao]
             
-            # Criar histórico com IDs de status
-            historico = HistoricoProcessamento(
-                distribuicao_material_id=distribuicao_id,
-                status_anterior_id=status_anterior_id,
-                status_novo_id=status.id,
-                mensagem=mensagem,
-                sucesso=sucesso
-            )
+            if distribuicao.formulario_id and distribuicao.unidade_escolar_id:
+                relacionadas = db.query(DistribuicaoMaterial).filter(
+                    DistribuicaoMaterial.formulario_id == distribuicao.formulario_id,
+                    DistribuicaoMaterial.unidade_escolar_id == distribuicao.unidade_escolar_id,
+                    DistribuicaoMaterial.id != distribuicao_id
+                ).all()
+                
+                if relacionadas:
+                    ids_relacionadas = [r.id for r in relacionadas]
+                    logger.info(
+                        f"Cascata: encontradas {len(relacionadas)} distribuição(ões) "
+                        f"relacionada(s) para atualizar em conjunto: {ids_relacionadas}"
+                    )
+                    distribuicoes_para_atualizar.extend(relacionadas)
             
-            db.add(historico)
+            # Atualizar todas as distribuições (principal + relacionadas)
+            historico_principal = None
+            
+            for dist in distribuicoes_para_atualizar:
+                status_anterior_id = dist.status_id
+                
+                # Pular se já está no status desejado
+                if status_anterior_id == status.id:
+                    logger.debug(
+                        f"Distribuição {dist.id} já está no status {novo_status}, "
+                        f"pulando atualização"
+                    )
+                    continue
+                
+                # Atualizar status
+                dist.status_id = status.id
+                
+                # Criar histórico
+                msg = mensagem if dist.id == distribuicao_id else (
+                    f"[Cascata] {mensagem} (atualizado junto com distribuição #{distribuicao_id})"
+                )
+                
+                historico = HistoricoProcessamento(
+                    distribuicao_material_id=dist.id,
+                    status_anterior_id=status_anterior_id,
+                    status_novo_id=status.id,
+                    mensagem=msg,
+                    sucesso=sucesso
+                )
+                db.add(historico)
+                
+                if dist.id == distribuicao_id:
+                    historico_principal = historico
+                
+                logger.info(f"Status da distribuição {dist.id} atualizado para {novo_status}")
+            
+            # Commit atômico de todas as atualizações
             db.commit()
-            db.refresh(historico)
             
-            logger.info(f"Status atualizado para {novo_status} - histórico ID {historico.id}")
-            return historico
+            if historico_principal:
+                db.refresh(historico_principal)
+                logger.info(
+                    f"Status atualizado para {novo_status} — "
+                    f"{len(distribuicoes_para_atualizar)} distribuição(ões) afetada(s), "
+                    f"histórico principal ID {historico_principal.id}"
+                )
+                return historico_principal
+            
+            # Fallback: se a distribuição principal já estava no status correto
+            return None
             
         except Exception as e:
             db.rollback()

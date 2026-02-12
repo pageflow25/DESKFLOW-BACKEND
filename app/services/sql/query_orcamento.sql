@@ -238,7 +238,7 @@ SELECT json_build_object(
             json_agg(
                 json_build_object(
                     'id_produto', ip.id_produto,
-                    'titulo', ip.nome_arquivo,
+                    'descricao', ip.nome_arquivo,
                     'quantidade', ip.quantidade_total,
                     'usar_listapreco', 1,
                     'manter_estrutura_mod_produto', 1,
@@ -256,7 +256,7 @@ SELECT json_build_object(
                                         'altura', comp_sel.altura,
                                         'largura', comp_sel.largura,
                                         'quantidade_paginas', COALESCE(comp_sel.quantidade_paginas, 0),
-                                        --'idgruposubstratoimpressao', comp_sel.idgruposubstratoimpressao,
+                                        'idgruposubstratoimpressao', comp_sel.idgruposubstratoimpressao,
                                         'gramaturasubstratoimpressao', COALESCE(
                                             comp_sel.gramatura_catalogo,
                                             NULLIF(replace(regexp_replace(comp_sel.gramatura_miolo::text, '[^0-9.,]', '', 'g'), ',', '.'), '')::numeric

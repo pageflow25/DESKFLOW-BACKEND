@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     
     # Configurações da API Bremen (Orçamento e Aprovação)
     BREMEN_API_URL: str
-    BREMEN_API_TOKEN: str
+    BREMEN_API_TOKEN: str = ""  # Opcional — token agora é renovado automaticamente via BremenClient
     API_TIMEOUT: int  # 5 minutos para aguardar resposta da API Bremen
 
     # Configurações FASE 03 — Download de Arquivos

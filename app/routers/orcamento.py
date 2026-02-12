@@ -88,6 +88,7 @@ async def gerar_orcamento(
             aprovar_automaticamente=request.aprovar_automaticamente,
             data_entrega=data_entrega,
             baixar_arquivos=request.baixar_arquivos,
+            gerar_op=request.gerar_op,
             modo_agrupamento=request.modo_agrupamento
         )
         
@@ -179,6 +180,7 @@ async def processar_orcamento(
 async def aprovar_orcamento_manual(
     id_orcamento: int,
     data_entrega: str = None,
+    gerar_op: bool = True,
     db: Session = Depends(get_db),
     user_data: dict = Depends(verify_admin)
 ):
@@ -231,7 +233,8 @@ async def aprovar_orcamento_manual(
         resposta_aprovacao = await api_service.aprovar_orcamento(
             db=db,
             id_orcamento=id_orcamento,
-            data_entrega=data_entrega
+            data_entrega=data_entrega,
+            gerar_op=gerar_op
         )
         
         # Normalizar resposta

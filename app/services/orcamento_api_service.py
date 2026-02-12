@@ -7,6 +7,7 @@ from ..config.logging_config import get_logger
 from ..config.settings import get_settings
 from ..models.orcamento_api import OrcamentoAPI
 from ..schemas.orcamento import OrcamentoResponse
+from .bremen_client import BremenClient
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -25,12 +26,8 @@ class OrcamentoAPIService:
         self.api_base_url = settings.BREMEN_API_URL
         self.api_timeout = settings.API_TIMEOUT
         
-        # Headers padrão
-        self.headers = {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-            'Authorization': settings.BREMEN_API_TOKEN
-        }
+        # Cliente Bremen com renovação automática de token
+        self.bremen_client = BremenClient()
     
     async def _fazer_requisicao_com_retry(
         self, 
@@ -40,42 +37,42 @@ class OrcamentoAPIService:
     ) -> Dict[str, Any]:
         """
         Faz uma requisição POST com retry automático para erros 503.
+        A renovação do token (401) é tratada automaticamente pelo BremenClient.
         
         Args:
-            url: URL da API
+            url: URL da API (caminho relativo, ex: /api/v1/orcamento)
             payload: Dados a enviar
             operacao: Nome da operação (para logs)
             
         Returns:
             Dict com resposta da API
         """
+        # Extrair path relativo se URL completa foi fornecida
+        path = url.replace(self.api_base_url, "") if url.startswith(self.api_base_url) else url
+        
         last_error = None
         
         for tentativa in range(1, MAX_RETRIES + 1):
             try:
                 logger.info(f"Tentativa {tentativa}/{MAX_RETRIES} - {operacao}")
                 
-                async with httpx.AsyncClient(timeout=self.api_timeout) as client:
-                    response = await client.post(
-                        url=url,
-                        headers=self.headers,
-                        json=payload
-                    )
+                # BremenClient cuida da autenticação e renovação do token
+                response = await self.bremen_client.post(path, payload)
+                
+                # Se for 503, fazer retry
+                if response.status_code == 503:
+                    error_msg = response.text
+                    logger.warning(f"API retornou 503 (ocupada). Aguardando {RETRY_DELAY_SECONDS}s antes de tentar novamente...")
+                    logger.debug(f"Resposta 503: {error_msg}")
                     
-                    # Se for 503, fazer retry
-                    if response.status_code == 503:
-                        error_msg = response.text
-                        logger.warning(f"API retornou 503 (ocupada). Aguardando {RETRY_DELAY_SECONDS}s antes de tentar novamente...")
-                        logger.debug(f"Resposta 503: {error_msg}")
-                        
-                        if tentativa < MAX_RETRIES:
-                            await asyncio.sleep(RETRY_DELAY_SECONDS * tentativa)  # Backoff exponencial
-                            continue
-                        else:
-                            response.raise_for_status()
-                    
-                    response.raise_for_status()
-                    return response.json()
+                    if tentativa < MAX_RETRIES:
+                        await asyncio.sleep(RETRY_DELAY_SECONDS * tentativa)  # Backoff exponencial
+                        continue
+                    else:
+                        response.raise_for_status()
+                
+                response.raise_for_status()
+                return response.json()
                     
             except httpx.ConnectError as e:
                 last_error = e

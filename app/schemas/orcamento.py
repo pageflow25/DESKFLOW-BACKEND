@@ -92,6 +92,7 @@ class FluxoOrcamentoRequest(BaseModel):
     aprovar_automaticamente: bool = Field(False, description="Se deve aprovar automaticamente")
     data_entrega: Optional[str] = Field(None, description="Data de entrega para aprovação (ISO format)")
     baixar_arquivos: bool = Field(False, description="Se deve baixar arquivos após aprovação (FASE 03)")
+    gerar_op: bool = Field(True, description="Se deve gerar OP na aprovação (FASE 02). False envia gerar_op=false para a API Bremen.")
     modo_agrupamento: str = Field("unidade", description="Modo de agrupamento: 'unidade' ou 'escola'")
 
 
@@ -109,4 +110,5 @@ class GerarOrcamentoCompleto(BaseModel):
     aprovar_automaticamente: bool = Field(True, description="Se deve aprovar automaticamente")
     data_entrega: Optional[str] = Field(None, description="Data de entrega para aprovação (formato ISO)")
     baixar_arquivos: bool = Field(True, description="Se deve baixar arquivos após aprovação (FASE 03)")
+    gerar_op: bool = Field(True, description="Se deve gerar OP na aprovação. False envia gerar_op=false para a API Bremen.")
     modo_agrupamento: str = Field("unidade", description="Modo de agrupamento: 'unidade' (por unidade) ou 'escola' (agrupado por escola)")
