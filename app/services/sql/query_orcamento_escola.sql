@@ -12,7 +12,6 @@ WITH parametros AS (
         CAST(:dias_uteis_filtro AS int[]) AS dias_uteis_filtro 
 ),
 
-
 unidades_filtradas AS (
     SELECT
         ue.id,
