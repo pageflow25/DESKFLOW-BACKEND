@@ -28,10 +28,9 @@ class BremenItem(Base):
         nullable=True, 
         comment="Descrição textual do produto/item"
     )
-    categoria_prod = Column(
+    categoria_Prod = Column(
         String(50),
         nullable=True,
-        name='categoria_Prod',
         comment="Categoria do produto: 'Apostila', 'Livreto', 'Avulso', 'Prova'"
     )
     sub_grupo = Column(
@@ -68,34 +67,35 @@ class BremenItem(Base):
         lazy="select"
     )
     
-    # Relacionamento bidirecional com EspecificacaoForm via id_produto
-    # IMPORTANTE: Este é um relacionamento lógico, não há FK no banco
-    # viewonly=True indica que SQLAlchemy não deve tentar sincronizar mudanças
-    especificacoes = relationship(
-        "EspecificacaoForm",
-        primaryjoin="BremenItem.id_produto == foreign(EspecificacaoForm.id_produto)",
-        back_populates="bremen_item",
-        foreign_keys="EspecificacaoForm.id_produto",
-        viewonly=True,
-        lazy="select"
-    )
-    
-    # Relacionamento com perguntas via id_produto
-    perguntas = relationship(
-        "BremenPergunta",
-        back_populates="item",
-        foreign_keys="BremenPergunta.id_geral",
-        primaryjoin="BremenItem.id_produto == BremenPergunta.id_geral",
-        lazy="select"
-    )
-    
-    # Relacionamento com gramaturas via id_produto
     gramaturas = relationship(
         "BremenGramatura",
         back_populates="item",
         foreign_keys="BremenGramatura.id_item",
         primaryjoin="BremenItem.id_produto == BremenGramatura.id_item",
-        lazy="select"
+        cascade="all, delete-orphan"
+    )
+    
+    gramaturas_capa = relationship(
+        "BremenGramaturaCapa",
+        back_populates="item",
+        foreign_keys="BremenGramaturaCapa.id_item",
+        primaryjoin="BremenItem.id_produto == BremenGramaturaCapa.id_item",
+        cascade="all, delete-orphan"
+    )
+    
+    perguntas = relationship(
+        "BremenPergunta",
+        back_populates="item",
+        foreign_keys="BremenPergunta.id_geral",
+        primaryjoin="BremenItem.id_produto == BremenPergunta.id_geral",
+        cascade="all, delete-orphan"
+    )
+    
+    especificacoes = relationship(
+        "EspecificacaoForm",
+        back_populates="item",
+        foreign_keys="EspecificacaoForm.id_produto",
+        primaryjoin="BremenItem.id_produto == EspecificacaoForm.id_produto"
     )
     
     # Índices compostos para otimizar queries
@@ -104,7 +104,7 @@ class BremenItem(Base):
     )
     
     def __repr__(self):
-        return f"<BremenItem(id={self.id}, id_produto={self.id_produto}, descricao='{self.descricao[:30] if self.descricao else 'N/A'}', categoria='{self.categoria_prod}')>"
+        return f"<BremenItem(id={self.id}, id_produto={self.id_produto}, descricao='{self.descricao[:30] if self.descricao else 'N/A'}', categoria='{self.categoria_Prod}')>"
     
     def to_dict(self):
         """Converte o objeto para dicionário para serialização"""
@@ -112,7 +112,7 @@ class BremenItem(Base):
             'id': self.id,
             'id_produto': self.id_produto,
             'descricao': self.descricao,
-            'categoria_prod': self.categoria_prod,
+            'categoria_Prod': self.categoria_Prod,
             'sub_grupo': self.sub_grupo,
             'is_ativo': self.is_ativo,
             'is_conveniado': self.is_conveniado,

@@ -14,12 +14,15 @@ from .bremen_pergunta import BremenPergunta
 from .bremen_resposta import BremenResposta
 from .bremen_especificacao_detalhe import BremenEspecificacaoDetalhe
 from .bremen_gramatura import BremenGramatura
+from .bremen_gramatura_capa import BremenGramaturaCapa
 from .bremen_tamanho_papel import BremenTamanhoPapel
 from .calc_bremen_escola import CalcBremenEscola
 from .status_deskflow_pedido import StatusDeskflowPedido
 from .orcamento_api import OrcamentoAPI
+from .orcamento_faturamento import OrcamentoFaturamento
 from .aprovacao_api import AprovacaoAPI
 from .historico_processamento import HistoricoProcessamento
+from .download_bremen import DownloadBremen
 
 __all__ = [
     "Usuario", 
@@ -37,10 +40,13 @@ __all__ = [
     "BremenResposta",
     "BremenEspecificacaoDetalhe",
     "BremenGramatura",
+    "BremenGramaturaCapa",
     "BremenTamanhoPapel",
     "CalcBremenEscola",
     "StatusDeskflowPedido",
     "OrcamentoAPI",
+    "OrcamentoFaturamento",
     "AprovacaoAPI",
-    "HistoricoProcessamento"
+    "HistoricoProcessamento",
+    "DownloadBremen"
 ]

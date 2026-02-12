@@ -17,13 +17,8 @@ class Settings(BaseSettings):
     DEBUG: bool
     NODE_ENV: str
 
-    # Configurações DriveHQ FTP 
-    DRIVEHQ_FTP_HOST: str
-    DRIVEHQ_FTP_PORT: int
-    DRIVEHQ_FTP_USER: str
-    DRIVEHQ_FTP_PASSWORD: str
-    DRIVEHQ_BASE_URL: str = "https://www.drivehq.com"
-
+    # Vercel Blob Storage (armazenamento de PDFs)
+    BLOB_READ_WRITE_TOKEN: str
 
     # Credenciais Bremen Auth
     DEFAULT_URL: str
@@ -31,6 +26,13 @@ class Settings(BaseSettings):
     DEFAULT_USER: str
     DEFAULT_PASSWORD: str
     
+    # Configurações da API Bremen (Orçamento e Aprovação)
+    BREMEN_API_URL: str
+    BREMEN_API_TOKEN: str = ""  # Opcional — token agora é renovado automaticamente via BremenClient
+    API_TIMEOUT: int  # 5 minutos para aguardar resposta da API Bremen
+
+    # Configurações FASE 03 — Download de Arquivos
+    DOWNLOAD_BASE_PATH: str
     class Config:
         env_file = ".env"
         extra = "ignore"  # Ignora campos extras do .env que não estão no modelo

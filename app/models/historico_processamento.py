@@ -26,17 +26,20 @@ class HistoricoProcessamento(Base):
         comment="ID da distribuição de material vinculada a este histórico"
     )
     
-    status_anterior = Column(
-        String(50),
+    status_anterior_id = Column(
+        Integer,
+        ForeignKey('status_deskflow_pedido.id', ondelete='RESTRICT', onupdate='CASCADE'),
         nullable=True,
-        comment="Código do status anterior (pode ser nulo no primeiro evento)"
+        index=True,
+        comment="ID do status anterior (pode ser nulo no primeiro evento)"
     )
     
-    status_novo = Column(
-        String(50),
+    status_novo_id = Column(
+        Integer,
+        ForeignKey('status_deskflow_pedido.id', ondelete='RESTRICT', onupdate='CASCADE'),
         nullable=False,
         index=True,
-        comment="Código do novo status após a transição"
+        comment="ID do novo status após a transição"
     )
     
     mensagem = Column(
@@ -68,10 +71,25 @@ class HistoricoProcessamento(Base):
         foreign_keys=[distribuicao_material_id]
     )
     
+    status_anterior = relationship(
+        "StatusDeskflowPedido",
+        foreign_keys=[status_anterior_id],
+        back_populates="historicos_como_status_anterior"
+    )
+    
+    status_novo = relationship(
+        "StatusDeskflowPedido",
+        foreign_keys=[status_novo_id],
+        back_populates="historicos_como_status_novo"
+    )
+    
     def __repr__(self):
-        status_str = f"{self.status_anterior or 'INÍCIO'} -> {self.status_novo}"
-        return f"<HistoricoProcessamento(id={self.id}, distribuicao_id={self.distribuicao_material_id}, {status_str})>"
+        status_ant = self.status_anterior.codigo if self.status_anterior else 'INÍCIO'
+        status_nov = self.status_novo.codigo if self.status_novo else 'N/A'
+        return f"<HistoricoProcessamento(id={self.id}, distribuicao_id={self.distribuicao_material_id}, {status_ant} -> {status_nov})>"
     
     def __str__(self):
         sucesso_str = "✓" if self.sucesso else "✗"
-        return f"[{sucesso_str}] {self.status_anterior or 'INÍCIO'} → {self.status_novo}: {self.mensagem or 'Sem mensagem'}"
+        status_ant = self.status_anterior.codigo if self.status_anterior else 'INÍCIO'
+        status_nov = self.status_novo.codigo if self.status_novo else 'N/A'
+        return f"[{sucesso_str}] {status_ant} → {status_nov}: {self.mensagem or 'Sem mensagem'}"

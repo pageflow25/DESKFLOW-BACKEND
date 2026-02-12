@@ -22,11 +22,40 @@ class EspecificacaoForm(Base):
     quantidade = Column(Integer, nullable=False, default=1, comment="Quantidade do item")
     grupo = Column(String(100), nullable=True, comment="Agrupamento lógico dos itens (principal, unidade, capa, miolo, etc.)")
     
+    # Relacionamento com produto
+    id_produto = Column(
+        Integer,
+        nullable=True,
+        comment="FK para bremen_itens.id_produto"
+    )
+    
+    # Especificações de tamanho
+    largura = Column(String(50), nullable=True, comment="Largura do item")
+    altura = Column(String(50), nullable=True, comment="Altura do item")
+    
+    # Especificações de material
+    gramatura_miolo = Column(String(50), nullable=True, comment="Gramatura do miolo")
+    id_gramatura = Column(
+        Integer,
+        ForeignKey('bremen_gramatura.id', ondelete='SET NULL', onupdate='CASCADE'),
+        nullable=True,
+        comment="FK para tabela de gramaturas catalogadas"
+    )
+    id_papel = Column(
+        Integer,
+        ForeignKey('bremen_tamanho_papel.id', ondelete='SET NULL', onupdate='CASCADE'),
+        nullable=True,
+        comment="FK para tamanhos de papel"
+    )
+    
+    # Cores
+    corfrente = Column(Integer, nullable=True, comment="Número de cores da frente")
+    corverso = Column(Integer, nullable=True, comment="Número de cores do verso")
+    
     # Especificações de produção
     formato = Column(String(100), nullable=True, comment="Formato do item")
     cor_impressao = Column(String(100), nullable=True, comment="Cor da impressão")
     impressao = Column(String(100), nullable=True, comment="Tipo de impressão")
-    gramatura = Column(String(50), nullable=True, comment="Gramatura do papel")
     papel_adesivo = Column(Boolean, default=False, nullable=True, comment="Se utiliza papel adesivo")
     tipo_adesivo = Column(String(100), nullable=True, comment="Tipo do adesivo")
     grampos = Column(String(100), nullable=True, comment="Tipo de grampos")
@@ -39,52 +68,18 @@ class EspecificacaoForm(Base):
     acabamento = Column(String(100), nullable=True, comment="Tipo de acabamento")
     tipo_papel = Column(String(100), nullable=True, comment="Tipo do papel")
     laminacao = Column(String(100), nullable=True, comment="Tipo de laminação")
-    livreto = Column(String(100), nullable=True, comment="Indica se o item possui livreto ou informações do livreto")
-    corte = Column(String(100), nullable=True, comment="Tipo de corte ou acabamento especial do item")
-    altura = Column(String(50), nullable=True, comment="Altura do item em milímetros")
-    largura = Column(String(50), nullable=True, comment="Largura do item em milímetros")
-    gramatura_miolo = Column(String(50), nullable=True, comment="Gramatura do miolo informada no formulário")
     
-    # Campos específicos do modelo comercial
-    origem_dados = Column(String(100), nullable=True, comment="Origem dos dados (manual, importado, etc.)")
-    grupos_vinculados = Column(Text, nullable=True, comment="JSON com os grupos vinculados e seus arquivos")
+    # Metadados
     metadados = Column(Text, nullable=True, comment="Dados adicionais em formato JSON")
+    obs = Column(Text, nullable=True, comment="Observações gerais")
     
-    # Relacionamento com Bremen
-    id_produto = Column(
-        Integer, 
-        nullable=True, 
-        index=True,
-        comment="FK para bremen_itens.id_produto - relacionamento lógico com BremenItem"
-    )
-    
-    # Relacionamento com gramatura e papel
-    id_gramatura = Column(
-        Integer,
-        ForeignKey('bremen_gramatura.id', ondelete='SET NULL', onupdate='CASCADE'),
-        nullable=True,
-        index=True,
-        comment="FK para bremen_gramatura"
-    )
-    
-    id_papel = Column(
-        Integer,
-        ForeignKey('bremen_tamanho_papel.id', ondelete='SET NULL', onupdate='CASCADE'),
-        nullable=True,
-        index=True,
-        comment="FK para bremen_tamanho_papel"
-    )
-    
-    # Chave estrangeira para formulário
+    # Relacionamentos com tabelas
     formulario_id = Column(
-        Integer, 
-        ForeignKey('formularios.id', ondelete='CASCADE', onupdate='CASCADE'), 
-        nullable=False,
-        index=True,
-        comment="ID do formulário ao qual esta especificação pertence"
+        Integer,
+        ForeignKey('formularios.id', ondelete='CASCADE', onupdate='CASCADE'),
+        nullable=True
     )
     
-    # Timestamps
     criado_em = Column(DateTime, server_default=func.now(), nullable=False)
     atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
     
@@ -107,15 +102,12 @@ class EspecificacaoForm(Base):
     )
     
     # Relacionamento lógico (sem FK) com BremenItem via id_produto
-    bremen_item = relationship(
+    item = relationship(
         "BremenItem",
-        # Mark EspecificacaoForm.id_produto as the foreign column to disambiguate direction
         primaryjoin="foreign(EspecificacaoForm.id_produto) == BremenItem.id_produto",
-        remote_side="BremenItem.id_produto",
         back_populates="especificacoes",
-        foreign_keys="EspecificacaoForm.id_produto",
-        viewonly=True,
-        uselist=False
+        foreign_keys=[id_produto],
+        viewonly=True
     )
     
     # Relacionamentos com gramatura e papel
@@ -137,6 +129,6 @@ class EspecificacaoForm(Base):
         back_populates="especificacao",
         cascade="all, delete-orphan"
     )
-    
+
     def __repr__(self):
         return f"<EspecificacaoForm(id={self.id}, nome_item='{self.nome_item}', formulario_id={self.formulario_id})>"

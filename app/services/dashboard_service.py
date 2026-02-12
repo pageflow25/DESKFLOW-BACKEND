@@ -35,6 +35,7 @@ class DashboardService:
                 ON dm.unidade_escolar_id = ue.id
             JOIN formularios f
                 ON f.id = dm.formulario_id
+            WHERE dm.status_id = 1
             GROUP BY
                 e.id,
                 e.nome,
