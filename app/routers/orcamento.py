@@ -87,7 +87,8 @@ async def gerar_orcamento(
             dias_uteis_filtro=request.dias_uteis_filtro,
             aprovar_automaticamente=request.aprovar_automaticamente,
             data_entrega=data_entrega,
-            baixar_arquivos=request.baixar_arquivos
+            baixar_arquivos=request.baixar_arquivos,
+            modo_agrupamento=request.modo_agrupamento
         )
         
         # Executar fluxo completo

@@ -10,6 +10,7 @@ class OrcamentoRequest(BaseModel):
     datas_saida: List[date] = Field(..., min_length=1, description="Lista de datas de saída")
     divisoes_logistica: Optional[List[str]] = Field(None, description="Lista de divisões logísticas (opcional)")
     dias_uteis_filtro: Optional[List[int]] = Field(None, description="Lista de dias úteis (opcional)")
+    modo_agrupamento: str = Field("unidade", description="Modo de agrupamento: 'unidade' (por unidade) ou 'escola' (agrupado por escola)")
 
 
 class ComponenteInfo(BaseModel):
@@ -38,10 +39,11 @@ class PerguntaGeral(BaseModel):
 class ItemOrcamento(BaseModel):
     """Item do orçamento"""
     id_produto: int
-    descricao: str
+    descricao: Optional[str] = "Sem descrição"
     quantidade: int
     usar_listapreco: int = 1
     manter_estrutura_mod_produto: int = 1
+    ids_distribuicao: Optional[List[int]] = Field(None, description="IDs de distribuição agrupados (modo escola)")
     componentes: List[ComponenteInfo] = []
     perguntas_gerais: List[PerguntaGeral] = []
 
@@ -49,7 +51,7 @@ class ItemOrcamento(BaseModel):
 class OrcamentoData(BaseModel):
     """Dados do orçamento"""
     id_cliente: Optional[int] = None
-    id_vendedor: int = 2285
+    id_vendedor: Optional[int] = 2285
     id_forma_pagamento: str = "11"
     itens: List[ItemOrcamento] = []
 
@@ -90,6 +92,7 @@ class FluxoOrcamentoRequest(BaseModel):
     aprovar_automaticamente: bool = Field(False, description="Se deve aprovar automaticamente")
     data_entrega: Optional[str] = Field(None, description="Data de entrega para aprovação (ISO format)")
     baixar_arquivos: bool = Field(False, description="Se deve baixar arquivos após aprovação (FASE 03)")
+    modo_agrupamento: str = Field("unidade", description="Modo de agrupamento: 'unidade' ou 'escola'")
 
 
 class GerarOrcamentoCompleto(BaseModel):
@@ -106,3 +109,4 @@ class GerarOrcamentoCompleto(BaseModel):
     aprovar_automaticamente: bool = Field(True, description="Se deve aprovar automaticamente")
     data_entrega: Optional[str] = Field(None, description="Data de entrega para aprovação (formato ISO)")
     baixar_arquivos: bool = Field(True, description="Se deve baixar arquivos após aprovação (FASE 03)")
+    modo_agrupamento: str = Field("unidade", description="Modo de agrupamento: 'unidade' (por unidade) ou 'escola' (agrupado por escola)")

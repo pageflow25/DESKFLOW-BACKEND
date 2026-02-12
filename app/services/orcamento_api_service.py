@@ -131,15 +131,18 @@ class OrcamentoAPIService:
             "identifier": orcamento.identifier,
             "data": {
                 "id_cliente": orcamento.data.id_cliente,
-                "id_vendedor": orcamento.data.id_vendedor,
+                "id_vendedor": orcamento.data.id_vendedor or 2285,
                 "id_forma_pagamento": orcamento.data.id_forma_pagamento,
                 "itens": [
                     {
                         "id_produto": item.id_produto,
-                        "descricao": item.descricao,
+                        "descricao": item.descricao or f"Produto {item.id_produto}",
                         "quantidade": item.quantidade,
                         "usar_listapreco": item.usar_listapreco,
                         "manter_estrutura_mod_produto": item.manter_estrutura_mod_produto,
+                        # ids_distribuicao é mantido no payload para rastreio interno,
+                        # mas NÃO será enviado para a API Bremen
+                        "ids_distribuicao": item.ids_distribuicao,
                         "componentes": [
                             {
                                 "id": comp.id,
@@ -171,11 +174,35 @@ class OrcamentoAPIService:
             }
         }
         
+        # Construir payload para envio à API Bremen (sem campos internos)
+        payload_api = {
+            "identifier": payload["identifier"],
+            "data": {
+                "id_cliente": payload["data"]["id_cliente"],
+                "id_vendedor": payload["data"]["id_vendedor"],
+                "id_forma_pagamento": payload["data"]["id_forma_pagamento"],
+                "itens": [
+                    {
+                        k: v for k, v in item.items()
+                        if k not in ("ids_distribuicao", "id_distribuicao")  # Remover campos internos
+                    }
+                    for item in payload["data"]["itens"]
+                ]
+            }
+        }
+        
+        # Limpar id_distribuicao dos componentes para a API Bremen
+        for item in payload_api["data"]["itens"]:
+            item["componentes"] = [
+                {k: v for k, v in comp.items() if k != "id_distribuicao"}
+                for comp in item.get("componentes", [])
+            ]
+        
         url = f"{self.api_base_url}/api/v1/orcamento"
         logger.info(f"Conectando à API Bremen: {url}")
-        logger.debug(f"Payload com {len(payload['data']['itens'])} itens")
+        logger.debug(f"Payload com {len(payload_api['data']['itens'])} itens")
         
-        resposta_api = await self._fazer_requisicao_com_retry(url, payload, "enviar orçamento")
+        resposta_api = await self._fazer_requisicao_com_retry(url, payload_api, "enviar orçamento")
         
         id_orcamento = resposta_api.get('data', {}).get('id_orcamento')
         logger.info(f"Orçamento enviado com sucesso. ID: {id_orcamento}")

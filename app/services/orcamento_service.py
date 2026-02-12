@@ -35,8 +35,17 @@ class OrcamentoService:
         logger.info(f"Iniciando geração de orçamento para escola {request.escola_id}")
         
         try:
+            # Escolher query SQL com base no modo de agrupamento
+            modo = getattr(request, 'modo_agrupamento', 'unidade')
+            if modo == 'escola':
+                sql_filename = 'query_orcamento_escola.sql'
+                logger.info(f"Modo ESCOLA: agrupando todas as unidades da escola {request.escola_id}")
+            else:
+                sql_filename = 'query_orcamento.sql'
+                logger.info(f"Modo UNIDADE: gerando orçamento por unidade para escola {request.escola_id}")
+            
             # Carregar query SQL
-            sql_file = Path(__file__).parent / 'sql' / 'query_orcamento.sql'
+            sql_file = Path(__file__).parent / 'sql' / sql_filename
             with open(sql_file, 'r', encoding='utf-8') as f:
                 query_sql = f.read()
             
@@ -61,7 +70,7 @@ class OrcamentoService:
                 # Converter para schema
                 data = OrcamentoData(
                     id_cliente=orcamento_data['data'].get('id_cliente'),
-                    id_vendedor=orcamento_data['data']['id_vendedor'],
+                    id_vendedor=orcamento_data['data'].get('id_vendedor') or 2285,
                     id_forma_pagamento=str(orcamento_data['data']['id_forma_pagamento']),  # Converter para string
                     itens=[ItemOrcamento(**item) for item in orcamento_data['data']['itens']]
                 )
@@ -121,6 +130,8 @@ class OrcamentoService:
                 return []
             
             # Extrair id_distribuicao de cada item do payload enviado (correspondência sequencial)
+            # Modo unidade: id_distribuicao está em componentes[0].id_distribuicao
+            # Modo escola: ids_distribuicao está no item (array de IDs)
             itens_payload = payload_enviado.get('data', {}).get('itens', [])
             
             registros_salvos = []
@@ -136,9 +147,19 @@ class OrcamentoService:
                 # Buscar id_distribuicao do item correspondente no payload enviado
                 id_distribuicao = None
                 if i < len(itens_payload):
-                    componentes = itens_payload[i].get('componentes', [])
-                    if componentes:
-                        id_distribuicao = componentes[0].get('id_distribuicao')
+                    item_payload = itens_payload[i]
+                    
+                    # Primeiro tentar ids_distribuicao no item (modo escola)
+                    ids_dist = item_payload.get('ids_distribuicao')
+                    if ids_dist and isinstance(ids_dist, list) and len(ids_dist) > 0:
+                        # Modo escola: usar o primeiro ID como distribuicao principal
+                        id_distribuicao = ids_dist[0]
+                        logger.debug(f"Modo escola - Item {i}: usando primeiro id_distribuicao={id_distribuicao} de {len(ids_dist)} distribuições")
+                    else:
+                        # Modo unidade: buscar em componentes[0].id_distribuicao
+                        componentes = item_payload.get('componentes', [])
+                        if componentes:
+                            id_distribuicao = componentes[0].get('id_distribuicao')
                 
                 if not id_distribuicao:
                     logger.error(f"id_distribuicao não encontrado para item índice {i} (id_item={id_item})")
