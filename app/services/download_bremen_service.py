@@ -200,13 +200,11 @@ class DownloadBremenService:
             logger.warning(f"Arquivo principal {arquivo_principal.id} sem URL de download")
         
         # 4. Verificar se existe arquivo complementar (capa ↔ miolo)
+        #    CORREÇÃO: usa coluna `pares` para encontrar o par correto
+        #    (antes filtrava apenas por formulario_id, misturando pares diferentes)
         if arquivo_principal.formulario_id:
-            tipo_complementar = "capa" if (arquivo_principal.tipo_arquivo or "").lower() == "miolo" else "miolo"
-            
-            arquivo_complementar = db.query(ArquivoPdf).filter(
-                ArquivoPdf.formulario_id == arquivo_principal.formulario_id,
-                ArquivoPdf.tipo_arquivo == tipo_complementar
-            ).first()
+            from .pareamento_pdf_service import buscar_par_complementar
+            arquivo_complementar = buscar_par_complementar(db, arquivo_principal)
             
             if arquivo_complementar:
                 url_complementar = arquivo_complementar.caminho_remoto or arquivo_complementar.arquivo
