@@ -290,31 +290,45 @@ class OrcamentoService:
             logger.info(f"OPs extraídas: {ops}, Pedido: {pedido}")
             logger.info(f"Distribuições IDs para correspondência: {distribuicoes_ids}")
 
-            if not ops:
-                raise ValueError(f"Nenhuma OP encontrada na resposta de aprovação do orçamento {id_orcamento}")
-
             # --- PASSO 1: montar todos os mappings em memória ---
             mappings: List[Dict[str, Any]] = []
-            for i, op_id in enumerate(ops):
-                if i < len(distribuicoes_ids):
-                    dist_id = distribuicoes_ids[i]
-                else:
-                    logger.warning(
-                        f"OP índice {i} (id={op_id}) sem distribuição correspondente. "
-                        f"Total OPs: {len(ops)}, Total distribuições: {len(distribuicoes_ids)}"
-                    )
-                    dist_id = distribuicoes_ids[-1] if distribuicoes_ids else None
-                    if not dist_id:
-                        raise ValueError(f"Nenhuma distribuição disponível para OP {op_id}")
 
-                mappings.append({
-                    "distribuicao_material_id": dist_id,
-                    "id_orcamento": id_orcamento,
-                    "id_ops": op_id,
-                    "pedidos": pedido,
-                    "resposta_api": resposta_completa,
-                })
-                logger.debug(f"OP {i}: distribuicao_material_id={dist_id}, id_ops={op_id}")
+            if ops:
+                # Caso normal: há OPs geradas — uma linha por OP
+                for i, op_id in enumerate(ops):
+                    if i < len(distribuicoes_ids):
+                        dist_id = distribuicoes_ids[i]
+                    else:
+                        logger.warning(
+                            f"OP índice {i} (id={op_id}) sem distribuição correspondente. "
+                            f"Total OPs: {len(ops)}, Total distribuições: {len(distribuicoes_ids)}"
+                        )
+                        dist_id = distribuicoes_ids[-1] if distribuicoes_ids else None
+                        if not dist_id:
+                            raise ValueError(f"Nenhuma distribuição disponível para OP {op_id}")
+
+                    mappings.append({
+                        "distribuicao_material_id": dist_id,
+                        "id_orcamento": id_orcamento,
+                        "id_ops": op_id,
+                        "pedidos": pedido,
+                        "resposta_api": resposta_completa,
+                    })
+                    logger.debug(f"OP {i}: distribuicao_material_id={dist_id}, id_ops={op_id}")
+            else:
+                # Sem OP (gerar_op=False) — salva apenas o pedido de venda, id_ops=None
+                logger.info(
+                    f"Orçamento {id_orcamento} sem OP (apenas pedido de venda). "
+                    f"Salvando {len(distribuicoes_ids)} registro(s) com id_ops=None."
+                )
+                for dist_id in distribuicoes_ids:
+                    mappings.append({
+                        "distribuicao_material_id": dist_id,
+                        "id_orcamento": id_orcamento,
+                        "id_ops": None,
+                        "pedidos": pedido,
+                        "resposta_api": resposta_completa,
+                    })
 
             # --- PASSO 2: delete único + bulk insert em uma única transação ---
             db.query(AprovacaoAPI).filter(
@@ -325,15 +339,14 @@ class OrcamentoService:
             db.commit()
 
             # Buscar os registros inseridos (uma única query)
-            ops_ids = [m["id_ops"] for m in mappings]
             registros_salvos = db.query(AprovacaoAPI).filter(
-                AprovacaoAPI.id_orcamento == id_orcamento,
-                AprovacaoAPI.id_ops.in_(ops_ids)
+                AprovacaoAPI.id_orcamento == id_orcamento
             ).all()
 
             logger.info(
                 f"Aprovação API salva com sucesso - {len(registros_salvos)} registros criados "
-                f"para orçamento {id_orcamento}"
+                f"para orçamento {id_orcamento} "
+                f"({'com OP' if ops else 'sem OP — apenas pedido de venda'})"
             )
             return registros_salvos
 
