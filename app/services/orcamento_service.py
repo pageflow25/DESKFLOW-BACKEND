@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, update
 from typing import List, Dict, Any, Optional
 from ..models.orcamento_api import OrcamentoAPI
 from ..models.aprovacao_api import AprovacaoAPI
@@ -19,6 +19,41 @@ logger = get_logger(__name__)
 
 class OrcamentoService:
     """Service para operações de orçamento"""
+
+    # ================================================================
+    # CACHE DE STATUS — evita N queries repetidas para o mesmo código
+    # ================================================================
+    _status_cache: Dict[str, StatusDeskflowPedido] = {}
+
+    @classmethod
+    def _get_or_create_status(cls, db: Session, codigo: str) -> StatusDeskflowPedido:
+        """
+        Retorna o StatusDeskflowPedido pelo código.
+        Usa cache em memória para evitar queries repetidas.
+        """
+        if codigo in cls._status_cache:
+            return cls._status_cache[codigo]
+
+        status = db.query(StatusDeskflowPedido).filter(
+            StatusDeskflowPedido.codigo == codigo
+        ).first()
+
+        if not status:
+            status = StatusDeskflowPedido(
+                codigo=codigo,
+                descricao=f"Status {codigo}"
+            )
+            db.add(status)
+            db.flush()
+            logger.info(f"Novo status criado: {codigo}")
+
+        cls._status_cache[codigo] = status
+        return status
+
+    @classmethod
+    def _invalidar_cache_status(cls):
+        """Limpa o cache de status (usar quando dados de status são alterados externamente)."""
+        cls._status_cache.clear()
     
     @staticmethod
     def gerar_orcamento(db: Session, request: OrcamentoRequest) -> OrcamentoListResponse:
@@ -120,101 +155,86 @@ class OrcamentoService:
             List[OrcamentoAPI]: Lista de registros salvos (um por item)
         """
         logger.info(f"Salvando orçamento API - ID: {id_orcamento}, Itens: {len(itens_resposta)}")
-        
+
         try:
             if not id_orcamento or id_orcamento <= 0:
                 raise ValueError(f"ID de orçamento inválido: {id_orcamento}")
-            
+
             if not itens_resposta:
                 logger.warning(f"Nenhum item para salvar no orçamento {id_orcamento}")
                 return []
-            
+
             # Extrair id_distribuicao de cada item do payload enviado (correspondência sequencial)
             # Modo unidade: id_distribuicao está em componentes[0].id_distribuicao
             # Modo escola: ids_distribuicao está no item (array de IDs)
             itens_payload = payload_enviado.get('data', {}).get('itens', [])
-            
-            registros_salvos = []
-            BATCH_SIZE = 5
-            batch_count = 0
-            
+
+            # --- PASSO 1: montar todos os registros em memória (sem I/O) ---
+            mappings: List[Dict[str, Any]] = []
+
             for i, item_resposta in enumerate(itens_resposta):
                 id_item = item_resposta.get('id')
                 if not id_item:
                     logger.warning(f"Item sem ID encontrado no índice {i}, pulando: {item_resposta}")
                     continue
-                
-                # Buscar id_distribuicao do item correspondente no payload enviado
+
                 id_distribuicao = None
                 if i < len(itens_payload):
                     item_payload = itens_payload[i]
-                    
-                    # Primeiro tentar ids_distribuicao no item (modo escola)
                     ids_dist = item_payload.get('ids_distribuicao')
                     if ids_dist and isinstance(ids_dist, list) and len(ids_dist) > 0:
-                        # Modo escola: usar o primeiro ID como distribuicao principal
                         id_distribuicao = ids_dist[0]
-                        logger.debug(f"Modo escola - Item {i}: usando primeiro id_distribuicao={id_distribuicao} de {len(ids_dist)} distribuições")
+                        logger.debug(
+                            f"Modo escola - Item {i}: usando primeiro id_distribuicao={id_distribuicao} "
+                            f"de {len(ids_dist)} distribuições"
+                        )
                     else:
-                        # Modo unidade: buscar em componentes[0].id_distribuicao
                         componentes = item_payload.get('componentes', [])
                         if componentes:
                             id_distribuicao = componentes[0].get('id_distribuicao')
-                
+
                 if not id_distribuicao:
                     logger.error(f"id_distribuicao não encontrado para item índice {i} (id_item={id_item})")
                     raise ValueError(f"id_distribuicao não encontrado para item índice {i}")
-                
-                # Deletar registro existente para evitar duplicatas
-                db.query(OrcamentoAPI).filter(
-                    OrcamentoAPI.distribuicao_material_id == id_distribuicao,
-                    OrcamentoAPI.id_orcamento == id_orcamento,
-                    OrcamentoAPI.id_item == id_item
-                ).delete(synchronize_session=False)
-                
-                # Criar novo registro para este item
-                orcamento_api = OrcamentoAPI(
-                    distribuicao_material_id=id_distribuicao,
-                    id_orcamento=id_orcamento,
-                    id_item=id_item,
-                    itens=item_resposta,  # Um objeto por registro, não array
-                    resposta_api=resposta_completa
-                )
-                db.add(orcamento_api)
-                registros_salvos.append(orcamento_api)
-                batch_count += 1
-                
+
+                mappings.append({
+                    "distribuicao_material_id": id_distribuicao,
+                    "id_orcamento": id_orcamento,
+                    "id_item": id_item,
+                    "itens": item_resposta,
+                    "resposta_api": resposta_completa,
+                })
                 logger.debug(
                     f"Item {i}: distribuicao_material_id={id_distribuicao}, "
                     f"id_item={id_item}, descricao={item_resposta.get('descricao', '')[:50]}"
                 )
-                
-                # Commit a cada BATCH_SIZE registros
-                if batch_count >= BATCH_SIZE:
-                    db.commit()
-                    logger.debug(f"Commit em lote - {len(registros_salvos)}/{len(itens_resposta)} registros salvos")
-                    batch_count = 0
-            
-            # Commit final para registros restantes
-            if batch_count > 0:
-                db.commit()
-            
-            # Refresh dos registros
-            for registro in registros_salvos:
-                try:
-                    db.refresh(registro)
-                except Exception:
-                    pass
-            
+
+            # --- PASSO 2: delete único para todos os itens deste orçamento ---
+            ids_item = [m["id_item"] for m in mappings]
+            db.query(OrcamentoAPI).filter(
+                OrcamentoAPI.id_orcamento == id_orcamento,
+                OrcamentoAPI.id_item.in_(ids_item)
+            ).delete(synchronize_session=False)
+
+            # --- PASSO 3: bulk insert em uma única operação ---
+            db.bulk_insert_mappings(OrcamentoAPI, mappings)
+            db.commit()
+
+            # Buscar os registros inseridos para retornar (uma única query)
+            registros_salvos = db.query(OrcamentoAPI).filter(
+                OrcamentoAPI.id_orcamento == id_orcamento,
+                OrcamentoAPI.id_item.in_(ids_item)
+            ).all()
+
             logger.info(
                 f"Orçamento API salvo com sucesso - {len(registros_salvos)} registros criados "
                 f"para orçamento {id_orcamento}"
             )
             return registros_salvos
-            
+
         except Exception as e:
             db.rollback()
-            logger.error(f"Erro ao salvar orçamento API para distribuição {distribuicao_id}: {str(e)}")
+            logger.error(f"Erro ao salvar orçamento API (id_orcamento={id_orcamento}): {str(e)}")
             raise
     
     @staticmethod
@@ -243,7 +263,7 @@ class OrcamentoService:
             List[AprovacaoAPI]: Lista de registros salvos (um por OP)
         """
         logger.info(f"Salvando aprovação API para orçamento {id_orcamento}")
-        
+
         try:
             # Extrair dados da resposta
             data = resposta_completa.get('data', [])
@@ -253,7 +273,7 @@ class OrcamentoService:
                 data_item = data
             else:
                 raise ValueError(f"Formato de resposta de aprovação inesperado: {type(data)}")
-            
+
             # Extrair OPs (vem como string separada por vírgula)
             id_ops_str = data_item.get('id_ops', '')
             if isinstance(id_ops_str, str):
@@ -262,28 +282,20 @@ class OrcamentoService:
                 ops = [id_ops_str]
             else:
                 ops = []
-            
+
             # Extrair pedido (um único objeto)
             pedidos_lista = data_item.get('pedidos', [])
             pedido = pedidos_lista[0] if pedidos_lista else {}
-            
+
             logger.info(f"OPs extraídas: {ops}, Pedido: {pedido}")
             logger.info(f"Distribuições IDs para correspondência: {distribuicoes_ids}")
-            
+
             if not ops:
                 raise ValueError(f"Nenhuma OP encontrada na resposta de aprovação do orçamento {id_orcamento}")
-            
-            # Deletar registros existentes para este orçamento
-            db.query(AprovacaoAPI).filter(
-                AprovacaoAPI.id_orcamento == id_orcamento
-            ).delete(synchronize_session=False)
-            db.commit()
-            
-            registros_salvos = []
-            
-            # Criar uma linha por OP com correspondência sequencial aos distribuicoes_ids
+
+            # --- PASSO 1: montar todos os mappings em memória ---
+            mappings: List[Dict[str, Any]] = []
             for i, op_id in enumerate(ops):
-                # Correspondência sequencial: OP[i] → distribuicao_id[i]
                 if i < len(distribuicoes_ids):
                     dist_id = distribuicoes_ids[i]
                 else:
@@ -291,44 +303,43 @@ class OrcamentoService:
                         f"OP índice {i} (id={op_id}) sem distribuição correspondente. "
                         f"Total OPs: {len(ops)}, Total distribuições: {len(distribuicoes_ids)}"
                     )
-                    # Usar o último distribuicao_id disponível como fallback
                     dist_id = distribuicoes_ids[-1] if distribuicoes_ids else None
                     if not dist_id:
                         raise ValueError(f"Nenhuma distribuição disponível para OP {op_id}")
-                
-                aprovacao = AprovacaoAPI(
-                    distribuicao_material_id=dist_id,
-                    id_orcamento=id_orcamento,
-                    id_ops=op_id,
-                    pedidos=pedido,  # Objeto único, não array
-                    resposta_api=resposta_completa
-                )
-                db.add(aprovacao)
-                registros_salvos.append(aprovacao)
-                
-                logger.debug(
-                    f"OP {i}: distribuicao_material_id={dist_id}, "
-                    f"id_ops={op_id}, pedido={pedido}"
-                )
-            
+
+                mappings.append({
+                    "distribuicao_material_id": dist_id,
+                    "id_orcamento": id_orcamento,
+                    "id_ops": op_id,
+                    "pedidos": pedido,
+                    "resposta_api": resposta_completa,
+                })
+                logger.debug(f"OP {i}: distribuicao_material_id={dist_id}, id_ops={op_id}")
+
+            # --- PASSO 2: delete único + bulk insert em uma única transação ---
+            db.query(AprovacaoAPI).filter(
+                AprovacaoAPI.id_orcamento == id_orcamento
+            ).delete(synchronize_session=False)
+
+            db.bulk_insert_mappings(AprovacaoAPI, mappings)
             db.commit()
-            
-            # Refresh dos registros
-            for registro in registros_salvos:
-                try:
-                    db.refresh(registro)
-                except Exception:
-                    pass
-            
+
+            # Buscar os registros inseridos (uma única query)
+            ops_ids = [m["id_ops"] for m in mappings]
+            registros_salvos = db.query(AprovacaoAPI).filter(
+                AprovacaoAPI.id_orcamento == id_orcamento,
+                AprovacaoAPI.id_ops.in_(ops_ids)
+            ).all()
+
             logger.info(
                 f"Aprovação API salva com sucesso - {len(registros_salvos)} registros criados "
                 f"para orçamento {id_orcamento}"
             )
             return registros_salvos
-            
+
         except Exception as e:
             db.rollback()
-            logger.error(f"Erro ao salvar aprovação API para distribuição {distribuicao_id}: {str(e)}")
+            logger.error(f"Erro ao salvar aprovação API (id_orcamento={id_orcamento}): {str(e)}")
             raise
     
     @staticmethod
@@ -353,104 +364,219 @@ class OrcamentoService:
             HistoricoProcessamento: Registro de histórico criado para a distribuição principal
         """
         logger.info(f"Atualizando status da distribuição {distribuicao_id} para {novo_status}")
-        
+
         try:
             # Buscar distribuição principal
             distribuicao = db.query(DistribuicaoMaterial).filter(
                 DistribuicaoMaterial.id == distribuicao_id
             ).first()
-            
+
             if not distribuicao:
                 raise ValueError(f"Distribuição {distribuicao_id} não encontrada")
-            
-            # Buscar ou criar status
-            status = db.query(StatusDeskflowPedido).filter(
-                StatusDeskflowPedido.codigo == novo_status
-            ).first()
-            
-            if not status:
-                # Criar novo status se não existir
-                status = StatusDeskflowPedido(
-                    codigo=novo_status,
-                    descricao=f"Status {novo_status}"
-                )
-                db.add(status)
-                db.flush()
-            
-            # Buscar distribuições relacionadas (capa/miolo do mesmo formulário + unidade)
-            distribuicoes_para_atualizar = [distribuicao]
-            
+
+            # Obter status via cache (evita query repetida a cada chamada)
+            status = OrcamentoService._get_or_create_status(db, novo_status)
+
+            # Coletar todos os IDs a atualizar (principal + relacionadas por capa/miolo)
+            todos_ids = [distribuicao_id]
+            status_anteriores: Dict[int, Optional[int]] = {distribuicao_id: distribuicao.status_id}
+
             if distribuicao.formulario_id and distribuicao.unidade_escolar_id:
-                relacionadas = db.query(DistribuicaoMaterial).filter(
+                relacionadas = db.query(
+                    DistribuicaoMaterial.id,
+                    DistribuicaoMaterial.status_id
+                ).filter(
                     DistribuicaoMaterial.formulario_id == distribuicao.formulario_id,
                     DistribuicaoMaterial.unidade_escolar_id == distribuicao.unidade_escolar_id,
                     DistribuicaoMaterial.id != distribuicao_id
                 ).all()
-                
+
                 if relacionadas:
                     ids_relacionadas = [r.id for r in relacionadas]
                     logger.info(
-                        f"Cascata: encontradas {len(relacionadas)} distribuição(ões) "
-                        f"relacionada(s) para atualizar em conjunto: {ids_relacionadas}"
+                        f"Cascata: {len(relacionadas)} distribuição(ões) relacionada(s): "
+                        f"{ids_relacionadas}"
                     )
-                    distribuicoes_para_atualizar.extend(relacionadas)
-            
-            # Atualizar todas as distribuições (principal + relacionadas)
-            historico_principal = None
-            
-            for dist in distribuicoes_para_atualizar:
-                status_anterior_id = dist.status_id
-                
-                # Pular se já está no status desejado
-                if status_anterior_id == status.id:
-                    logger.debug(
-                        f"Distribuição {dist.id} já está no status {novo_status}, "
-                        f"pulando atualização"
-                    )
-                    continue
-                
-                # Atualizar status
-                dist.status_id = status.id
-                
-                # Criar histórico
-                msg = mensagem if dist.id == distribuicao_id else (
+                    todos_ids.extend(ids_relacionadas)
+                    for r in relacionadas:
+                        status_anteriores[r.id] = r.status_id
+
+            # Filtrar somente os que precisam mudar (excluir os que já estão no status alvo)
+            ids_para_atualizar = [
+                i for i in todos_ids
+                if status_anteriores.get(i) != status.id
+            ]
+
+            if not ids_para_atualizar:
+                logger.debug(f"Todas as distribuições já estão no status {novo_status}, nada a fazer")
+                return None
+
+            # Bulk UPDATE em uma única query SQL
+            db.execute(
+                update(DistribuicaoMaterial)
+                .where(DistribuicaoMaterial.id.in_(ids_para_atualizar))
+                .values(status_id=status.id)
+            )
+
+            # Criar os registros de histórico em bulk
+            historicos: List[Dict[str, Any]] = []
+            for dist_id in ids_para_atualizar:
+                msg = mensagem if dist_id == distribuicao_id else (
                     f"[Cascata] {mensagem} (atualizado junto com distribuição #{distribuicao_id})"
                 )
-                
-                historico = HistoricoProcessamento(
-                    distribuicao_material_id=dist.id,
-                    status_anterior_id=status_anterior_id,
-                    status_novo_id=status.id,
-                    mensagem=msg,
-                    sucesso=sucesso
-                )
-                db.add(historico)
-                
-                if dist.id == distribuicao_id:
-                    historico_principal = historico
-                
-                logger.info(f"Status da distribuição {dist.id} atualizado para {novo_status}")
-            
-            # Commit atômico de todas as atualizações
+                historicos.append({
+                    "distribuicao_material_id": dist_id,
+                    "status_anterior_id": status_anteriores.get(dist_id),
+                    "status_novo_id": status.id,
+                    "mensagem": msg,
+                    "sucesso": sucesso,
+                })
+
+            db.bulk_insert_mappings(HistoricoProcessamento, historicos)
             db.commit()
-            
-            if historico_principal:
-                db.refresh(historico_principal)
-                logger.info(
-                    f"Status atualizado para {novo_status} — "
-                    f"{len(distribuicoes_para_atualizar)} distribuição(ões) afetada(s), "
-                    f"histórico principal ID {historico_principal.id}"
-                )
-                return historico_principal
-            
-            # Fallback: se a distribuição principal já estava no status correto
-            return None
-            
+
+            # Buscar o histórico principal para retorno
+            historico_principal = db.query(HistoricoProcessamento).filter(
+                HistoricoProcessamento.distribuicao_material_id == distribuicao_id,
+                HistoricoProcessamento.status_novo_id == status.id,
+            ).order_by(HistoricoProcessamento.data_evento.desc()).first()
+
+            logger.info(
+                f"Status atualizado para {novo_status} — "
+                f"{len(ids_para_atualizar)} distribuição(ões) afetada(s)"
+            )
+            return historico_principal
+
         except Exception as e:
             db.rollback()
             logger.error(f"Erro ao atualizar status da distribuição {distribuicao_id}: {str(e)}")
             raise
-    
+
+    @staticmethod
+    def atualizar_status_em_lote(
+        db: Session,
+        distribuicoes_ids: List[int],
+        novo_status: str,
+        mensagem: str,
+        sucesso: bool = True
+    ) -> int:
+        """
+        Atualiza o status de múltiplas distribuições em uma única operação
+        de banco de dados (sem loop de transações individuais).
+
+        Inclui a lógica de cascata capa/miolo para cada distribuição informada.
+
+        Args:
+            db: Sessão do banco de dados
+            distribuicoes_ids: Lista de IDs de distribuição a atualizar
+            novo_status: Código do novo status
+            mensagem: Mensagem descritiva do evento
+            sucesso: Se a operação foi bem-sucedida
+
+        Returns:
+            Número de distribuições efetivamente atualizadas
+        """
+        if not distribuicoes_ids:
+            return 0
+
+        logger.info(
+            f"Atualização em lote: {len(distribuicoes_ids)} distribuições → {novo_status}"
+        )
+
+        try:
+            # Obter status via cache
+            status = OrcamentoService._get_or_create_status(db, novo_status)
+
+            # -- 1. Buscar todas as distribuições informadas + suas relacionadas (cascata) --
+            # Busca em uma única query para não ter N+1
+            distribuicoes_base = db.query(
+                DistribuicaoMaterial.id,
+                DistribuicaoMaterial.status_id,
+                DistribuicaoMaterial.formulario_id,
+                DistribuicaoMaterial.unidade_escolar_id,
+            ).filter(DistribuicaoMaterial.id.in_(distribuicoes_ids)).all()
+
+            if not distribuicoes_base:
+                logger.warning(f"Nenhuma distribuição encontrada para os IDs: {distribuicoes_ids}")
+                return 0
+
+            # Buscar pares capa/miolo para todas as distribuições de uma vez
+            chaves_cascata = [
+                (d.formulario_id, d.unidade_escolar_id)
+                for d in distribuicoes_base
+                if d.formulario_id and d.unidade_escolar_id
+            ]
+
+            # IDs já conhecidos (os passados + suas cascatas)
+            todos_ids_set: set = set(distribuicoes_ids)
+            status_map: Dict[int, Optional[int]] = {d.id: d.status_id for d in distribuicoes_base}
+
+            if chaves_cascata:
+                # Construir filtro para todas as chaves (formulario_id, unidade_escolar_id)
+                from sqlalchemy import tuple_
+                relacionadas = db.query(
+                    DistribuicaoMaterial.id,
+                    DistribuicaoMaterial.status_id,
+                ).filter(
+                    tuple_(
+                        DistribuicaoMaterial.formulario_id,
+                        DistribuicaoMaterial.unidade_escolar_id
+                    ).in_(chaves_cascata),
+                    DistribuicaoMaterial.id.notin_(distribuicoes_ids)
+                ).all()
+
+                for r in relacionadas:
+                    todos_ids_set.add(r.id)
+                    status_map[r.id] = r.status_id
+                    logger.debug(f"Cascata: incluindo distribuição {r.id}")
+
+            # -- 2. Filtrar somente os que precisam mudar --
+            ids_para_atualizar = [
+                i for i in todos_ids_set
+                if status_map.get(i) != status.id
+            ]
+
+            if not ids_para_atualizar:
+                logger.debug(f"Todas as distribuições já estão no status {novo_status}")
+                return 0
+
+            # -- 3. Bulk UPDATE em uma única query --
+            db.execute(
+                update(DistribuicaoMaterial)
+                .where(DistribuicaoMaterial.id.in_(ids_para_atualizar))
+                .values(status_id=status.id)
+            )
+
+            # -- 4. Bulk INSERT de histórico --
+            ids_originais = set(distribuicoes_ids)
+            historicos: List[Dict[str, Any]] = []
+            for dist_id in ids_para_atualizar:
+                if dist_id in ids_originais:
+                    msg = mensagem
+                else:
+                    msg = f"[Cascata] {mensagem}"
+                historicos.append({
+                    "distribuicao_material_id": dist_id,
+                    "status_anterior_id": status_map.get(dist_id),
+                    "status_novo_id": status.id,
+                    "mensagem": msg,
+                    "sucesso": sucesso,
+                })
+
+            db.bulk_insert_mappings(HistoricoProcessamento, historicos)
+            db.commit()
+
+            logger.info(
+                f"Lote concluído: {len(ids_para_atualizar)} distribuições → {novo_status} "
+                f"({len(ids_para_atualizar) - len(distribuicoes_ids)} via cascata)"
+            )
+            return len(ids_para_atualizar)
+
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Erro na atualização em lote de status: {str(e)}")
+            raise
+
     @staticmethod
     def obter_distribuicoes_por_escola(db: Session, escola_id: int, 
                                      ids_produtos: List[int]) -> List[DistribuicaoMaterial]:

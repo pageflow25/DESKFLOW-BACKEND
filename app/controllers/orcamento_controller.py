@@ -102,26 +102,21 @@ class OrcamentoController:
         sucesso: bool = True
     ):
         """
-        Atualiza o status de múltiplas distribuições.
-        
-        Args:
-            db: Sessão do banco de dados
-            distribuicoes_ids: Lista de IDs de distribuição
-            novo_status: Novo status a ser definido
-            mensagem: Mensagem descritiva do evento
-            sucesso: Se a operação foi bem-sucedida
+        Atualiza o status de múltiplas distribuições em uma única operação de banco.
+        Inclui lógica de cascata capa/miolo via atualizar_status_em_lote.
         """
-        for dist_id in distribuicoes_ids:
-            try:
-                OrcamentoService.atualizar_status_distribuicao(
-                    db=db,
-                    distribuicao_id=dist_id,
-                    novo_status=novo_status,
-                    mensagem=mensagem,
-                    sucesso=sucesso
-                )
-            except Exception as e:
-                logger.warning(f"Erro ao atualizar status da distribuição {dist_id}: {e}")
+        if not distribuicoes_ids:
+            return
+        try:
+            OrcamentoService.atualizar_status_em_lote(
+                db=db,
+                distribuicoes_ids=distribuicoes_ids,
+                novo_status=novo_status,
+                mensagem=mensagem,
+                sucesso=sucesso,
+            )
+        except Exception as e:
+            logger.warning(f"Erro ao atualizar status em lote: {e}")
 
     # ================================================================
     # FASE 01 — GERAR ORÇAMENTO VIA API BREMEN
