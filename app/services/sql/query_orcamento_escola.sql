@@ -339,13 +339,16 @@ SELECT json_build_object(
                                 -- CENÁRIO 1: MIOLO
                                 -- ==========================================================
                                 WHEN (comp_sel.is_miolo IS TRUE OR LOWER(COALESCE(comp_sel.descricao, '')) LIKE '%miolo%') THEN
-                                    json_build_object(
+                                    json_strip_nulls(json_build_object(
                                         'id', comp_sel.id_componente,
                                         'descricao', comp_sel.descricao,
                                         'altura', comp_sel.altura,
                                         'largura', comp_sel.largura,
                                         'quantidade_paginas', COALESCE(comp_sel.quantidade_paginas, 0),
-                                        'idgruposubstratoimpressao', comp_sel.idgruposubstratoimpressao,
+                                        'idgruposubstratoimpressao', CASE
+                                            WHEN UPPER(comp_sel."categoria_Prod") IN ('LIVRETO') THEN NULL
+                                            ELSE comp_sel.idgruposubstratoimpressao
+                                        END,
                                         'gramaturasubstratoimpressao', COALESCE(
                                             comp_sel.gramatura_catalogo,
                                             NULLIF(replace(regexp_replace(comp_sel.gramatura_miolo::text, '[^0-9.,]', '', 'g'), ',', '.'), '')::numeric
@@ -369,7 +372,7 @@ SELECT json_build_object(
                                                 AND rc.especificacao_id = comp_sel.especificacao_id
                                             WHERE bp.id_componente = comp_sel.id_componente
                                         ), '[]'::json)
-                                    )
+                                    ))
 
                                 -- ==========================================================
                                 -- CENÁRIO 2: CAPA (Ajuste para ILIKE e prioridade de dados)
