@@ -66,7 +66,7 @@ especificacoes_unidade AS (
             p.datas_saida IS NULL
             OR NULLIF(dm.data_saida, '')::date = ANY(p.datas_saida)
             OR NULLIF(dm.data_saida, '') IS NULL
-        ) and dm.status_distribuicao = 'pendente'
+        ) and dm.status_distribuicao = 'pendente' and dm.status_distribuicao = 'pendente' and dm.status_id = 1
 ),
 
 itens_produto AS (
