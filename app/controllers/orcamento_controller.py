@@ -240,7 +240,7 @@ class OrcamentoController:
                 logger.warning("Resposta da aprovação veio como lista. Normalizando.")
                 resposta_aprovacao = {"data": resposta_aprovacao}
 
-            # Salvar na tabela aprovacao_api (1 linha por OP)
+            # Salvar na tabela aprovacao_api (1 linha por OP, ou 1 por distribuição se sem OP)
             registros_aprovacao = OrcamentoService.salvar_aprovacao_api(
                 db=db,
                 id_orcamento=id_orcamento,
@@ -249,20 +249,33 @@ class OrcamentoController:
                 payload_orcamento=payload_enviado
             )
 
+            # Verificar se OPs foram geradas (id_ops=None significa apenas pedido de venda)
+            tem_op = any(r.id_ops is not None for r in registros_aprovacao)
+
+            if tem_op:
+                status_aprovacao = "orcamento_aprovado"
+                msg_status = f"Orçamento {id_orcamento} aprovado - {len(registros_aprovacao)} OPs geradas"
+            else:
+                status_aprovacao = "pedido_venda_gerado"
+                msg_status = f"Orçamento {id_orcamento} aprovado como pedido de venda (sem OP)"
+                logger.info(f"Orçamento {id_orcamento}: sem OP gerada, FASE 03 será ignorada.")
+
             # Atualizar status das distribuições
             OrcamentoController._atualizar_status_distribuicoes(
                 db, distribuicoes_ids,
-                novo_status="orcamento_aprovado",
-                mensagem=f"Orçamento {id_orcamento} aprovado - {len(registros_aprovacao)} OPs geradas"
+                novo_status=status_aprovacao,
+                mensagem=msg_status
             )
 
             return {
                 "aprovado": True,
+                "tem_op": tem_op,
                 "detalhe": {
                     "fase": "02_aprovacao",
                     "id_orcamento": id_orcamento,
-                    "ops_count": len(registros_aprovacao),
+                    "ops_count": len([r for r in registros_aprovacao if r.id_ops is not None]),
                     "distribuicoes_ids": distribuicoes_ids,
+                    "gerar_op": gerar_op,
                     "status": "sucesso"
                 }
             }
@@ -463,8 +476,8 @@ class OrcamentoController:
                         else:
                             resultado.erros.append(fase02["erro"])
 
-                    # FASE 03 — Baixar arquivos (se configurado e aprovado)
-                    if request.baixar_arquivos and resultado.aprovados > 0:
+                    # FASE 03 — Baixar arquivos (somente se aprovado E com OP gerada)
+                    if request.baixar_arquivos and fase02.get("tem_op", False):
                         fase03 = await OrcamentoController._fase03_baixar_arquivos(
                             db, id_orcamento, distribuicoes_ids
                         )
