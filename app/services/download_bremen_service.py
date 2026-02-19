@@ -226,7 +226,7 @@ class DownloadBremenService:
                     arquivos_baixados += 1
                     
                     logger.info(
-                        f"✅ Baixado complementar ({tipo_complementar}): "
+                        f"✅ Baixado complementar ({arquivo_complementar.tipo_arquivo}): "
                         f"{arquivo_complementar.nome} ({tamanho_comp} bytes)"
                     )
                 else:
@@ -235,7 +235,7 @@ class DownloadBremenService:
                     )
             else:
                 logger.debug(
-                    f"OP {op_id}: sem arquivo complementar ({tipo_complementar}) "
+                    f"OP {op_id}: sem arquivo complementar "
                     f"no formulário {arquivo_principal.formulario_id}"
                 )
         
