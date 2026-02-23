@@ -39,7 +39,7 @@ class PerguntaGeral(BaseModel):
 class ItemOrcamento(BaseModel):
     """Item do orçamento"""
     id_produto: int
-    descricao: Optional[str] = "Sem descrição"
+    titulo: Optional[str] = "Sem descrição"
     quantidade: int
     usar_listapreco: int = 1
     manter_estrutura_mod_produto: int = 1
