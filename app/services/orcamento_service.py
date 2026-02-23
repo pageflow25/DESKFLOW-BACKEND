@@ -21,15 +21,17 @@ class OrcamentoService:
     """Service para operações de orçamento"""
 
     # ================================================================
-    # CACHE DE STATUS — evita N queries repetidas para o mesmo código
+    # CACHE DE STATUS — armazena apenas o ID (int) para evitar objetos
+    # ORM detached entre sessões diferentes
     # ================================================================
-    _status_cache: Dict[str, StatusDeskflowPedido] = {}
+    _status_cache: Dict[str, int] = {}
 
     @classmethod
-    def _get_or_create_status(cls, db: Session, codigo: str) -> StatusDeskflowPedido:
+    def _get_or_create_status(cls, db: Session, codigo: str) -> int:
         """
-        Retorna o StatusDeskflowPedido pelo código.
-        Usa cache em memória para evitar queries repetidas.
+        Retorna o ID do StatusDeskflowPedido pelo código.
+        Usa cache em memória (apenas o ID, nunca o objeto ORM) para evitar
+        erros de instância detached entre sessões diferentes.
         """
         if codigo in cls._status_cache:
             return cls._status_cache[codigo]
@@ -47,8 +49,8 @@ class OrcamentoService:
             db.flush()
             logger.info(f"Novo status criado: {codigo}")
 
-        cls._status_cache[codigo] = status
-        return status
+        cls._status_cache[codigo] = status.id
+        return status.id
 
     @classmethod
     def _invalidar_cache_status(cls):
@@ -417,7 +419,7 @@ class OrcamentoService:
             # Filtrar somente os que precisam mudar (excluir os que já estão no status alvo)
             ids_para_atualizar = [
                 i for i in todos_ids
-                if status_anteriores.get(i) != status.id
+                if status_anteriores.get(i) != status
             ]
 
             if not ids_para_atualizar:
@@ -428,7 +430,7 @@ class OrcamentoService:
             db.execute(
                 update(DistribuicaoMaterial)
                 .where(DistribuicaoMaterial.id.in_(ids_para_atualizar))
-                .values(status_id=status.id)
+                .values(status_id=status)
             )
 
             # Criar os registros de histórico em bulk
@@ -440,7 +442,7 @@ class OrcamentoService:
                 historicos.append({
                     "distribuicao_material_id": dist_id,
                     "status_anterior_id": status_anteriores.get(dist_id),
-                    "status_novo_id": status.id,
+                    "status_novo_id": status,
                     "mensagem": msg,
                     "sucesso": sucesso,
                 })
@@ -451,7 +453,7 @@ class OrcamentoService:
             # Buscar o histórico principal para retorno
             historico_principal = db.query(HistoricoProcessamento).filter(
                 HistoricoProcessamento.distribuicao_material_id == distribuicao_id,
-                HistoricoProcessamento.status_novo_id == status.id,
+                HistoricoProcessamento.status_novo_id == status,
             ).order_by(HistoricoProcessamento.data_evento.desc()).first()
 
             logger.info(
@@ -546,7 +548,7 @@ class OrcamentoService:
             # -- 2. Filtrar somente os que precisam mudar --
             ids_para_atualizar = [
                 i for i in todos_ids_set
-                if status_map.get(i) != status.id
+                if status_map.get(i) != status
             ]
 
             if not ids_para_atualizar:
@@ -557,7 +559,7 @@ class OrcamentoService:
             db.execute(
                 update(DistribuicaoMaterial)
                 .where(DistribuicaoMaterial.id.in_(ids_para_atualizar))
-                .values(status_id=status.id)
+                .values(status_id=status)
             )
 
             # -- 4. Bulk INSERT de histórico --
@@ -571,7 +573,7 @@ class OrcamentoService:
                 historicos.append({
                     "distribuicao_material_id": dist_id,
                     "status_anterior_id": status_map.get(dist_id),
-                    "status_novo_id": status.id,
+                    "status_novo_id": status,
                     "mensagem": msg,
                     "sucesso": sucesso,
                 })
