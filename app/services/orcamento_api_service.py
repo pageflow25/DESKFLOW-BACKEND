@@ -133,7 +133,7 @@ class OrcamentoAPIService:
                 "itens": [
                     {
                         "id_produto": item.id_produto,
-                        "descricao": item.descricao or f"Produto {item.id_produto}",
+                        "descricao": item.titulo or f"Produto {item.id_produto}",
                         "quantidade": item.quantidade,
                         "usar_listapreco": item.usar_listapreco,
                         "manter_estrutura_mod_produto": item.manter_estrutura_mod_produto,
