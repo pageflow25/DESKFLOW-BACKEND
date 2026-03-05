@@ -1,5 +1,5 @@
 -- Query para geração de orçamentos por unidade escolar
--- Parâmetros: :escola_id, :ids_produtos, :datas_saida, :divisoes_logistica, :dias_uteis_filtro
+-- Parâmetros: :escola_id, :ids_produtos, :datas_saida, :divisoes_logistica, :dias_uteis_filtro, :ids_formularios, :status_ids
 
 WITH parametros AS (
     SELECT
@@ -8,7 +8,8 @@ WITH parametros AS (
         CAST(:datas_saida AS date[]) AS datas_saida,
         CAST(:divisoes_logistica AS text[]) AS divisoes_logistica, 
         CAST(:dias_uteis_filtro AS int[]) AS dias_uteis_filtro,
-        NULL::integer[] AS ids_formularios
+        CAST(:ids_formularios AS int[]) AS ids_formularios,
+        CAST(:status_ids AS int[]) AS status_ids
 ),
 
 unidades_filtradas AS (
@@ -67,7 +68,8 @@ especificacoes_unidade AS (
             p.datas_saida IS NULL
             OR NULLIF(dm.data_saida, '')::date = ANY(p.datas_saida)
             OR NULLIF(dm.data_saida, '') IS NULL
-        ) AND dm.status_distribuicao = 'pendente' AND dm.status_id = 1
+        ) 
+        AND dm.status_id = ANY(p.status_ids)
         AND (p.ids_formularios IS NULL OR ap.formulario_id = ANY(p.ids_formularios))
 ),
 
@@ -260,10 +262,7 @@ SELECT json_build_object(
                                         'altura', comp_sel.altura,
                                         'largura', comp_sel.largura,
                                         'quantidade_paginas', COALESCE(comp_sel.quantidade_paginas, 0),
-                                        'idgruposubstratoimpressao', CASE
-                                            WHEN UPPER(comp_sel."categoria_Prod") IN ('LIVRETO') THEN NULL
-                                            ELSE comp_sel.idgruposubstratoimpressao
-                                        END,
+                                        'idgruposubstratoimpressao',  comp_sel.idgruposubstratoimpressao,
                                         'gramaturasubstratoimpressao', COALESCE(
                                             comp_sel.gramatura_catalogo,
                                             NULLIF(replace(regexp_replace(comp_sel.gramatura_miolo::text, '[^0-9.,]', '', 'g'), ',', '.'), '')::numeric

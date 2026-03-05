@@ -39,6 +39,8 @@ def verify_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
 async def get_pedidos_escola_cascata(
     escola_id: int,
     tipo_formulario: str = Query(default='MEMOREX', description="Tipo de formulário a filtrar"),
+    ids_formularios: str = Query(default=None, description="IDs de formulários separados por vírgula (ex: 1,2,3)"),
+    status_ids: str = Query(default=None, description="IDs de status separados por vírgula (ex: 1,2,3). Padrão: 1"),
     db: Session = Depends(get_db),
     user_data: dict = Depends(verify_admin)
 ):
@@ -49,5 +51,25 @@ async def get_pedidos_escola_cascata(
     Args:
         escola_id: ID da escola
         tipo_formulario: Tipo de formulário (padrão: 'MEMOREX')
+        ids_formularios: IDs de formulários separados por vírgula (opcional)
+        status_ids: IDs de status separados por vírgula (padrão: 1)
     """
-    return await CascataController.get_pedidos_escola(db, escola_id, tipo_formulario)
+    # Converter string de IDs para lista de inteiros
+    parsed_ids = None
+    if ids_formularios:
+        try:
+            parsed_ids = [int(x.strip()) for x in ids_formularios.split(',') if x.strip()]
+        except ValueError:
+            from fastapi import HTTPException as HTTPExc
+            raise HTTPExc(status_code=400, detail="ids_formularios deve conter apenas números separados por vírgula")
+    
+    # Converter string de status_ids para lista de inteiros
+    parsed_status_ids = None
+    if status_ids:
+        try:
+            parsed_status_ids = [int(x.strip()) for x in status_ids.split(',') if x.strip()]
+        except ValueError:
+            from fastapi import HTTPException as HTTPExc
+            raise HTTPExc(status_code=400, detail="status_ids deve conter apenas números separados por vírgula")
+    
+    return await CascataController.get_pedidos_escola(db, escola_id, tipo_formulario, parsed_ids, parsed_status_ids)

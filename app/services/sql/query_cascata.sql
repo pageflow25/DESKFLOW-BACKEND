@@ -1,5 +1,5 @@
 -- Query para buscar pedidos de uma escola em estrutura hierárquica (cascata)
--- Parâmetros: :escola_id, :tipo_formulario
+-- Parâmetros: :escola_id, :tipo_formulario, :ids_formularios, :status_ids
 
 WITH dados_normalizados AS (
     SELECT
@@ -36,7 +36,9 @@ WITH dados_normalizados AS (
         ON e.id_produto = b.id_produto
     WHERE UPPER(f.tipo_formulario) = UPPER(:tipo_formulario)
         AND uc.escola_id = :escola_id
-        AND distri.status_id = 1
+        AND distri.status_id = ANY(CAST(:status_ids AS int[]))
+        AND (CAST(:ids_formularios AS int[]) IS NULL OR f.id = ANY(CAST(:ids_formularios AS int[]))
+        )
 ),
 
 -- NÍVEL 4: ARQUIVOS

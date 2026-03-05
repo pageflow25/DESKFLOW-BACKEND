@@ -1,6 +1,7 @@
 import asyncio
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from typing import Dict, Any, List
 from ..config.logging_config import get_logger
 from ..schemas.orcamento import (
@@ -99,7 +100,8 @@ class OrcamentoController:
         distribuicoes_ids: List[int], 
         novo_status: str, 
         mensagem: str, 
-        sucesso: bool = True
+        sucesso: bool = True,
+        grupo_lote_id: int = None
     ):
         """
         Atualiza o status de múltiplas distribuições em uma única operação de banco.
@@ -114,6 +116,7 @@ class OrcamentoController:
                 novo_status=novo_status,
                 mensagem=mensagem,
                 sucesso=sucesso,
+                grupo_lote_id=grupo_lote_id,
             )
         except Exception as e:
             logger.warning(f"Erro ao atualizar status em lote: {e}")
@@ -127,7 +130,8 @@ class OrcamentoController:
         db: Session,
         api_service: OrcamentoAPIService,
         orcamento: OrcamentoResponse,
-        modo: str
+        modo: str,
+        grupo_lote_id: int = None
     ) -> Dict[str, Any]:
         """
         FASE 01 — Envia um orçamento para a API Bremen e salva na tabela orcamento_api.
@@ -176,7 +180,8 @@ class OrcamentoController:
         OrcamentoController._atualizar_status_distribuicoes(
             db, distribuicoes_ids,
             novo_status="orcamento_gerado",
-            mensagem=f"Orçamento gerado via API - ID: {id_orcamento}"
+            mensagem=f"Orçamento gerado via API - ID: {id_orcamento}",
+            grupo_lote_id=grupo_lote_id
         )
 
         return {
@@ -205,7 +210,8 @@ class OrcamentoController:
         data_entrega: str,
         distribuicoes_ids: List[int],
         payload_enviado: Dict[str, Any],
-        gerar_op: bool = True
+        gerar_op: bool = True,
+        grupo_lote_id: int = None
     ) -> Dict[str, Any]:
         """
         FASE 02 — Aprova um orçamento na API Bremen e salva na tabela aprovacao_api.
@@ -264,7 +270,8 @@ class OrcamentoController:
             OrcamentoController._atualizar_status_distribuicoes(
                 db, distribuicoes_ids,
                 novo_status=status_aprovacao,
-                mensagem=msg_status
+                mensagem=msg_status,
+                grupo_lote_id=grupo_lote_id
             )
 
             return {
@@ -289,7 +296,8 @@ class OrcamentoController:
                 db, distribuicoes_ids,
                 novo_status="erro_aprovacao",
                 mensagem=error_msg,
-                sucesso=False
+                sucesso=False,
+                grupo_lote_id=grupo_lote_id
             )
 
             return {
@@ -311,7 +319,8 @@ class OrcamentoController:
     async def _fase03_baixar_arquivos(
         db: Session,
         id_orcamento: int,
-        distribuicoes_ids: List[int]
+        distribuicoes_ids: List[int],
+        grupo_lote_id: int = None
     ) -> Dict[str, Any]:
         """
         FASE 03 — Baixa e organiza os arquivos PDF de um orçamento aprovado.
@@ -343,7 +352,8 @@ class OrcamentoController:
             OrcamentoController._atualizar_status_distribuicoes(
                 db, distribuicoes_ids,
                 novo_status="arquivos_baixados",
-                mensagem=f"Arquivos baixados - {total_downloads} arquivos"
+                mensagem=f"Arquivos baixados - {total_downloads} arquivos",
+                grupo_lote_id=grupo_lote_id
             )
 
             detalhe = {
@@ -416,6 +426,21 @@ class OrcamentoController:
         api_service = OrcamentoAPIService()
         modo = getattr(request, 'modo_agrupamento', 'unidade')
 
+        # Gerar grupo_lote_id sequencial a partir do banco de dados
+        grupo_lote_id = getattr(request, 'grupo_lote_id', None)
+        if not grupo_lote_id:
+            try:
+                db.execute(text("CREATE SEQUENCE IF NOT EXISTS lote_id_seq START WITH 1 INCREMENT BY 1"))
+                row = db.execute(text("SELECT nextval('lote_id_seq')")).fetchone()
+                grupo_lote_id = row[0]
+                logger.info(f"Grupo lote ID gerado sequencialmente: {grupo_lote_id}")
+            except Exception as e:
+                logger.warning(f"Erro ao gerar lote_id via sequence: {e}")
+                import random
+                grupo_lote_id = random.randint(100000, 999999)
+
+        resultado.grupo_lote_id = grupo_lote_id
+
         try:
             # Gerar orçamentos locais (via SQL)
             orcamentos_locais = await OrcamentoController.gerar_orcamento(
@@ -426,6 +451,8 @@ class OrcamentoController:
                     datas_saida=request.datas_saida,
                     divisoes_logistica=request.divisoes_logistica,
                     dias_uteis_filtro=request.dias_uteis_filtro,
+                    ids_formularios=request.ids_formularios,
+                    status_ids=request.status_ids,
                     modo_agrupamento=modo
                 )
             )
@@ -451,7 +478,7 @@ class OrcamentoController:
                 try:
                     # FASE 01 — Enviar orçamento
                     fase01 = await OrcamentoController._fase01_enviar_orcamento(
-                        db, api_service, orcamento, modo
+                        db, api_service, orcamento, modo, grupo_lote_id=grupo_lote_id
                     )
                     resultado.enviados += 1
                     resultado.salvos += 1
@@ -467,7 +494,8 @@ class OrcamentoController:
                         fase02 = await OrcamentoController._fase02_aprovar_orcamento(
                             db, api_service, id_orcamento,
                             request.data_entrega, distribuicoes_ids, payload_enviado,
-                            gerar_op=gerar_op
+                            gerar_op=gerar_op,
+                            grupo_lote_id=grupo_lote_id
                         )
                         resultado.detalhes.append(fase02["detalhe"])
 
@@ -479,7 +507,7 @@ class OrcamentoController:
                     # FASE 03 — Baixar arquivos (somente se aprovado E com OP gerada)
                     if request.baixar_arquivos and fase02.get("tem_op", False):
                         fase03 = await OrcamentoController._fase03_baixar_arquivos(
-                            db, id_orcamento, distribuicoes_ids
+                            db, id_orcamento, distribuicoes_ids, grupo_lote_id=grupo_lote_id
                         )
                         resultado.downloads += fase03["downloads"]
                         resultado.erros.extend(fase03["erros"])

@@ -92,7 +92,9 @@ class OrcamentoService:
                 'ids_produtos': request.ids_produtos,
                 'datas_saida': [d.isoformat() for d in request.datas_saida],
                 'divisoes_logistica': request.divisoes_logistica,
-                'dias_uteis_filtro': request.dias_uteis_filtro
+                'dias_uteis_filtro': request.dias_uteis_filtro,
+                'ids_formularios': getattr(request, 'ids_formularios', None),
+                'status_ids': getattr(request, 'status_ids', None) or [1]
             }
             
             # Executar query
@@ -473,7 +475,8 @@ class OrcamentoService:
         distribuicoes_ids: List[int],
         novo_status: str,
         mensagem: str,
-        sucesso: bool = True
+        sucesso: bool = True,
+        grupo_lote_id: int = None
     ) -> int:
         """
         Atualiza o status de múltiplas distribuições em uma única operação
@@ -487,6 +490,7 @@ class OrcamentoService:
             novo_status: Código do novo status
             mensagem: Mensagem descritiva do evento
             sucesso: Se a operação foi bem-sucedida
+            grupo_lote_id: ID do grupo selecionado ao disparar o lote (opcional)
 
         Returns:
             Número de distribuições efetivamente atualizadas
@@ -556,10 +560,13 @@ class OrcamentoService:
                 return 0
 
             # -- 3. Bulk UPDATE em uma única query --
+            update_values = {"status_id": status}
+            if grupo_lote_id is not None:
+                update_values["grupo_id"] = grupo_lote_id
             db.execute(
                 update(DistribuicaoMaterial)
                 .where(DistribuicaoMaterial.id.in_(ids_para_atualizar))
-                .values(status_id=status)
+                .values(**update_values)
             )
 
             # -- 4. Bulk INSERT de histórico --
@@ -570,13 +577,16 @@ class OrcamentoService:
                     msg = mensagem
                 else:
                     msg = f"[Cascata] {mensagem}"
-                historicos.append({
+                hist_entry = {
                     "distribuicao_material_id": dist_id,
                     "status_anterior_id": status_map.get(dist_id),
                     "status_novo_id": status,
                     "mensagem": msg,
                     "sucesso": sucesso,
-                })
+                }
+                if grupo_lote_id is not None:
+                    hist_entry["grupo_lote_id"] = grupo_lote_id
+                historicos.append(hist_entry)
 
             db.bulk_insert_mappings(HistoricoProcessamento, historicos)
             db.commit()
