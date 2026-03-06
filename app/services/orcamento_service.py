@@ -560,14 +560,37 @@ class OrcamentoService:
                 return 0
 
             # -- 3. Bulk UPDATE em uma única query --
-            update_values = {"status_id": status}
             if grupo_lote_id is not None:
-                update_values["grupo_id"] = grupo_lote_id
-            db.execute(
-                update(DistribuicaoMaterial)
-                .where(DistribuicaoMaterial.id.in_(ids_para_atualizar))
-                .values(**update_values)
-            )
+                # Raw SQL para atualizar grupo_id E acumular grupo_lote_ids
+                # sem sobrescrever o histórico de lotes anteriores
+                db.execute(
+                    text("""
+                        UPDATE distribuicao_materiais
+                        SET
+                            status_id = :status_id,
+                            grupo_id  = :lote_id,
+                            grupo_lote_ids = CASE
+                                WHEN grupo_lote_ids IS NULL OR grupo_lote_ids = ''
+                                    THEN jsonb_build_array(:lote_id)::text
+                                WHEN grupo_lote_ids::jsonb @> jsonb_build_array(:lote_id)
+                                    THEN grupo_lote_ids
+                                ELSE
+                                    (grupo_lote_ids::jsonb || jsonb_build_array(:lote_id))::text
+                            END
+                        WHERE id = ANY(:ids)
+                    """),
+                    {
+                        "status_id": status,
+                        "lote_id": grupo_lote_id,
+                        "ids": ids_para_atualizar,
+                    },
+                )
+            else:
+                db.execute(
+                    update(DistribuicaoMaterial)
+                    .where(DistribuicaoMaterial.id.in_(ids_para_atualizar))
+                    .values(status_id=status)
+                )
 
             # -- 4. Bulk INSERT de histórico --
             ids_originais = set(distribuicoes_ids)

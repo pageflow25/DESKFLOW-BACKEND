@@ -21,7 +21,8 @@ class DistribuicaoMaterial(Base):
     __tablename__ = "distribuicao_materiais"
     
     id = Column(Integer, primary_key=True, index=True)
-    grupo_id = Column(Integer, nullable=True, comment="ID do grupo relacionado à distribuição - pode ser nulo para distribuições por turma")
+    grupo_id = Column(Integer, nullable=True, comment="ID do grupo/lote mais recente atribuído à distribuição")
+    grupo_lote_ids = Column(Text, nullable=True, comment="JSON array com histórico de todos os grupo_lote_ids atribuídos — nunca sobrescreve, apenas acumula")
     quantidade = Column(Integer, nullable=False, default=0, comment="Quantidade de material destinada à unidade")
     descricao_material = Column(Text, nullable=True, comment="Descrição específica do material para esta unidade")
     observacoes = Column(Text, nullable=True, comment="Observações específicas para esta distribuição")
