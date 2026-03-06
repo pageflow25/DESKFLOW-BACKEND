@@ -9,11 +9,18 @@ class ArquivoInfo(BaseModel):
     paginas: Optional[int] = None
 
 
+class UnidadeInfo(BaseModel):
+    """Informações de unidade escolar"""
+    unidade: str
+    quantidade: int
+    arquivos: list[ArquivoInfo]
+
+
 class DataInfo(BaseModel):
     """Informações de data de saída"""
     data_saida: str
     quantidade: int
-    arquivos: list[ArquivoInfo]
+    unidades: list[UnidadeInfo]
 
 
 class ProdutoInfo(BaseModel):

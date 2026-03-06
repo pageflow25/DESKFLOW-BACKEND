@@ -15,6 +15,7 @@ WITH parametros AS (
 unidades_filtradas AS (
     SELECT
         ue.id,
+        ue.nome,
         ue.cliente_id,
         ue.forma_pagamento,
         ue.escola_id,
@@ -85,6 +86,7 @@ itens_produto AS (
         (SELECT uf.client_id_venda FROM unidades_filtradas uf WHERE uf.id = eu.unidade_id LIMIT 1) AS client_id_venda,
         (SELECT uf.vendedor_id_venda FROM unidades_filtradas uf WHERE uf.id = eu.unidade_id LIMIT 1) AS vendedor_id_venda,
         (SELECT uf.forma_pagamento FROM unidades_filtradas uf WHERE uf.id = eu.unidade_id LIMIT 1) AS forma_pagamento_venda,
+        (SELECT uf.nome FROM unidades_filtradas uf WHERE uf.id = eu.unidade_id LIMIT 1) AS nome_unidade,
         
         -- PEGA O ID DA DISTRIBUIÇÃO POR TIPO DE COMPONENTE
         MAX(CASE WHEN LOWER(eu.tipo_arquivo) = 'miolo' THEN eu.id_distribuicao END) AS id_distribuicao_miolo,
@@ -240,6 +242,7 @@ SELECT json_build_object(
         'id_cliente', ip.cliente_id,
         'id_vendedor', ip.vendedor_id_venda,
         'id_forma_pagamento', ip.forma_pagamento_venda,
+        'nome_unidade', ip.nome_unidade,
         'itens', COALESCE(
             json_agg(
                 json_build_object(
@@ -424,5 +427,5 @@ SELECT json_build_object(
     )
 )
 FROM itens_produto ip
-GROUP BY ip.unidade_id, ip.cliente_id, ip.tipo_agrupamento, ip.client_id_venda, ip.vendedor_id_venda, ip.forma_pagamento_venda
+GROUP BY ip.unidade_id, ip.cliente_id, ip.tipo_agrupamento, ip.client_id_venda, ip.vendedor_id_venda, ip.forma_pagamento_venda, ip.nome_unidade
 ORDER BY ip.unidade_id, ip.tipo_agrupamento DESC;

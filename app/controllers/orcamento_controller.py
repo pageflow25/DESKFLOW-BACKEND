@@ -378,6 +378,11 @@ class OrcamentoController:
         except Exception as e:
             error_msg = f"Erro na FASE 03 (download) para orçamento {id_orcamento}: {str(e)}"
             logger.error(error_msg)
+            try:
+                db.rollback()
+                logger.debug("Rollback realizado após erro na FASE 03")
+            except Exception:
+                pass
 
             return {
                 "downloads": 0,
@@ -517,6 +522,11 @@ class OrcamentoController:
                     error_msg = f"Erro na FASE 01 (orçamento) para índice {idx}: {str(e)}"
                     logger.error(error_msg)
                     resultado.erros.append(error_msg)
+                    try:
+                        db.rollback()
+                        logger.debug(f"Rollback realizado após erro no orçamento {idx}")
+                    except Exception:
+                        pass
 
             # Log final
             logger.info("=" * 60)

@@ -17,6 +17,7 @@ WITH parametros AS (
 unidades_filtradas AS (
     SELECT
         ue.id,
+        ue.nome,
         ue.cliente_id,
         ue.forma_pagamento,
         ue.escola_id,
