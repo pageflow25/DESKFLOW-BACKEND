@@ -1,7 +1,7 @@
 -- Query para geração de orçamentos AGRUPADOS POR ESCOLA (soma quantidades de todas as unidades)
 -- Diferença do modo "por unidade": aqui agrupa tudo da escola em um único orçamento
 -- Usa ids_distribuicao (array) em vez de id_distribuicao (único) nos itens
--- Parâmetros: :escola_id, :ids_produtos, :datas_saida, :divisoes_logistica, :dias_uteis_filtro
+-- Parâmetros: :escola_id, :ids_produtos, :datas_saida, :divisoes_logistica, :dias_uteis_filtro, :ids_formularios, :status_ids
 
 WITH parametros AS (
     SELECT
@@ -9,12 +9,15 @@ WITH parametros AS (
         CAST(:ids_produtos AS int[]) AS ids_produtos, 
         CAST(:datas_saida AS date[]) AS datas_saida,
         CAST(:divisoes_logistica AS text[]) AS divisoes_logistica, 
-        CAST(:dias_uteis_filtro AS int[]) AS dias_uteis_filtro 
+        CAST(:dias_uteis_filtro AS int[]) AS dias_uteis_filtro,
+        CAST(:ids_formularios AS int[]) AS ids_formularios,
+        CAST(:status_ids AS int[]) AS status_ids
 ),
 
 unidades_filtradas AS (
     SELECT
         ue.id,
+        ue.nome,
         ue.cliente_id,
         ue.forma_pagamento,
         ue.escola_id,
@@ -65,8 +68,8 @@ especificacoes_unidade AS (
             p.datas_saida IS NULL
             OR NULLIF(dm.data_saida, '')::date = ANY(p.datas_saida)
         )
-        AND dm.status_distribuicao = 'pendente'
-        AND dm.status_id = 1
+        AND dm.status_id = ANY(p.status_ids)
+        AND (p.ids_formularios IS NULL OR ap.formulario_id = ANY(p.ids_formularios))
 ),
 
 distribuicao_ids AS (
@@ -88,8 +91,8 @@ distribuicao_ids AS (
             p.datas_saida IS NULL
             OR NULLIF(dm.data_saida, '')::date = ANY(p.datas_saida)
         )
-        AND dm.status_distribuicao = 'pendente'
-        AND dm.status_id = 1
+        AND dm.status_id = ANY(p.status_ids)
+        AND (p.ids_formularios IS NULL OR ap.formulario_id = ANY(p.ids_formularios))
 ),
 
 -- Primeiro, agrupa as quantidades únicas por cliente/unidade para evitar duplicação causada pelos JOINs
@@ -347,10 +350,7 @@ SELECT json_build_object(
                                         'altura', comp_sel.altura,
                                         'largura', comp_sel.largura,
                                         'quantidade_paginas', COALESCE(comp_sel.quantidade_paginas, 0),
-                                        'idgruposubstratoimpressao', CASE
-                                            WHEN UPPER(comp_sel."categoria_Prod") IN ('LIVRETO') THEN NULL
-                                            ELSE comp_sel.idgruposubstratoimpressao
-                                        END,
+                                        'idgruposubstratoimpressao', comp_sel.idgruposubstratoimpressao,
                                         'gramaturasubstratoimpressao', COALESCE(
                                             comp_sel.gramatura_catalogo,
                                             NULLIF(replace(regexp_replace(comp_sel.gramatura_miolo::text, '[^0-9.,]', '', 'g'), ',', '.'), '')::numeric

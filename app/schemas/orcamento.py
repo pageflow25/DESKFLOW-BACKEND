@@ -10,6 +10,8 @@ class OrcamentoRequest(BaseModel):
     datas_saida: List[date] = Field(..., min_length=1, description="Lista de datas de saída")
     divisoes_logistica: Optional[List[str]] = Field(None, description="Lista de divisões logísticas (opcional)")
     dias_uteis_filtro: Optional[List[int]] = Field(None, description="Lista de dias úteis (opcional)")
+    ids_formularios: Optional[List[int]] = Field(None, description="Lista de IDs de formulários para filtrar (opcional)")
+    status_ids: Optional[List[int]] = Field(None, description="Lista de status_id para filtrar (padrão: [1])")
     modo_agrupamento: str = Field("unidade", description="Modo de agrupamento: 'unidade' (por unidade) ou 'escola' (agrupado por escola)")
 
 
@@ -79,6 +81,7 @@ class ProcessamentoResultado(BaseModel):
     downloads: int = 0
     erros: List[str] = []
     detalhes: List[dict] = []
+    grupo_lote_id: Optional[int] = Field(None, description="ID sequencial do lote gerado automaticamente")
 
 
 class FluxoOrcamentoRequest(BaseModel):
@@ -93,6 +96,9 @@ class FluxoOrcamentoRequest(BaseModel):
     data_entrega: Optional[str] = Field(None, description="Data de entrega para aprovação (ISO format)")
     baixar_arquivos: bool = Field(False, description="Se deve baixar arquivos após aprovação (FASE 03)")
     gerar_op: bool = Field(True, description="Se deve gerar OP na aprovação (FASE 02). False envia gerar_op=false para a API Bremen.")
+    ids_formularios: Optional[List[int]] = Field(None, description="Lista de IDs de formulários para filtrar (opcional)")
+    status_ids: Optional[List[int]] = Field(None, description="Lista de status_id para filtrar (padrão: [1])")
+    grupo_lote_id: Optional[int] = Field(None, description="ID do grupo selecionado para disparo do lote")
     modo_agrupamento: str = Field("unidade", description="Modo de agrupamento: 'unidade' ou 'escola'")
 
 
@@ -111,4 +117,7 @@ class GerarOrcamentoCompleto(BaseModel):
     data_entrega: Optional[str] = Field(None, description="Data de entrega para aprovação (formato ISO)")
     baixar_arquivos: bool = Field(True, description="Se deve baixar arquivos após aprovação (FASE 03)")
     gerar_op: bool = Field(True, description="Se deve gerar OP na aprovação. False envia gerar_op=false para a API Bremen.")
+    ids_formularios: Optional[List[int]] = Field(None, description="Lista de IDs de formulários para filtrar (opcional)")
+    status_ids: Optional[List[int]] = Field(None, description="Lista de status_id para filtrar (padrão: [1])")
+    grupo_lote_id: Optional[int] = Field(None, description="ID do grupo selecionado para disparo do lote")
     modo_agrupamento: str = Field("unidade", description="Modo de agrupamento: 'unidade' (por unidade) ou 'escola' (agrupado por escola)")
