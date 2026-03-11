@@ -387,7 +387,22 @@ SELECT json_build_object(
                                             'altura', comp_sel.altura,
                                             'largura', comp_sel.largura,
                                             'quantidade_paginas', comp_sel.quantidade_paginas,
-                                            'idgruposubstratoimpressao', comp_sel.idgruposubstratoimpressao,
+                                                'idgruposubstratoimpressao',
+                                                    CASE
+                                                        WHEN UPPER(comp_sel."categoria_Prod") = 'LIVRETO'
+                                                             AND comp_sel.is_capa IS TRUE
+                                                             AND EXISTS (
+                                                                 SELECT 1 FROM componentes c_miolo
+                                                                 WHERE c_miolo.id_produto = comp_sel.id_produto
+                                                                   AND c_miolo.is_miolo IS TRUE
+                                                                   AND (
+                                                                       (ip.pares IS NOT NULL AND c_miolo.pares = ip.pares AND c_miolo.formulario_id = ip.formulario_id)
+                                                                       OR (ip.pares IS NULL AND c_miolo.especificacao_id = ip.especificacao_id)
+                                                                   )
+                                                             )
+                                                        THEN comp_sel.idgruposubstratoimpressao
+                                                        ELSE NULL
+                                                    END,
                                             'gramaturasubstratoimpressao',
                                                 CASE
                                                     -- Verifica se é Livreto (categoria_Prod) E se tem capa e miolo
