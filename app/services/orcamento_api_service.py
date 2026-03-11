@@ -1,11 +1,13 @@
 import httpx
 import json
 import asyncio
-from typing import Dict, Any, List
+from datetime import datetime
+from typing import Dict, Any, List, Optional
 from sqlalchemy.orm import Session
 from ..config.logging_config import get_logger
 from ..config.settings import get_settings
 from ..models.orcamento_api import OrcamentoAPI
+from ..models.distribuicao_material import DistribuicaoMaterial
 from ..schemas.orcamento import OrcamentoResponse
 from .bremen_client import BremenClient
 
@@ -20,6 +22,22 @@ REQUEST_DELAY_SECONDS = 2  # Delay entre requisições para não sobrecarregar A
 
 class OrcamentoAPIService:
     """Service para integração com APIs externas de orçamento Bremen"""
+
+    @staticmethod
+    def _formatar_data_entrega_iso(data_raw: Any) -> str | None:
+        """Converte data (YYYY-MM-DD) para formato ISO esperado pela API Bremen."""
+        if data_raw is None:
+            return None
+
+        valor = str(data_raw).strip()
+        if not valor:
+            return None
+
+        try:
+            data_obj = datetime.fromisoformat(valor[:10])
+            return data_obj.strftime("%Y-%m-%dT12:00:00.000-03:00")
+        except Exception:
+            return None
     
     def __init__(self):
         # URLs das APIs Bremen
@@ -215,8 +233,9 @@ class OrcamentoAPIService:
         self, 
         db: Session,
         id_orcamento: int, 
-        data_entrega: str,
-        gerar_op: bool = True
+        data_entrega: Optional[str],
+        gerar_op: bool = True,
+        usar_data_saida_distribuicao: bool = False,
     ) -> Dict[str, Any]:
         """
         Aprova orçamento na API Bremen (FASE 02)
@@ -244,15 +263,42 @@ class OrcamentoAPIService:
         
         logger.info(f"Encontrados {len(itens_db)} itens na tabela orcamento_api para orçamento {id_orcamento}")
         
+        # Buscar data_saida por distribuição para aprovação por item (quando habilitado)
+        datas_entrega_por_distribuicao: Dict[int, str] = {}
+        if usar_data_saida_distribuicao:
+            ids_dist = [item.distribuicao_material_id for item in itens_db if item.distribuicao_material_id is not None]
+            if ids_dist:
+                rows_dist = db.query(DistribuicaoMaterial.id, DistribuicaoMaterial.data_saida).filter(
+                    DistribuicaoMaterial.id.in_(ids_dist)
+                ).all()
+                datas_entrega_por_distribuicao = {
+                    row.id: self._formatar_data_entrega_iso(row.data_saida)
+                    for row in rows_dist
+                }
+
         # Montar lista de itens para aprovação usando id_item da tabela
         itens_aprovacao = []
         for item in itens_db:
             if item.id_item:
+                data_item = data_entrega
+                if usar_data_saida_distribuicao:
+                    data_item = datas_entrega_por_distribuicao.get(item.distribuicao_material_id)
+
+                    if not data_item and data_entrega:
+                        data_item = data_entrega
+
+                    if not data_item:
+                        raise ValueError(
+                            f"Distribuição {item.distribuicao_material_id} sem data_saida válida para aprovação do item {item.id_item}"
+                        )
+
                 itens_aprovacao.append({
                     "id": item.id_item,
-                    "data_entrega": data_entrega
+                    "data_entrega": data_item
                 })
-                logger.debug(f"Item adicionado para aprovação: id={item.id_item}")
+                logger.debug(
+                    f"Item adicionado para aprovação: id={item.id_item}, dist={item.distribuicao_material_id}, data_entrega={data_item}"
+                )
         
         if not itens_aprovacao:
             raise ValueError(f"Nenhum item válido (id_item) encontrado para aprovação do orçamento {id_orcamento}")

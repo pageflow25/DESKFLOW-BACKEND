@@ -303,6 +303,7 @@ SELECT json_build_object(
                                             'altura', comp_sel.altura,
                                             'largura', comp_sel.largura,
                                             'quantidade_paginas', comp_sel.quantidade_paginas,
+                                            'idgruposubstratoimpressao',  comp_sel.idgruposubstratoimpressao,
                                             'gramaturasubstratoimpressao',
                                                 CASE
                                                     WHEN UPPER(comp_sel."categoria_Prod") = 'LIVRETO'

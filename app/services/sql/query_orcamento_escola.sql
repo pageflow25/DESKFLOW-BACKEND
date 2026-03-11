@@ -387,6 +387,7 @@ SELECT json_build_object(
                                             'altura', comp_sel.altura,
                                             'largura', comp_sel.largura,
                                             'quantidade_paginas', comp_sel.quantidade_paginas,
+                                            'idgruposubstratoimpressao', comp_sel.idgruposubstratoimpressao,
                                             'gramaturasubstratoimpressao',
                                                 CASE
                                                     -- Verifica se é Livreto (categoria_Prod) E se tem capa e miolo

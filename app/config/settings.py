@@ -33,6 +33,12 @@ class Settings(BaseSettings):
 
     # Configurações FASE 03 — Download de Arquivos
     DOWNLOAD_BASE_PATH: str
+
+    # Configurações da automação de escolas conveniadas
+    CONVENIADO_AUTOMACAO_ATIVA: bool
+    CONVENIADO_AUTOMACAO_HORARIOS: str
+    CONVENIADO_AUTOMACAO_TIMEZONE: str
+    CONVENIADO_DATA_ENTREGA_OFFSET_DIAS: int
     class Config:
         env_file = ".env"
         extra = "ignore"  # Ignora campos extras do .env que não estão no modelo
