@@ -13,6 +13,7 @@ from ..schemas.orcamento import (
 from ..controllers.orcamento_controller import OrcamentoController
 from ..services.auth_service import verify_token
 from ..services.arquivo_orcamento_service import ArquivoOrcamentoService
+from ..services.automacao_conveniado_service import AutomacaoConveniadoService
 from ..config.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -71,7 +72,7 @@ async def gerar_orcamento(
         
         # Se data_entrega não foi fornecida, usar data padrão (hoje + 7 dias)
         data_entrega = request.data_entrega
-        if not data_entrega and request.aprovar_automaticamente:
+        if not data_entrega and request.aprovar_automaticamente and not request.usar_data_saida_distribuicao:
             from datetime import datetime, timedelta
             data_futura = datetime.now() + timedelta(days=7)
             data_entrega = data_futura.strftime("%Y-%m-%dT12:00:00.000-03:00")
@@ -90,6 +91,7 @@ async def gerar_orcamento(
             grupo_lote_id=request.grupo_lote_id,
             aprovar_automaticamente=request.aprovar_automaticamente,
             data_entrega=data_entrega,
+            usar_data_saida_distribuicao=request.usar_data_saida_distribuicao,
             baixar_arquivos=request.baixar_arquivos,
             gerar_op=request.gerar_op,
             modo_agrupamento=request.modo_agrupamento
@@ -173,6 +175,32 @@ async def processar_orcamento(
         raise
     except Exception as e:
         logger.error(f"Erro no processamento de orçamento: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro interno: {str(e)}"
+        )
+
+
+@router.post("/automacao/conveniados/executar")
+async def executar_automacao_conveniados(
+    user_data: dict = Depends(verify_admin)
+):
+    """
+    Executa manualmente o lote de automação das escolas conveniadas.
+
+    Fluxo executado por escola elegível:
+    1) Lançamento de pedidos (orçamento)
+    2) Aprovação com geração de OP
+    3) Download e organização de arquivos
+    4) Atualização de status/histórico de distribuição
+    """
+    try:
+        logger.info(
+            f"Usuário {user_data.get('username')} iniciou execução manual da automação de conveniados"
+        )
+        return await AutomacaoConveniadoService.executar_lote_conveniados()
+    except Exception as e:
+        logger.error(f"Erro na automação manual de conveniados: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro interno: {str(e)}"

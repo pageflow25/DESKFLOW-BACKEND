@@ -2,7 +2,7 @@ import asyncio
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from ..config.logging_config import get_logger
 from ..schemas.orcamento import (
     OrcamentoRequest, 
@@ -207,10 +207,11 @@ class OrcamentoController:
         db: Session,
         api_service: OrcamentoAPIService,
         id_orcamento: int,
-        data_entrega: str,
+        data_entrega: Optional[str],
         distribuicoes_ids: List[int],
         payload_enviado: Dict[str, Any],
         gerar_op: bool = True,
+        usar_data_saida_distribuicao: bool = False,
         grupo_lote_id: int = None
     ) -> Dict[str, Any]:
         """
@@ -238,7 +239,8 @@ class OrcamentoController:
                 db=db,
                 id_orcamento=id_orcamento,
                 data_entrega=data_entrega,
-                gerar_op=gerar_op
+                gerar_op=gerar_op,
+                usar_data_saida_distribuicao=usar_data_saida_distribuicao,
             )
 
             # Normalizar resposta (pode vir como lista)
@@ -494,12 +496,15 @@ class OrcamentoController:
                     payload_enviado = fase01["payload_enviado"]
 
                     # FASE 02 — Aprovar orçamento (se configurado)
-                    if request.data_entrega and request.aprovar_automaticamente:
+                    usar_data_saida_distribuicao = getattr(request, 'usar_data_saida_distribuicao', False)
+
+                    if request.aprovar_automaticamente and (request.data_entrega or usar_data_saida_distribuicao):
                         gerar_op = getattr(request, 'gerar_op', True)
                         fase02 = await OrcamentoController._fase02_aprovar_orcamento(
                             db, api_service, id_orcamento,
                             request.data_entrega, distribuicoes_ids, payload_enviado,
                             gerar_op=gerar_op,
+                            usar_data_saida_distribuicao=usar_data_saida_distribuicao,
                             grupo_lote_id=grupo_lote_id
                         )
                         resultado.detalhes.append(fase02["detalhe"])
