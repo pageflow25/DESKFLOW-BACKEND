@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from ..config.database import get_db
-from ..schemas.pedido_cascata import PedidoCascataResponse
+from ..schemas.pedido_cascata import PedidoCascataResponse, StatusDeskflowListResponse
 from ..controllers.cascata_controller import CascataController
 from ..services.auth_service import verify_token
 from fastapi import HTTPException, status
@@ -38,7 +38,7 @@ def verify_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
 @router.get("/escola/{escola_id}/cascata", response_model=PedidoCascataResponse)
 async def get_pedidos_escola_cascata(
     escola_id: int,
-    tipo_formulario: str = Query(default='MEMOREX', description="Tipo de formulário a filtrar"),
+    tipo_formulario: str = Query(default=None, description="Tipo de formulário a filtrar (opcional)"),
     ids_formularios: str = Query(default=None, description="IDs de formulários separados por vírgula (ex: 1,2,3)"),
     status_ids: str = Query(default=None, description="IDs de status separados por vírgula (ex: 1,2,3). Padrão: 1"),
     db: Session = Depends(get_db),
@@ -50,7 +50,7 @@ async def get_pedidos_escola_cascata(
     
     Args:
         escola_id: ID da escola
-        tipo_formulario: Tipo de formulário (padrão: 'MEMOREX')
+        tipo_formulario: Tipo de formulário (opcional)
         ids_formularios: IDs de formulários separados por vírgula (opcional)
         status_ids: IDs de status separados por vírgula (padrão: 1)
     """
@@ -73,3 +73,12 @@ async def get_pedidos_escola_cascata(
             raise HTTPExc(status_code=400, detail="status_ids deve conter apenas números separados por vírgula")
     
     return await CascataController.get_pedidos_escola(db, escola_id, tipo_formulario, parsed_ids, parsed_status_ids)
+
+
+@router.get("/status-deskflow", response_model=StatusDeskflowListResponse)
+async def listar_status_deskflow(
+    db: Session = Depends(get_db),
+    user_data: dict = Depends(verify_admin)
+):
+    """Lista os status disponíveis para filtro em tela (status_deskflow_pedido)."""
+    return await CascataController.listar_status_deskflow(db)

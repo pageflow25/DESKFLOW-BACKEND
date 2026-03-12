@@ -47,3 +47,15 @@ class PedidoCascataRequest(BaseModel):
 class PedidoCascataResponse(BaseModel):
     """Response com dados em cascata da escola"""
     dashboard_completo: list[DivisaoLogisticaInfo]
+
+
+class StatusDeskflowOption(BaseModel):
+    """Opção de status para filtros da UI."""
+    id: int
+    codigo: str
+    descricao: str
+
+
+class StatusDeskflowListResponse(BaseModel):
+    """Lista de status disponíveis para seleção no frontend."""
+    status: list[StatusDeskflowOption]
