@@ -132,16 +132,29 @@ class LoteDisparoEvento(BaseModel):
     data_evento: Optional[str] = None
 
 
-class LoteDisparoItem(BaseModel):
+class LoteDisparoOP(BaseModel):
+    id_ops: int
+    pedido: Optional[dict] = None
+
+
+class LoteDisparoDistribuicao(BaseModel):
     distribuicao_material_id: int
-    status: str
-    sucesso: bool
-    mensagem: Optional[str] = None
-    data_evento: Optional[str] = None
     escola_nome: Optional[str] = None
     unidade_nome: Optional[str] = None
     material_descricao: Optional[str] = None
+    arquivo_nome: Optional[str] = None
+    quantidade: Optional[int] = None
+    status: Optional[str] = None
+    sucesso: bool = False
+    mensagem: Optional[str] = None
+    data_evento: Optional[str] = None
+    ops: List[LoteDisparoOP] = []
     eventos: List[LoteDisparoEvento] = []
+
+
+class LoteDisparoOrcamento(BaseModel):
+    id_orcamento: Optional[int] = None
+    distribuicoes: List[LoteDisparoDistribuicao] = []
 
 
 class LoteDisparoResumo(BaseModel):
@@ -150,7 +163,9 @@ class LoteDisparoResumo(BaseModel):
     total_pedidos: int
     total_sucesso: int
     total_erro: int
-    itens: List[LoteDisparoItem] = []
+    escolas: List[str] = []
+    destinos: List[str] = []
+    orcamentos: List[LoteDisparoOrcamento] = []
 
 
 class LoteDisparoListResponse(BaseModel):

@@ -8,6 +8,7 @@ class EscolaListItem(BaseModel):
     nome_escola: str
     codigo_escola: Optional[str] = None
     total_pedidos: int
+    possui_pedidos_alerta: bool = False
 
     class Config:
         from_attributes = True

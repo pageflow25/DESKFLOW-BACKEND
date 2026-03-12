@@ -13,8 +13,10 @@ from ..schemas.orcamento import (
     ProcessamentoResultado,
     LoteDisparoListResponse,
     LoteDisparoResumo,
-    LoteDisparoItem,
     LoteDisparoEvento,
+    LoteDisparoOP,
+    LoteDisparoDistribuicao,
+    LoteDisparoOrcamento,
 )
 from ..services.orcamento_service import OrcamentoService
 from ..services.orcamento_api_service import OrcamentoAPIService
@@ -56,11 +58,11 @@ class OrcamentoController:
 
     @staticmethod
     async def listar_lotes_disparo(db: Session, limit: int = 10, offset: int = 0) -> LoteDisparoListResponse:
-        """Lista lotes de disparo com resumo e itens detalhados por distribuição. Suporta paginação."""
+        """Lista lotes agrupados: Lote → Orçamento → Distribuição → OPs. Suporta paginação."""
         limite = max(1, min(limit, 100))
         deslocamento = max(0, offset)
 
-        # Contagem total de lotes distintos para paginação
+        # Contagem total de lotes distintos
         total_row = (
             db.execute(
                 text(
@@ -73,6 +75,7 @@ class OrcamentoController:
         )
         total_geral = int(total_row["total"] or 0)
 
+        # Lotes paginados (resumo)
         lotes_rows = (
             db.execute(
                 text(
@@ -101,6 +104,7 @@ class OrcamentoController:
         for lote in lotes_rows:
             grupo_lote_id = int(lote["grupo_lote_id"])
 
+            # --- Eventos (timeline) por distribuição ---
             eventos_rows = (
                 db.execute(
                     text(
@@ -123,19 +127,20 @@ class OrcamentoController:
                 .all()
             )
 
-            eventos_por_distribuicao: Dict[int, List[LoteDisparoEvento]] = {}
-            for evento in eventos_rows:
-                distribuicao_id = int(evento["distribuicao_material_id"])
-                eventos_por_distribuicao.setdefault(distribuicao_id, []).append(
+            eventos_por_dist: Dict[int, List[LoteDisparoEvento]] = {}
+            for ev in eventos_rows:
+                did = int(ev["distribuicao_material_id"])
+                eventos_por_dist.setdefault(did, []).append(
                     LoteDisparoEvento(
-                        status=str(evento["status_codigo"]),
-                        sucesso=bool(evento["sucesso"]),
-                        mensagem=evento["mensagem"],
-                        data_evento=evento["data_evento"].isoformat() if evento["data_evento"] else None,
+                        status=str(ev["status_codigo"]),
+                        sucesso=bool(ev["sucesso"]),
+                        mensagem=ev["mensagem"],
+                        data_evento=ev["data_evento"].isoformat() if ev["data_evento"] else None,
                     )
                 )
 
-            itens_rows = (
+            # --- Distribuições com informações completas ---
+            dist_rows = (
                 db.execute(
                     text(
                         """
@@ -158,13 +163,25 @@ class OrcamentoController:
                             u.data_evento,
                             e.nome AS escola_nome,
                             ue.nome AS unidade_nome,
-                            dm.descricao_material AS material_descricao
+                            dm.descricao_material AS material_descricao,
+                            dm.quantidade,
+                            COALESCE(oa_agg.id_orcamento, dm.id_orcamento) AS id_orcamento,
+                            ap.nome AS arquivo_nome
                         FROM ultimos u
                         LEFT JOIN status_deskflow_pedido s ON s.id = u.status_novo_id
                         LEFT JOIN distribuicao_materiais dm ON dm.id = u.distribuicao_material_id
+                        LEFT JOIN (
+                            SELECT
+                                distribuicao_material_id,
+                                MAX(id_orcamento) AS id_orcamento
+                            FROM orcamento_api
+                            WHERE id_orcamento IS NOT NULL
+                            GROUP BY distribuicao_material_id
+                        ) oa_agg ON oa_agg.distribuicao_material_id = dm.id
                         LEFT JOIN unidades_escolares ue ON ue.id = dm.unidade_escolar_id
                         LEFT JOIN escolas e ON e.id = ue.escola_id
-                        ORDER BY u.distribuicao_material_id
+                        LEFT JOIN arquivo_pdfs ap ON ap.id = dm.arquivo_pdf_id
+                        ORDER BY dm.id_orcamento NULLS LAST, u.distribuicao_material_id
                         """
                     ),
                     {"grupo_lote_id": grupo_lote_id},
@@ -173,19 +190,73 @@ class OrcamentoController:
                 .all()
             )
 
-            itens = [
-                LoteDisparoItem(
-                    distribuicao_material_id=int(item["distribuicao_material_id"]),
-                    status=str(item["status_codigo"]),
-                    sucesso=bool(item["sucesso"]),
-                    mensagem=item["mensagem"],
-                    data_evento=item["data_evento"].isoformat() if item["data_evento"] else None,
-                    escola_nome=item["escola_nome"],
-                    unidade_nome=item["unidade_nome"],
-                    material_descricao=item["material_descricao"],
-                    eventos=eventos_por_distribuicao.get(int(item["distribuicao_material_id"]), []),
+            # --- OPs por distribuição ---
+            ops_por_dist: Dict[int, List[LoteDisparoOP]] = {}
+            ops_rows = (
+                db.execute(
+                    text(
+                        """
+                        SELECT
+                            aa.distribuicao_material_id,
+                            aa.id_ops,
+                            aa.pedidos
+                        FROM aprovacao_api aa
+                        WHERE aa.id_ops IS NOT NULL
+                          AND aa.distribuicao_material_id IN (
+                              SELECT DISTINCT hp.distribuicao_material_id
+                              FROM historico_processamento hp
+                              WHERE hp.grupo_lote_id = :grupo_lote_id
+                          )
+                        ORDER BY aa.distribuicao_material_id, aa.id_ops
+                        """
+                    ),
+                    {"grupo_lote_id": grupo_lote_id},
                 )
-                for item in itens_rows
+                .mappings()
+                .all()
+            )
+            for op in ops_rows:
+                did = int(op["distribuicao_material_id"])
+                ops_por_dist.setdefault(did, []).append(
+                    LoteDisparoOP(
+                        id_ops=int(op["id_ops"]),
+                        pedido=op["pedidos"],
+                    )
+                )
+
+            # --- Agrupar distribuições por orçamento ---
+            orcamentos_map: Dict[Optional[int], List[LoteDisparoDistribuicao]] = {}
+            escolas_set: set = set()
+            destinos_set: set = set()
+
+            for row in dist_rows:
+                did = int(row["distribuicao_material_id"])
+                id_orc = row["id_orcamento"]
+
+                if row["escola_nome"]:
+                    escolas_set.add(row["escola_nome"])
+                if row["unidade_nome"]:
+                    destinos_set.add(row["unidade_nome"])
+
+                dist_obj = LoteDisparoDistribuicao(
+                    distribuicao_material_id=did,
+                    escola_nome=row["escola_nome"],
+                    unidade_nome=row["unidade_nome"],
+                    material_descricao=row["material_descricao"],
+                    arquivo_nome=row["arquivo_nome"],
+                    quantidade=row["quantidade"],
+                    status=str(row["status_codigo"]),
+                    sucesso=bool(row["sucesso"]),
+                    mensagem=row["mensagem"],
+                    data_evento=row["data_evento"].isoformat() if row["data_evento"] else None,
+                    ops=ops_por_dist.get(did, []),
+                    eventos=eventos_por_dist.get(did, []),
+                )
+                orcamentos_map.setdefault(id_orc, []).append(dist_obj)
+
+            orcamentos = [
+                LoteDisparoOrcamento(id_orcamento=orc_id, distribuicoes=dists)
+                for orc_id, dists in orcamentos_map.items()
             ]
 
             lotes.append(
@@ -195,7 +266,9 @@ class OrcamentoController:
                     total_pedidos=int(lote["total_pedidos"] or 0),
                     total_sucesso=int(lote["total_sucesso"] or 0),
                     total_erro=int(lote["total_erro"] or 0),
-                    itens=itens,
+                    escolas=sorted(escolas_set),
+                    destinos=sorted(destinos_set),
+                    orcamentos=orcamentos,
                 )
             )
 

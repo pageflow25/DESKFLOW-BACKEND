@@ -215,10 +215,19 @@ class OrcamentoService:
 
             # --- PASSO 2: delete único para todos os itens deste orçamento ---
             ids_item = [m["id_item"] for m in mappings]
+            ids_distribuicao = list({m["distribuicao_material_id"] for m in mappings})
             db.query(OrcamentoAPI).filter(
                 OrcamentoAPI.id_orcamento == id_orcamento,
                 OrcamentoAPI.id_item.in_(ids_item)
             ).delete(synchronize_session=False)
+
+            # --- PASSO 2.1: sincronizar o id_orcamento na distribuição para consultas legadas/monitor ---
+            db.query(DistribuicaoMaterial).filter(
+                DistribuicaoMaterial.id.in_(ids_distribuicao)
+            ).update(
+                {DistribuicaoMaterial.id_orcamento: id_orcamento},
+                synchronize_session=False
+            )
 
             # --- PASSO 3: bulk insert em uma única operação ---
             db.bulk_insert_mappings(OrcamentoAPI, mappings)

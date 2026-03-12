@@ -20,22 +20,23 @@ class DashboardService:
         Returns:
             Lista de escolas com seus dados e total de pedidos
         """
-        logger.info("Buscando escolas com contagem de pedidos")
+        logger.info("Buscando escolas (incluindo sem pedidos) com contagem/alerta")
         
         query = text("""
             SELECT
                 e.id AS escola_id,
                 e.nome AS nome_escola,
                 e.codigo AS codigo_escola,
-                COUNT(DISTINCT f.id) AS total_pedidos
+                COUNT(DISTINCT f.id) AS total_pedidos,
+                CASE WHEN COUNT(DISTINCT f.id) > 0 THEN TRUE ELSE FALSE END AS possui_pedidos_alerta
             FROM escolas e
-            JOIN unidades_escolares ue
+            LEFT JOIN unidades_escolares ue
                 ON ue.escola_id = e.id
-            JOIN distribuicao_materiais dm
+            LEFT JOIN distribuicao_materiais dm
                 ON dm.unidade_escolar_id = ue.id
-            JOIN formularios f
+               AND dm.status_id = 1
+            LEFT JOIN formularios f
                 ON f.id = dm.formulario_id
-            WHERE dm.status_id = 1
             GROUP BY
                 e.id,
                 e.nome,
@@ -52,7 +53,8 @@ class DashboardService:
                     "escola_id": row.escola_id,
                     "nome_escola": row.nome_escola,
                     "codigo_escola": row.codigo_escola,
-                    "total_pedidos": row.total_pedidos
+                    "total_pedidos": int(row.total_pedidos or 0),
+                    "possui_pedidos_alerta": bool(row.possui_pedidos_alerta)
                 }
                 escolas.append(escola_dict)
             

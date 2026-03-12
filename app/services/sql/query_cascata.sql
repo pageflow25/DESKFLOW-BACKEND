@@ -8,8 +8,8 @@ WITH dados_normalizados AS (
         COALESCE(CAST(uc.dias_uteis AS TEXT), 'Sem dias uteis') AS dias_uteis,
 
         -- PRODUTO
-        b.id_produto,
-        b.descricao AS nome_produto,
+        COALESCE(b.id_produto, e.id_produto) AS id_produto,
+        COALESCE(b.descricao, CONCAT('Produto ', COALESCE(CAST(e.id_produto AS TEXT), 'N/A'))) AS nome_produto,
 
         -- DATA DE SAÍDA
         COALESCE(
@@ -23,24 +23,28 @@ WITH dados_normalizados AS (
 
         -- ARQUIVO
         ar.id AS arquivo_id,
-        ar.nome as nome_arquivo,
+        COALESCE(ar.nome, 'Sem arquivo vinculado') AS nome_arquivo,
         distri.quantidade as quantidade,
         ar.paginas as paginas
 
     FROM formularios f
     INNER JOIN especificacoes_form e 
         ON f.id = e.formulario_id
-    INNER JOIN arquivo_pdfs ar 
-        ON ar.item_pedido_id = e.id
     INNER JOIN distribuicao_materiais distri 
-        ON distri.arquivo_pdf_id = ar.id
+        ON distri.especificacao_form_id = e.id
     INNER JOIN unidades_escolares uc 
         ON distri.unidade_escolar_id = uc.id
-    INNER JOIN bremen_itens b 
+    LEFT JOIN arquivo_pdfs ar
+        ON ar.id = distri.arquivo_pdf_id
+    LEFT JOIN bremen_itens b 
         ON e.id_produto = b.id_produto
-    WHERE UPPER(f.tipo_formulario) = UPPER(:tipo_formulario)
+    WHERE (
+            :tipo_formulario IS NULL
+            OR TRIM(CAST(:tipo_formulario AS TEXT)) = ''
+            OR UPPER(f.tipo_formulario) = UPPER(:tipo_formulario)
+        )
         AND uc.escola_id = :escola_id
-        AND distri.status_id = ANY(CAST(:status_ids AS int[]))
+        AND (:status_ids IS NULL OR distri.status_id = ANY(CAST(:status_ids AS int[])))
         AND (CAST(:ids_formularios AS int[]) IS NULL OR f.id = ANY(CAST(:ids_formularios AS int[]))
         )
 ),

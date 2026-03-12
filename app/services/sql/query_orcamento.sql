@@ -20,7 +20,7 @@ unidades_filtradas AS (
         ue.forma_pagamento,
         ue.escola_id,
         ue.client_id_venda,
-        ue.vendedor_id_venda
+        ue.vendedor_id  -- switched from vendedor_id_venda to vendedor_id
     FROM unidades_escolares ue
     CROSS JOIN parametros p
     WHERE ue.escola_id = p.escola_id
@@ -84,7 +84,7 @@ itens_produto AS (
         MAX(eu.especificacao_id) AS especificacao_id,
         MAX(eu.id_produto) AS id_produto,
         (SELECT uf.client_id_venda FROM unidades_filtradas uf WHERE uf.id = eu.unidade_id LIMIT 1) AS client_id_venda,
-        (SELECT uf.vendedor_id_venda FROM unidades_filtradas uf WHERE uf.id = eu.unidade_id LIMIT 1) AS vendedor_id,
+        (SELECT uf.vendedor_id FROM unidades_filtradas uf WHERE uf.id = eu.unidade_id LIMIT 1) AS vendedor_id,
         (SELECT uf.forma_pagamento FROM unidades_filtradas uf WHERE uf.id = eu.unidade_id LIMIT 1) AS forma_pagamento_venda,
         (SELECT uf.nome FROM unidades_filtradas uf WHERE uf.id = eu.unidade_id LIMIT 1) AS nome_unidade,
         
