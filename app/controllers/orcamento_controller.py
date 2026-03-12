@@ -14,6 +14,7 @@ from ..schemas.orcamento import (
     LoteDisparoListResponse,
     LoteDisparoResumo,
     LoteDisparoItem,
+    LoteDisparoEvento,
 )
 from ..services.orcamento_service import OrcamentoService
 from ..services.orcamento_api_service import OrcamentoAPIService
@@ -100,6 +101,40 @@ class OrcamentoController:
         for lote in lotes_rows:
             grupo_lote_id = int(lote["grupo_lote_id"])
 
+            eventos_rows = (
+                db.execute(
+                    text(
+                        """
+                        SELECT
+                            hp.distribuicao_material_id,
+                            COALESCE(s.codigo, 'desconhecido') AS status_codigo,
+                            hp.sucesso,
+                            hp.mensagem,
+                            hp.data_evento
+                        FROM historico_processamento hp
+                        LEFT JOIN status_deskflow_pedido s ON s.id = hp.status_novo_id
+                        WHERE hp.grupo_lote_id = :grupo_lote_id
+                        ORDER BY hp.distribuicao_material_id, hp.data_evento DESC, hp.id DESC
+                        """
+                    ),
+                    {"grupo_lote_id": grupo_lote_id},
+                )
+                .mappings()
+                .all()
+            )
+
+            eventos_por_distribuicao: Dict[int, List[LoteDisparoEvento]] = {}
+            for evento in eventos_rows:
+                distribuicao_id = int(evento["distribuicao_material_id"])
+                eventos_por_distribuicao.setdefault(distribuicao_id, []).append(
+                    LoteDisparoEvento(
+                        status=str(evento["status_codigo"]),
+                        sucesso=bool(evento["sucesso"]),
+                        mensagem=evento["mensagem"],
+                        data_evento=evento["data_evento"].isoformat() if evento["data_evento"] else None,
+                    )
+                )
+
             itens_rows = (
                 db.execute(
                     text(
@@ -148,6 +183,7 @@ class OrcamentoController:
                     escola_nome=item["escola_nome"],
                     unidade_nome=item["unidade_nome"],
                     material_descricao=item["material_descricao"],
+                    eventos=eventos_por_distribuicao.get(int(item["distribuicao_material_id"]), []),
                 )
                 for item in itens_rows
             ]
