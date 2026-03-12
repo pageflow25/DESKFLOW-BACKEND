@@ -56,6 +56,13 @@ class HistoricoProcessamento(Base):
         comment="Indica se a operação foi bem-sucedida"
     )
     
+    grupo_lote_id = Column(
+        Integer,
+        nullable=True,
+        index=True,
+        comment="ID do grupo selecionado ao disparar o lote de orçamentos"
+    )
+    
     data_evento = Column(
         DateTime,
         nullable=False,

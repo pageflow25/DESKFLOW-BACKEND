@@ -1,14 +1,22 @@
 import asyncio
+import json
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-from typing import Dict, Any, List
+from sqlalchemy import text
+from typing import Dict, Any, List, Optional
 from ..config.logging_config import get_logger
 from ..schemas.orcamento import (
     OrcamentoRequest, 
     OrcamentoListResponse, 
     OrcamentoResponse,
     FluxoOrcamentoRequest, 
-    ProcessamentoResultado
+    ProcessamentoResultado,
+    LoteDisparoListResponse,
+    LoteDisparoResumo,
+    LoteDisparoEvento,
+    LoteDisparoOP,
+    LoteDisparoDistribuicao,
+    LoteDisparoOrcamento,
 )
 from ..services.orcamento_service import OrcamentoService
 from ..services.orcamento_api_service import OrcamentoAPIService
@@ -25,6 +33,246 @@ DELAY_ENTRE_FASES = 2
 
 class OrcamentoController:
     """Controller para operações de orçamento"""
+    _execucao_lock = asyncio.Lock()
+    _execucoes_em_andamento: set[str] = set()
+
+    @staticmethod
+    def _gerar_chave_execucao(request: FluxoOrcamentoRequest) -> str:
+        payload_chave = {
+            "tipo_fluxo": request.tipo_fluxo,
+            "escola_id": request.escola_id,
+            "ids_produtos": sorted(request.ids_produtos or []),
+            "datas_saida": sorted([d.isoformat() for d in (request.datas_saida or [])]),
+            "divisoes_logistica": sorted(request.divisoes_logistica or []),
+            "dias_uteis_filtro": sorted(request.dias_uteis_filtro or []),
+            "ids_formularios": sorted(request.ids_formularios or []),
+            "status_ids": sorted(request.status_ids or []),
+            "modo_agrupamento": request.modo_agrupamento,
+            "grupo_lote_id": request.grupo_lote_id,
+            "aprovar_automaticamente": request.aprovar_automaticamente,
+            "baixar_arquivos": request.baixar_arquivos,
+            "gerar_op": request.gerar_op,
+            "usar_data_saida_distribuicao": request.usar_data_saida_distribuicao,
+        }
+        return json.dumps(payload_chave, ensure_ascii=False, sort_keys=True)
+
+    @staticmethod
+    async def listar_lotes_disparo(db: Session, limit: int = 10, offset: int = 0) -> LoteDisparoListResponse:
+        """Lista lotes agrupados: Lote → Orçamento → Distribuição → OPs. Suporta paginação."""
+        limite = max(1, min(limit, 100))
+        deslocamento = max(0, offset)
+
+        # Contagem total de lotes distintos
+        total_row = (
+            db.execute(
+                text(
+                    "SELECT COUNT(DISTINCT grupo_lote_id) AS total "
+                    "FROM historico_processamento WHERE grupo_lote_id IS NOT NULL"
+                )
+            )
+            .mappings()
+            .one()
+        )
+        total_geral = int(total_row["total"] or 0)
+
+        # Lotes paginados (resumo)
+        lotes_rows = (
+            db.execute(
+                text(
+                    """
+                    SELECT
+                        hp.grupo_lote_id,
+                        MIN(hp.data_evento) AS data_envio,
+                        COUNT(DISTINCT hp.distribuicao_material_id) AS total_pedidos,
+                        COUNT(DISTINCT CASE WHEN hp.sucesso IS TRUE THEN hp.distribuicao_material_id END) AS total_sucesso,
+                        COUNT(DISTINCT CASE WHEN hp.sucesso IS FALSE THEN hp.distribuicao_material_id END) AS total_erro
+                    FROM historico_processamento hp
+                    WHERE hp.grupo_lote_id IS NOT NULL
+                    GROUP BY hp.grupo_lote_id
+                    ORDER BY hp.grupo_lote_id DESC
+                    LIMIT :limit OFFSET :offset
+                    """
+                ),
+                {"limit": limite, "offset": deslocamento},
+            )
+            .mappings()
+            .all()
+        )
+
+        lotes: List[LoteDisparoResumo] = []
+
+        for lote in lotes_rows:
+            grupo_lote_id = int(lote["grupo_lote_id"])
+
+            # --- Eventos (timeline) por distribuição ---
+            eventos_rows = (
+                db.execute(
+                    text(
+                        """
+                        SELECT
+                            hp.distribuicao_material_id,
+                            COALESCE(s.codigo, 'desconhecido') AS status_codigo,
+                            hp.sucesso,
+                            hp.mensagem,
+                            hp.data_evento
+                        FROM historico_processamento hp
+                        LEFT JOIN status_deskflow_pedido s ON s.id = hp.status_novo_id
+                        WHERE hp.grupo_lote_id = :grupo_lote_id
+                        ORDER BY hp.distribuicao_material_id, hp.data_evento DESC, hp.id DESC
+                        """
+                    ),
+                    {"grupo_lote_id": grupo_lote_id},
+                )
+                .mappings()
+                .all()
+            )
+
+            eventos_por_dist: Dict[int, List[LoteDisparoEvento]] = {}
+            for ev in eventos_rows:
+                did = int(ev["distribuicao_material_id"])
+                eventos_por_dist.setdefault(did, []).append(
+                    LoteDisparoEvento(
+                        status=str(ev["status_codigo"]),
+                        sucesso=bool(ev["sucesso"]),
+                        mensagem=ev["mensagem"],
+                        data_evento=ev["data_evento"].isoformat() if ev["data_evento"] else None,
+                    )
+                )
+
+            # --- Distribuições com informações completas ---
+            dist_rows = (
+                db.execute(
+                    text(
+                        """
+                        WITH ultimos AS (
+                            SELECT DISTINCT ON (hp.distribuicao_material_id)
+                                hp.distribuicao_material_id,
+                                hp.status_novo_id,
+                                hp.sucesso,
+                                hp.mensagem,
+                                hp.data_evento
+                            FROM historico_processamento hp
+                            WHERE hp.grupo_lote_id = :grupo_lote_id
+                            ORDER BY hp.distribuicao_material_id, hp.data_evento DESC, hp.id DESC
+                        )
+                        SELECT
+                            u.distribuicao_material_id,
+                            COALESCE(s.codigo, 'desconhecido') AS status_codigo,
+                            u.sucesso,
+                            u.mensagem,
+                            u.data_evento,
+                            e.nome AS escola_nome,
+                            ue.nome AS unidade_nome,
+                            dm.descricao_material AS material_descricao,
+                            dm.quantidade,
+                            COALESCE(oa_agg.id_orcamento, dm.id_orcamento) AS id_orcamento,
+                            ap.nome AS arquivo_nome
+                        FROM ultimos u
+                        LEFT JOIN status_deskflow_pedido s ON s.id = u.status_novo_id
+                        LEFT JOIN distribuicao_materiais dm ON dm.id = u.distribuicao_material_id
+                        LEFT JOIN (
+                            SELECT
+                                distribuicao_material_id,
+                                MAX(id_orcamento) AS id_orcamento
+                            FROM orcamento_api
+                            WHERE id_orcamento IS NOT NULL
+                            GROUP BY distribuicao_material_id
+                        ) oa_agg ON oa_agg.distribuicao_material_id = dm.id
+                        LEFT JOIN unidades_escolares ue ON ue.id = dm.unidade_escolar_id
+                        LEFT JOIN escolas e ON e.id = ue.escola_id
+                        LEFT JOIN arquivo_pdfs ap ON ap.id = dm.arquivo_pdf_id
+                        ORDER BY dm.id_orcamento NULLS LAST, u.distribuicao_material_id
+                        """
+                    ),
+                    {"grupo_lote_id": grupo_lote_id},
+                )
+                .mappings()
+                .all()
+            )
+
+            # --- OPs por distribuição ---
+            ops_por_dist: Dict[int, List[LoteDisparoOP]] = {}
+            ops_rows = (
+                db.execute(
+                    text(
+                        """
+                        SELECT
+                            aa.distribuicao_material_id,
+                            aa.id_ops,
+                            aa.pedidos
+                        FROM aprovacao_api aa
+                        WHERE aa.id_ops IS NOT NULL
+                          AND aa.distribuicao_material_id IN (
+                              SELECT DISTINCT hp.distribuicao_material_id
+                              FROM historico_processamento hp
+                              WHERE hp.grupo_lote_id = :grupo_lote_id
+                          )
+                        ORDER BY aa.distribuicao_material_id, aa.id_ops
+                        """
+                    ),
+                    {"grupo_lote_id": grupo_lote_id},
+                )
+                .mappings()
+                .all()
+            )
+            for op in ops_rows:
+                did = int(op["distribuicao_material_id"])
+                ops_por_dist.setdefault(did, []).append(
+                    LoteDisparoOP(
+                        id_ops=int(op["id_ops"]),
+                        pedido=op["pedidos"],
+                    )
+                )
+
+            # --- Agrupar distribuições por orçamento ---
+            orcamentos_map: Dict[Optional[int], List[LoteDisparoDistribuicao]] = {}
+            escolas_set: set = set()
+            destinos_set: set = set()
+
+            for row in dist_rows:
+                did = int(row["distribuicao_material_id"])
+                id_orc = row["id_orcamento"]
+
+                if row["escola_nome"]:
+                    escolas_set.add(row["escola_nome"])
+                if row["unidade_nome"]:
+                    destinos_set.add(row["unidade_nome"])
+
+                dist_obj = LoteDisparoDistribuicao(
+                    distribuicao_material_id=did,
+                    escola_nome=row["escola_nome"],
+                    unidade_nome=row["unidade_nome"],
+                    material_descricao=row["material_descricao"],
+                    arquivo_nome=row["arquivo_nome"],
+                    quantidade=row["quantidade"],
+                    status=str(row["status_codigo"]),
+                    sucesso=bool(row["sucesso"]),
+                    mensagem=row["mensagem"],
+                    data_evento=row["data_evento"].isoformat() if row["data_evento"] else None,
+                    ops=ops_por_dist.get(did, []),
+                    eventos=eventos_por_dist.get(did, []),
+                )
+                orcamentos_map.setdefault(id_orc, []).append(dist_obj)
+
+            orcamentos = [
+                LoteDisparoOrcamento(id_orcamento=orc_id, distribuicoes=dists)
+                for orc_id, dists in orcamentos_map.items()
+            ]
+
+            lotes.append(
+                LoteDisparoResumo(
+                    grupo_lote_id=grupo_lote_id,
+                    data_envio=lote["data_envio"].isoformat() if lote["data_envio"] else None,
+                    total_pedidos=int(lote["total_pedidos"] or 0),
+                    total_sucesso=int(lote["total_sucesso"] or 0),
+                    total_erro=int(lote["total_erro"] or 0),
+                    escolas=sorted(escolas_set),
+                    destinos=sorted(destinos_set),
+                    orcamentos=orcamentos,
+                )
+            )
+
+        return LoteDisparoListResponse(lotes=lotes, total_lotes=len(lotes), total_geral=total_geral)
     
     # ================================================================
     # GERAÇÃO LOCAL
@@ -99,7 +347,8 @@ class OrcamentoController:
         distribuicoes_ids: List[int], 
         novo_status: str, 
         mensagem: str, 
-        sucesso: bool = True
+        sucesso: bool = True,
+        grupo_lote_id: int = None
     ):
         """
         Atualiza o status de múltiplas distribuições em uma única operação de banco.
@@ -114,6 +363,7 @@ class OrcamentoController:
                 novo_status=novo_status,
                 mensagem=mensagem,
                 sucesso=sucesso,
+                grupo_lote_id=grupo_lote_id,
             )
         except Exception as e:
             logger.warning(f"Erro ao atualizar status em lote: {e}")
@@ -127,7 +377,8 @@ class OrcamentoController:
         db: Session,
         api_service: OrcamentoAPIService,
         orcamento: OrcamentoResponse,
-        modo: str
+        modo: str,
+        grupo_lote_id: int = None
     ) -> Dict[str, Any]:
         """
         FASE 01 — Envia um orçamento para a API Bremen e salva na tabela orcamento_api.
@@ -176,7 +427,8 @@ class OrcamentoController:
         OrcamentoController._atualizar_status_distribuicoes(
             db, distribuicoes_ids,
             novo_status="orcamento_gerado",
-            mensagem=f"Orçamento gerado via API - ID: {id_orcamento}"
+            mensagem=f"Orçamento gerado via API - ID: {id_orcamento}",
+            grupo_lote_id=grupo_lote_id
         )
 
         return {
@@ -202,10 +454,12 @@ class OrcamentoController:
         db: Session,
         api_service: OrcamentoAPIService,
         id_orcamento: int,
-        data_entrega: str,
+        data_entrega: Optional[str],
         distribuicoes_ids: List[int],
         payload_enviado: Dict[str, Any],
-        gerar_op: bool = True
+        gerar_op: bool = True,
+        usar_data_saida_distribuicao: bool = False,
+        grupo_lote_id: int = None
     ) -> Dict[str, Any]:
         """
         FASE 02 — Aprova um orçamento na API Bremen e salva na tabela aprovacao_api.
@@ -232,7 +486,8 @@ class OrcamentoController:
                 db=db,
                 id_orcamento=id_orcamento,
                 data_entrega=data_entrega,
-                gerar_op=gerar_op
+                gerar_op=gerar_op,
+                usar_data_saida_distribuicao=usar_data_saida_distribuicao,
             )
 
             # Normalizar resposta (pode vir como lista)
@@ -264,7 +519,8 @@ class OrcamentoController:
             OrcamentoController._atualizar_status_distribuicoes(
                 db, distribuicoes_ids,
                 novo_status=status_aprovacao,
-                mensagem=msg_status
+                mensagem=msg_status,
+                grupo_lote_id=grupo_lote_id
             )
 
             return {
@@ -289,7 +545,8 @@ class OrcamentoController:
                 db, distribuicoes_ids,
                 novo_status="erro_aprovacao",
                 mensagem=error_msg,
-                sucesso=False
+                sucesso=False,
+                grupo_lote_id=grupo_lote_id
             )
 
             return {
@@ -311,7 +568,8 @@ class OrcamentoController:
     async def _fase03_baixar_arquivos(
         db: Session,
         id_orcamento: int,
-        distribuicoes_ids: List[int]
+        distribuicoes_ids: List[int],
+        grupo_lote_id: int = None
     ) -> Dict[str, Any]:
         """
         FASE 03 — Baixa e organiza os arquivos PDF de um orçamento aprovado.
@@ -343,7 +601,8 @@ class OrcamentoController:
             OrcamentoController._atualizar_status_distribuicoes(
                 db, distribuicoes_ids,
                 novo_status="arquivos_baixados",
-                mensagem=f"Arquivos baixados - {total_downloads} arquivos"
+                mensagem=f"Arquivos baixados - {total_downloads} arquivos",
+                grupo_lote_id=grupo_lote_id
             )
 
             detalhe = {
@@ -368,6 +627,11 @@ class OrcamentoController:
         except Exception as e:
             error_msg = f"Erro na FASE 03 (download) para orçamento {id_orcamento}: {str(e)}"
             logger.error(error_msg)
+            try:
+                db.rollback()
+                logger.debug("Rollback realizado após erro na FASE 03")
+            except Exception:
+                pass
 
             return {
                 "downloads": 0,
@@ -413,8 +677,36 @@ class OrcamentoController:
             salvos=0, downloads=0, erros=[], detalhes=[]
         )
 
+        chave_execucao = OrcamentoController._gerar_chave_execucao(request)
+
+        async with OrcamentoController._execucao_lock:
+            if chave_execucao in OrcamentoController._execucoes_em_andamento:
+                logger.warning(
+                    "Processamento duplicado bloqueado para o mesmo lote/filtros em execução"
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Este lote já está em processamento. Aguarde a conclusão antes de reenviar."
+                )
+            OrcamentoController._execucoes_em_andamento.add(chave_execucao)
+
         api_service = OrcamentoAPIService()
         modo = getattr(request, 'modo_agrupamento', 'unidade')
+
+        # Gerar grupo_lote_id sequencial a partir do banco de dados
+        grupo_lote_id = getattr(request, 'grupo_lote_id', None)
+        if not grupo_lote_id:
+            try:
+                db.execute(text("CREATE SEQUENCE IF NOT EXISTS lote_id_seq START WITH 1 INCREMENT BY 1"))
+                row = db.execute(text("SELECT nextval('lote_id_seq')")).fetchone()
+                grupo_lote_id = row[0]
+                logger.info(f"Grupo lote ID gerado sequencialmente: {grupo_lote_id}")
+            except Exception as e:
+                logger.warning(f"Erro ao gerar lote_id via sequence: {e}")
+                import random
+                grupo_lote_id = random.randint(100000, 999999)
+
+        resultado.grupo_lote_id = grupo_lote_id
 
         try:
             # Gerar orçamentos locais (via SQL)
@@ -426,6 +718,8 @@ class OrcamentoController:
                     datas_saida=request.datas_saida,
                     divisoes_logistica=request.divisoes_logistica,
                     dias_uteis_filtro=request.dias_uteis_filtro,
+                    ids_formularios=request.ids_formularios,
+                    status_ids=request.status_ids,
                     modo_agrupamento=modo
                 )
             )
@@ -442,6 +736,8 @@ class OrcamentoController:
             total_orcamentos = len(orcamentos_locais.orcamentos)
 
             for idx, orcamento in enumerate(orcamentos_locais.orcamentos):
+                fase02 = {"tem_op": False}
+
                 if idx > 0:
                     logger.info(f"Aguardando {DELAY_ENTRE_ORCAMENTOS}s antes da próxima requisição...")
                     await asyncio.sleep(DELAY_ENTRE_ORCAMENTOS)
@@ -451,7 +747,7 @@ class OrcamentoController:
                 try:
                     # FASE 01 — Enviar orçamento
                     fase01 = await OrcamentoController._fase01_enviar_orcamento(
-                        db, api_service, orcamento, modo
+                        db, api_service, orcamento, modo, grupo_lote_id=grupo_lote_id
                     )
                     resultado.enviados += 1
                     resultado.salvos += 1
@@ -462,12 +758,16 @@ class OrcamentoController:
                     payload_enviado = fase01["payload_enviado"]
 
                     # FASE 02 — Aprovar orçamento (se configurado)
-                    if request.data_entrega and request.aprovar_automaticamente:
+                    usar_data_saida_distribuicao = getattr(request, 'usar_data_saida_distribuicao', False)
+
+                    if request.aprovar_automaticamente and (request.data_entrega or usar_data_saida_distribuicao):
                         gerar_op = getattr(request, 'gerar_op', True)
                         fase02 = await OrcamentoController._fase02_aprovar_orcamento(
                             db, api_service, id_orcamento,
                             request.data_entrega, distribuicoes_ids, payload_enviado,
-                            gerar_op=gerar_op
+                            gerar_op=gerar_op,
+                            usar_data_saida_distribuicao=usar_data_saida_distribuicao,
+                            grupo_lote_id=grupo_lote_id
                         )
                         resultado.detalhes.append(fase02["detalhe"])
 
@@ -479,7 +779,7 @@ class OrcamentoController:
                     # FASE 03 — Baixar arquivos (somente se aprovado E com OP gerada)
                     if request.baixar_arquivos and fase02.get("tem_op", False):
                         fase03 = await OrcamentoController._fase03_baixar_arquivos(
-                            db, id_orcamento, distribuicoes_ids
+                            db, id_orcamento, distribuicoes_ids, grupo_lote_id=grupo_lote_id
                         )
                         resultado.downloads += fase03["downloads"]
                         resultado.erros.extend(fase03["erros"])
@@ -489,6 +789,15 @@ class OrcamentoController:
                     error_msg = f"Erro na FASE 01 (orçamento) para índice {idx}: {str(e)}"
                     logger.error(error_msg)
                     resultado.erros.append(error_msg)
+                    try:
+                        db.rollback()
+                        logger.debug(f"Rollback realizado após erro no orçamento {idx}")
+                    except Exception:
+                        pass
+                    logger.warning(
+                        "Processamento interrompido após erro para evitar envios subsequentes sem OK da API."
+                    )
+                    break
 
             # Log final
             logger.info("=" * 60)
@@ -504,3 +813,6 @@ class OrcamentoController:
             logger.error(f"Erro geral no processamento: {str(e)}")
             resultado.erros.append(f"Erro geral: {str(e)}")
             return resultado
+        finally:
+            async with OrcamentoController._execucao_lock:
+                OrcamentoController._execucoes_em_andamento.discard(chave_execucao)

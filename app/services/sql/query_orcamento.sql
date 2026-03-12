@@ -1,5 +1,5 @@
 -- Query para geração de orçamentos por unidade escolar
--- Parâmetros: :escola_id, :ids_produtos, :datas_saida, :divisoes_logistica, :dias_uteis_filtro
+-- Parâmetros: :escola_id, :ids_produtos, :datas_saida, :divisoes_logistica, :dias_uteis_filtro, :ids_formularios, :status_ids
 
 WITH parametros AS (
     SELECT
@@ -8,17 +8,19 @@ WITH parametros AS (
         CAST(:datas_saida AS date[]) AS datas_saida,
         CAST(:divisoes_logistica AS text[]) AS divisoes_logistica, 
         CAST(:dias_uteis_filtro AS int[]) AS dias_uteis_filtro,
-        NULL::integer[] AS ids_formularios
+        CAST(:ids_formularios AS int[]) AS ids_formularios,
+        CAST(:status_ids AS int[]) AS status_ids
 ),
 
 unidades_filtradas AS (
     SELECT
         ue.id,
+        ue.nome,
         ue.cliente_id,
         ue.forma_pagamento,
         ue.escola_id,
         ue.client_id_venda,
-        ue.vendedor_id_venda
+        ue.vendedor_id  -- switched from vendedor_id_venda to vendedor_id
     FROM unidades_escolares ue
     CROSS JOIN parametros p
     WHERE ue.escola_id = p.escola_id
@@ -67,7 +69,8 @@ especificacoes_unidade AS (
             p.datas_saida IS NULL
             OR NULLIF(dm.data_saida, '')::date = ANY(p.datas_saida)
             OR NULLIF(dm.data_saida, '') IS NULL
-        ) AND dm.status_distribuicao = 'pendente' AND dm.status_id = 1
+        ) 
+        AND dm.status_id = ANY(p.status_ids)
         AND (p.ids_formularios IS NULL OR ap.formulario_id = ANY(p.ids_formularios))
 ),
 
@@ -81,8 +84,9 @@ itens_produto AS (
         MAX(eu.especificacao_id) AS especificacao_id,
         MAX(eu.id_produto) AS id_produto,
         (SELECT uf.client_id_venda FROM unidades_filtradas uf WHERE uf.id = eu.unidade_id LIMIT 1) AS client_id_venda,
-        (SELECT uf.vendedor_id_venda FROM unidades_filtradas uf WHERE uf.id = eu.unidade_id LIMIT 1) AS vendedor_id_venda,
+        (SELECT uf.vendedor_id FROM unidades_filtradas uf WHERE uf.id = eu.unidade_id LIMIT 1) AS vendedor_id,
         (SELECT uf.forma_pagamento FROM unidades_filtradas uf WHERE uf.id = eu.unidade_id LIMIT 1) AS forma_pagamento_venda,
+        (SELECT uf.nome FROM unidades_filtradas uf WHERE uf.id = eu.unidade_id LIMIT 1) AS nome_unidade,
         
         -- PEGA O ID DA DISTRIBUIÇÃO POR TIPO DE COMPONENTE
         MAX(CASE WHEN LOWER(eu.tipo_arquivo) = 'miolo' THEN eu.id_distribuicao END) AS id_distribuicao_miolo,
@@ -236,8 +240,9 @@ SELECT json_build_object(
     'identifier', 'PageFlow',
     'data', json_build_object(
         'id_cliente', ip.cliente_id,
-        'id_vendedor', ip.vendedor_id_venda,
+        'id_vendedor', ip.vendedor_id,
         'id_forma_pagamento', ip.forma_pagamento_venda,
+        'nome_unidade', ip.nome_unidade,
         'itens', COALESCE(
             json_agg(
                 json_build_object(
@@ -260,10 +265,7 @@ SELECT json_build_object(
                                         'altura', comp_sel.altura,
                                         'largura', comp_sel.largura,
                                         'quantidade_paginas', COALESCE(comp_sel.quantidade_paginas, 0),
-                                        'idgruposubstratoimpressao', CASE
-                                            WHEN UPPER(comp_sel."categoria_Prod") IN ('LIVRETO') THEN NULL
-                                            ELSE comp_sel.idgruposubstratoimpressao
-                                        END,
+                                        'idgruposubstratoimpressao',  comp_sel.idgruposubstratoimpressao,
                                         'gramaturasubstratoimpressao', COALESCE(
                                             comp_sel.gramatura_catalogo,
                                             NULLIF(replace(regexp_replace(comp_sel.gramatura_miolo::text, '[^0-9.,]', '', 'g'), ',', '.'), '')::numeric
@@ -301,6 +303,22 @@ SELECT json_build_object(
                                             'altura', comp_sel.altura,
                                             'largura', comp_sel.largura,
                                             'quantidade_paginas', comp_sel.quantidade_paginas,
+                                                'idgruposubstratoimpressao',
+                                                    CASE
+                                                        WHEN UPPER(comp_sel."categoria_Prod") = 'LIVRETO'
+                                                             AND comp_sel.is_capa IS TRUE
+                                                             AND EXISTS (
+                                                                 SELECT 1 FROM componentes c_miolo
+                                                                 WHERE c_miolo.id_produto = comp_sel.id_produto
+                                                                   AND c_miolo.is_miolo IS TRUE
+                                                                   AND (
+                                                                       (ip.pares IS NOT NULL AND c_miolo.pares = ip.pares AND c_miolo.formulario_id = ip.formulario_id)
+                                                                       OR (ip.pares IS NULL AND c_miolo.especificacao_id = ip.especificacao_id)
+                                                                   )
+                                                             )
+                                                        THEN comp_sel.idgruposubstratoimpressao
+                                                        ELSE NULL
+                                                    END,
                                             'gramaturasubstratoimpressao',
                                                 CASE
                                                     WHEN UPPER(comp_sel."categoria_Prod") = 'LIVRETO'
@@ -425,5 +443,5 @@ SELECT json_build_object(
     )
 )
 FROM itens_produto ip
-GROUP BY ip.unidade_id, ip.cliente_id, ip.tipo_agrupamento, ip.client_id_venda, ip.vendedor_id_venda, ip.forma_pagamento_venda
+GROUP BY ip.unidade_id, ip.cliente_id, ip.tipo_agrupamento, ip.client_id_venda, ip.vendedor_id, ip.forma_pagamento_venda, ip.nome_unidade
 ORDER BY ip.unidade_id, ip.tipo_agrupamento DESC;

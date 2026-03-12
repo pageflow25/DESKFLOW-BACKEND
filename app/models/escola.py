@@ -11,6 +11,7 @@ class TipoEscola(str, enum.Enum):
     FEDERAL = "federal"
     ESTADUAL = "estadual"
     MUNICIPAL = "municipal"
+    CONVENIADO = "conveniado"
 
 class StatusEscola(str, enum.Enum):
     """Enum para status de escola"""

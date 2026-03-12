@@ -10,6 +10,8 @@ class OrcamentoRequest(BaseModel):
     datas_saida: List[date] = Field(..., min_length=1, description="Lista de datas de saída")
     divisoes_logistica: Optional[List[str]] = Field(None, description="Lista de divisões logísticas (opcional)")
     dias_uteis_filtro: Optional[List[int]] = Field(None, description="Lista de dias úteis (opcional)")
+    ids_formularios: Optional[List[int]] = Field(None, description="Lista de IDs de formulários para filtrar (opcional)")
+    status_ids: Optional[List[int]] = Field(None, description="Lista de status_id para filtrar (padrão: [1])")
     modo_agrupamento: str = Field("unidade", description="Modo de agrupamento: 'unidade' (por unidade) ou 'escola' (agrupado por escola)")
 
 
@@ -79,6 +81,7 @@ class ProcessamentoResultado(BaseModel):
     downloads: int = 0
     erros: List[str] = []
     detalhes: List[dict] = []
+    grupo_lote_id: Optional[int] = Field(None, description="ID sequencial do lote gerado automaticamente")
 
 
 class FluxoOrcamentoRequest(BaseModel):
@@ -91,8 +94,12 @@ class FluxoOrcamentoRequest(BaseModel):
     dias_uteis_filtro: Optional[List[int]] = Field(None, description="Dias úteis (opcional)")
     aprovar_automaticamente: bool = Field(False, description="Se deve aprovar automaticamente")
     data_entrega: Optional[str] = Field(None, description="Data de entrega para aprovação (ISO format)")
+    usar_data_saida_distribuicao: bool = Field(False, description="Se true, usa data_saida da distribuicao_materiais por item na aprovação")
     baixar_arquivos: bool = Field(False, description="Se deve baixar arquivos após aprovação (FASE 03)")
     gerar_op: bool = Field(True, description="Se deve gerar OP na aprovação (FASE 02). False envia gerar_op=false para a API Bremen.")
+    ids_formularios: Optional[List[int]] = Field(None, description="Lista de IDs de formulários para filtrar (opcional)")
+    status_ids: Optional[List[int]] = Field(None, description="Lista de status_id para filtrar (padrão: [1])")
+    grupo_lote_id: Optional[int] = Field(None, description="ID do grupo selecionado para disparo do lote")
     modo_agrupamento: str = Field("unidade", description="Modo de agrupamento: 'unidade' ou 'escola'")
 
 
@@ -109,6 +116,59 @@ class GerarOrcamentoCompleto(BaseModel):
     tipo_fluxo: str = Field(default="com_distribuicao_sem_faturamento", description="Tipo do fluxo de processamento")
     aprovar_automaticamente: bool = Field(True, description="Se deve aprovar automaticamente")
     data_entrega: Optional[str] = Field(None, description="Data de entrega para aprovação (formato ISO)")
+    usar_data_saida_distribuicao: bool = Field(False, description="Se true, usa data_saida da distribuicao_materiais por item na aprovação")
     baixar_arquivos: bool = Field(True, description="Se deve baixar arquivos após aprovação (FASE 03)")
     gerar_op: bool = Field(True, description="Se deve gerar OP na aprovação. False envia gerar_op=false para a API Bremen.")
+    ids_formularios: Optional[List[int]] = Field(None, description="Lista de IDs de formulários para filtrar (opcional)")
+    status_ids: Optional[List[int]] = Field(None, description="Lista de status_id para filtrar (padrão: [1])")
+    grupo_lote_id: Optional[int] = Field(None, description="ID do grupo selecionado para disparo do lote")
     modo_agrupamento: str = Field("unidade", description="Modo de agrupamento: 'unidade' (por unidade) ou 'escola' (agrupado por escola)")
+
+
+class LoteDisparoEvento(BaseModel):
+    status: str
+    sucesso: bool
+    mensagem: Optional[str] = None
+    data_evento: Optional[str] = None
+
+
+class LoteDisparoOP(BaseModel):
+    id_ops: int
+    pedido: Optional[dict] = None
+
+
+class LoteDisparoDistribuicao(BaseModel):
+    distribuicao_material_id: int
+    escola_nome: Optional[str] = None
+    unidade_nome: Optional[str] = None
+    material_descricao: Optional[str] = None
+    arquivo_nome: Optional[str] = None
+    quantidade: Optional[int] = None
+    status: Optional[str] = None
+    sucesso: bool = False
+    mensagem: Optional[str] = None
+    data_evento: Optional[str] = None
+    ops: List[LoteDisparoOP] = []
+    eventos: List[LoteDisparoEvento] = []
+
+
+class LoteDisparoOrcamento(BaseModel):
+    id_orcamento: Optional[int] = None
+    distribuicoes: List[LoteDisparoDistribuicao] = []
+
+
+class LoteDisparoResumo(BaseModel):
+    grupo_lote_id: int
+    data_envio: Optional[str] = None
+    total_pedidos: int
+    total_sucesso: int
+    total_erro: int
+    escolas: List[str] = []
+    destinos: List[str] = []
+    orcamentos: List[LoteDisparoOrcamento] = []
+
+
+class LoteDisparoListResponse(BaseModel):
+    lotes: List[LoteDisparoResumo]
+    total_lotes: int
+    total_geral: int = 0

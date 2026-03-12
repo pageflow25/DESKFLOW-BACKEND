@@ -30,9 +30,18 @@ class Settings(BaseSettings):
     BREMEN_API_URL: str
     BREMEN_API_TOKEN: str = ""  # Opcional — token agora é renovado automaticamente via BremenClient
     API_TIMEOUT: int  # 5 minutos para aguardar resposta da API Bremen
+    BREMEN_503_MAX_WAIT_SECONDS: int = 300
+    BREMEN_503_RETRY_BASE_SECONDS: int = 5
+    BREMEN_503_RETRY_MAX_INTERVAL_SECONDS: int = 30
 
     # Configurações FASE 03 — Download de Arquivos
     DOWNLOAD_BASE_PATH: str
+
+    # Configurações da automação de escolas conveniadas
+    CONVENIADO_AUTOMACAO_ATIVA: bool
+    CONVENIADO_AUTOMACAO_HORARIOS: str
+    CONVENIADO_AUTOMACAO_TIMEZONE: str
+    CONVENIADO_DATA_ENTREGA_OFFSET_DIAS: int
     class Config:
         env_file = ".env"
         extra = "ignore"  # Ignora campos extras do .env que não estão no modelo

@@ -1,5 +1,5 @@
 -- Query para buscar pedidos de uma escola em estrutura hierárquica (cascata)
--- Parâmetros: :escola_id, :tipo_formulario
+-- Parâmetros: :escola_id, :tipo_formulario, :ids_formularios, :status_ids
 
 WITH dados_normalizados AS (
     SELECT
@@ -8,8 +8,8 @@ WITH dados_normalizados AS (
         COALESCE(CAST(uc.dias_uteis AS TEXT), 'Sem dias uteis') AS dias_uteis,
 
         -- PRODUTO
-        b.id_produto,
-        b.descricao AS nome_produto,
+        COALESCE(b.id_produto, e.id_produto) AS id_produto,
+        COALESCE(b.descricao, CONCAT('Produto ', COALESCE(CAST(e.id_produto AS TEXT), 'N/A'))) AS nome_produto,
 
         -- DATA DE SAÍDA
         COALESCE(
@@ -17,29 +17,39 @@ WITH dados_normalizados AS (
             'Sem data saida'
         ) AS data_saida_formatada,
 
-        -- ARQUIVO (NÍVEL 4)
+        -- UNIDADE ESCOLAR
+        uc.id AS unidade_id,
+        uc.nome AS nome_unidade,
+
+        -- ARQUIVO
         ar.id AS arquivo_id,
-        ar.nome as nome_arquivo,
+        COALESCE(ar.nome, 'Sem arquivo vinculado') AS nome_arquivo,
         distri.quantidade as quantidade,
         ar.paginas as paginas
 
     FROM formularios f
     INNER JOIN especificacoes_form e 
         ON f.id = e.formulario_id
-    INNER JOIN arquivo_pdfs ar 
-        ON ar.item_pedido_id = e.id
     INNER JOIN distribuicao_materiais distri 
-        ON distri.arquivo_pdf_id = ar.id
+        ON distri.especificacao_form_id = e.id
     INNER JOIN unidades_escolares uc 
         ON distri.unidade_escolar_id = uc.id
-    INNER JOIN bremen_itens b 
+    LEFT JOIN arquivo_pdfs ar
+        ON ar.id = distri.arquivo_pdf_id
+    LEFT JOIN bremen_itens b 
         ON e.id_produto = b.id_produto
-    WHERE UPPER(f.tipo_formulario) = UPPER(:tipo_formulario)
+    WHERE (
+            :tipo_formulario IS NULL
+            OR TRIM(CAST(:tipo_formulario AS TEXT)) = ''
+            OR UPPER(f.tipo_formulario) = UPPER(:tipo_formulario)
+        )
         AND uc.escola_id = :escola_id
-        AND distri.status_id = 1
+        AND (:status_ids IS NULL OR distri.status_id = ANY(CAST(:status_ids AS int[])))
+        AND (CAST(:ids_formularios AS int[]) IS NULL OR f.id = ANY(CAST(:ids_formularios AS int[]))
+        )
 ),
 
--- NÍVEL 4: ARQUIVOS
+-- NÍVEL 5: ARQUIVOS (agrupados por divisão + produto + data + unidade)
 nivel_arquivos AS (
     SELECT
         divisao_logistica,
@@ -47,6 +57,8 @@ nivel_arquivos AS (
         id_produto,
         nome_produto,
         data_saida_formatada,
+        unidade_id,
+        nome_unidade,
 
         COUNT(*) AS qtd_arquivos,
 
@@ -59,6 +71,29 @@ nivel_arquivos AS (
         ) AS lista_arquivos
 
     FROM dados_normalizados
+    GROUP BY 1,2,3,4,5,6,7
+),
+
+-- NÍVEL 4: UNIDADES ESCOLARES
+nivel_unidades AS (
+    SELECT
+        divisao_logistica,
+        dias_uteis,
+        id_produto,
+        nome_produto,
+        data_saida_formatada,
+
+        SUM(qtd_arquivos) AS qtd_data,
+
+        JSONB_AGG(
+            JSONB_BUILD_OBJECT(
+                'unidade', nome_unidade,
+                'quantidade', qtd_arquivos,
+                'arquivos', lista_arquivos
+            ) ORDER BY nome_unidade ASC
+        ) AS lista_unidades
+
+    FROM nivel_arquivos
     GROUP BY 1,2,3,4,5
 ),
 
@@ -70,17 +105,17 @@ nivel_datas AS (
         id_produto,
         nome_produto,
 
-        SUM(qtd_arquivos) AS qtd_produto,
+        SUM(qtd_data) AS qtd_produto,
 
         JSONB_AGG(
             JSONB_BUILD_OBJECT(
                 'data_saida', data_saida_formatada,
-                'quantidade', qtd_arquivos,
-                'arquivos', lista_arquivos
+                'quantidade', qtd_data,
+                'unidades', lista_unidades
             ) ORDER BY data_saida_formatada DESC
         ) AS lista_datas
 
-    FROM nivel_arquivos
+    FROM nivel_unidades
     GROUP BY 1,2,3,4
 ),
 

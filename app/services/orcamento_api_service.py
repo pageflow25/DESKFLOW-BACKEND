@@ -1,33 +1,55 @@
 import httpx
 import json
 import asyncio
-from typing import Dict, Any, List
+from datetime import datetime
+from typing import Dict, Any, List, Optional
 from sqlalchemy.orm import Session
 from ..config.logging_config import get_logger
 from ..config.settings import get_settings
 from ..models.orcamento_api import OrcamentoAPI
+from ..models.distribuicao_material import DistribuicaoMaterial
 from ..schemas.orcamento import OrcamentoResponse
 from .bremen_client import BremenClient
 
 logger = get_logger(__name__)
 settings = get_settings()
 
-# Configurações de retry
-MAX_RETRIES = 3
-RETRY_DELAY_SECONDS = 5
 REQUEST_DELAY_SECONDS = 2  # Delay entre requisições para não sobrecarregar API
 
 
 class OrcamentoAPIService:
     """Service para integração com APIs externas de orçamento Bremen"""
+
+    @staticmethod
+    def _formatar_data_entrega_iso(data_raw: Any) -> str | None:
+        """Converte data (YYYY-MM-DD) para formato ISO esperado pela API Bremen."""
+        if data_raw is None:
+            return None
+
+        valor = str(data_raw).strip()
+        if not valor:
+            return None
+
+        try:
+            data_obj = datetime.fromisoformat(valor[:10])
+            return data_obj.strftime("%Y-%m-%dT12:00:00.000-03:00")
+        except Exception:
+            return None
     
     def __init__(self):
         # URLs das APIs Bremen
         self.api_base_url = settings.BREMEN_API_URL
         self.api_timeout = settings.API_TIMEOUT
+        self.retry_max_wait_seconds = max(0, settings.BREMEN_503_MAX_WAIT_SECONDS)
+        self.retry_base_seconds = max(1, settings.BREMEN_503_RETRY_BASE_SECONDS)
+        self.retry_max_interval_seconds = max(1, settings.BREMEN_503_RETRY_MAX_INTERVAL_SECONDS)
         
         # Cliente Bremen com renovação automática de token
         self.bremen_client = BremenClient()
+
+    def _calcular_delay_retry(self, tentativa: int) -> int:
+        """Calcula delay progressivo entre tentativas, limitado por configuração."""
+        return min(self.retry_base_seconds * max(tentativa, 1), self.retry_max_interval_seconds)
     
     async def _fazer_requisicao_com_retry(
         self, 
@@ -51,10 +73,17 @@ class OrcamentoAPIService:
         path = url.replace(self.api_base_url, "") if url.startswith(self.api_base_url) else url
         
         last_error = None
-        
-        for tentativa in range(1, MAX_RETRIES + 1):
+        tentativa = 1
+        loop = asyncio.get_running_loop()
+        inicio = loop.time()
+        prazo_final = inicio + self.retry_max_wait_seconds
+
+        while True:
             try:
-                logger.info(f"Tentativa {tentativa}/{MAX_RETRIES} - {operacao}")
+                logger.info(
+                    f"Tentativa {tentativa} - {operacao} "
+                    f"(janela retry 503: {self.retry_max_wait_seconds}s)"
+                )
                 
                 # BremenClient cuida da autenticação e renovação do token
                 response = await self.bremen_client.post(path, payload)
@@ -62,14 +91,28 @@ class OrcamentoAPIService:
                 # Se for 503, fazer retry
                 if response.status_code == 503:
                     error_msg = response.text
-                    logger.warning(f"API retornou 503 (ocupada). Aguardando {RETRY_DELAY_SECONDS}s antes de tentar novamente...")
-                    logger.debug(f"Resposta 503: {error_msg}")
-                    
-                    if tentativa < MAX_RETRIES:
-                        await asyncio.sleep(RETRY_DELAY_SECONDS * tentativa)  # Backoff exponencial
-                        continue
-                    else:
+                    agora = loop.time()
+                    tempo_decorrido = int(agora - inicio)
+                    tempo_restante = int(max(0, prazo_final - agora))
+
+                    if agora >= prazo_final:
+                        logger.error(
+                            "API Bremen permaneceu em 503 até o limite de retry "
+                            f"({self.retry_max_wait_seconds}s)."
+                        )
                         response.raise_for_status()
+
+                    delay = min(self._calcular_delay_retry(tentativa), max(1, tempo_restante))
+                    logger.warning(
+                        f"API retornou 503 (ocupada). Tentativa {tentativa}. "
+                        f"Decorrido: {tempo_decorrido}s, restante: {tempo_restante}s. "
+                        f"Aguardando {delay}s para nova tentativa..."
+                    )
+                    logger.debug(f"Resposta 503: {error_msg}")
+
+                    await asyncio.sleep(delay)
+                    tentativa += 1
+                    continue
                 
                 response.raise_for_status()
                 return response.json()
@@ -78,12 +121,44 @@ class OrcamentoAPIService:
                 last_error = e
                 logger.error(f"ERRO DE CONEXÃO com API Bremen ({self.api_base_url}): {str(e)}")
                 logger.error("Verifique: 1) Servidor Bremen online? 2) Rede/VPN conectada? 3) IP correto?")
-                
-                if tentativa < MAX_RETRIES:
-                    logger.info(f"Aguardando {RETRY_DELAY_SECONDS}s antes de tentar novamente...")
-                    await asyncio.sleep(RETRY_DELAY_SECONDS)
-                    continue
-                raise
+
+                agora = loop.time()
+                if agora >= prazo_final:
+                    logger.error(
+                        "Timeout de retry por erro de conexão atingido "
+                        f"({self.retry_max_wait_seconds}s)."
+                    )
+                    raise
+
+                tempo_restante = int(max(0, prazo_final - agora))
+                delay = min(self._calcular_delay_retry(tentativa), max(1, tempo_restante))
+                logger.info(
+                    f"Aguardando {delay}s antes de tentar novamente "
+                    f"(restante da janela: {tempo_restante}s)..."
+                )
+                await asyncio.sleep(delay)
+                tentativa += 1
+                continue
+
+            except httpx.ReadTimeout as e:
+                last_error = e
+                logger.error(
+                    f"Timeout de leitura na operação '{operacao}' após {self.api_timeout}s: {str(e)}"
+                )
+
+                agora = loop.time()
+                if agora >= prazo_final:
+                    raise
+
+                tempo_restante = int(max(0, prazo_final - agora))
+                delay = min(self._calcular_delay_retry(tentativa), max(1, tempo_restante))
+                logger.info(
+                    f"Aguardando {delay}s após timeout para nova tentativa "
+                    f"(restante da janela: {tempo_restante}s)..."
+                )
+                await asyncio.sleep(delay)
+                tentativa += 1
+                continue
                 
             except httpx.HTTPStatusError as e:
                 last_error = e
@@ -91,18 +166,30 @@ class OrcamentoAPIService:
                 if e.response.status_code != 503:
                     logger.error(f"Erro HTTP: {e.response.status_code} - {e.response.text}")
                     raise
-                    
-                # 503 já tratado acima
-                raise
+
+                agora = loop.time()
+                if agora >= prazo_final:
+                    raise
+
+                tempo_restante = int(max(0, prazo_final - agora))
+                delay = min(self._calcular_delay_retry(tentativa), max(1, tempo_restante))
+                await asyncio.sleep(delay)
+                tentativa += 1
+                continue
                 
             except Exception as e:
                 last_error = e
                 logger.error(f"Erro ao fazer {operacao}: {str(e)}")
-                
-                if tentativa < MAX_RETRIES:
-                    await asyncio.sleep(RETRY_DELAY_SECONDS)
-                    continue
-                raise
+
+                agora = loop.time()
+                if agora >= prazo_final:
+                    raise
+
+                tempo_restante = int(max(0, prazo_final - agora))
+                delay = min(self._calcular_delay_retry(tentativa), max(1, tempo_restante))
+                await asyncio.sleep(delay)
+                tentativa += 1
+                continue
         
         # Se chegou aqui, todas as tentativas falharam
         raise last_error if last_error else Exception("Todas as tentativas falharam")
@@ -215,8 +302,9 @@ class OrcamentoAPIService:
         self, 
         db: Session,
         id_orcamento: int, 
-        data_entrega: str,
-        gerar_op: bool = True
+        data_entrega: Optional[str],
+        gerar_op: bool = True,
+        usar_data_saida_distribuicao: bool = False,
     ) -> Dict[str, Any]:
         """
         Aprova orçamento na API Bremen (FASE 02)
@@ -244,15 +332,42 @@ class OrcamentoAPIService:
         
         logger.info(f"Encontrados {len(itens_db)} itens na tabela orcamento_api para orçamento {id_orcamento}")
         
+        # Buscar data_saida por distribuição para aprovação por item (quando habilitado)
+        datas_entrega_por_distribuicao: Dict[int, str] = {}
+        if usar_data_saida_distribuicao:
+            ids_dist = [item.distribuicao_material_id for item in itens_db if item.distribuicao_material_id is not None]
+            if ids_dist:
+                rows_dist = db.query(DistribuicaoMaterial.id, DistribuicaoMaterial.data_saida).filter(
+                    DistribuicaoMaterial.id.in_(ids_dist)
+                ).all()
+                datas_entrega_por_distribuicao = {
+                    row.id: self._formatar_data_entrega_iso(row.data_saida)
+                    for row in rows_dist
+                }
+
         # Montar lista de itens para aprovação usando id_item da tabela
         itens_aprovacao = []
         for item in itens_db:
             if item.id_item:
+                data_item = data_entrega
+                if usar_data_saida_distribuicao:
+                    data_item = datas_entrega_por_distribuicao.get(item.distribuicao_material_id)
+
+                    if not data_item and data_entrega:
+                        data_item = data_entrega
+
+                    if not data_item:
+                        raise ValueError(
+                            f"Distribuição {item.distribuicao_material_id} sem data_saida válida para aprovação do item {item.id_item}"
+                        )
+
                 itens_aprovacao.append({
                     "id": item.id_item,
-                    "data_entrega": data_entrega
+                    "data_entrega": data_item
                 })
-                logger.debug(f"Item adicionado para aprovação: id={item.id_item}")
+                logger.debug(
+                    f"Item adicionado para aprovação: id={item.id_item}, dist={item.distribuicao_material_id}, data_entrega={data_item}"
+                )
         
         if not itens_aprovacao:
             raise ValueError(f"Nenhum item válido (id_item) encontrado para aprovação do orçamento {id_orcamento}")

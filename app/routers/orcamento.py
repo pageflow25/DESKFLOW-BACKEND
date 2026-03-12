@@ -8,11 +8,13 @@ from ..schemas.orcamento import (
     FluxoOrcamentoRequest,
     OrcamentoRequest,
     OrcamentoListResponse,
-    GerarOrcamentoCompleto
+    GerarOrcamentoCompleto,
+    LoteDisparoListResponse,
 )
 from ..controllers.orcamento_controller import OrcamentoController
 from ..services.auth_service import verify_token
 from ..services.arquivo_orcamento_service import ArquivoOrcamentoService
+from ..services.automacao_conveniado_service import AutomacaoConveniadoService
 from ..config.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -71,7 +73,7 @@ async def gerar_orcamento(
         
         # Se data_entrega não foi fornecida, usar data padrão (hoje + 7 dias)
         data_entrega = request.data_entrega
-        if not data_entrega and request.aprovar_automaticamente:
+        if not data_entrega and request.aprovar_automaticamente and not request.usar_data_saida_distribuicao:
             from datetime import datetime, timedelta
             data_futura = datetime.now() + timedelta(days=7)
             data_entrega = data_futura.strftime("%Y-%m-%dT12:00:00.000-03:00")
@@ -85,8 +87,12 @@ async def gerar_orcamento(
             datas_saida=request.datas_saida,
             divisoes_logistica=request.divisoes_logistica,
             dias_uteis_filtro=request.dias_uteis_filtro,
+            ids_formularios=request.ids_formularios,
+            status_ids=request.status_ids,
+            grupo_lote_id=request.grupo_lote_id,
             aprovar_automaticamente=request.aprovar_automaticamente,
             data_entrega=data_entrega,
+            usar_data_saida_distribuicao=request.usar_data_saida_distribuicao,
             baixar_arquivos=request.baixar_arquivos,
             gerar_op=request.gerar_op,
             modo_agrupamento=request.modo_agrupamento
@@ -102,6 +108,34 @@ async def gerar_orcamento(
         raise
     except Exception as e:
         logger.error(f"Erro no fluxo completo de orçamento: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro interno: {str(e)}"
+        )
+
+
+@router.get("/lotes/disparos", response_model=LoteDisparoListResponse)
+async def listar_lotes_disparo(
+    limit: int = 10,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    user_data: dict = Depends(verify_admin)
+):
+    """
+    Lista lotes de disparo de pedidos para acompanhamento/auditoria.
+
+    Retorna resumo por grupo_lote_id e detalhes por distribuição.
+    Suporta paginação via limit/offset.
+    """
+    try:
+        logger.info(
+            f"Usuário {user_data.get('username')} consultando lotes de disparo (limit={limit}, offset={offset})"
+        )
+        return await OrcamentoController.listar_lotes_disparo(db=db, limit=limit, offset=offset)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao listar lotes de disparo: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro interno: {str(e)}"
@@ -170,6 +204,32 @@ async def processar_orcamento(
         raise
     except Exception as e:
         logger.error(f"Erro no processamento de orçamento: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro interno: {str(e)}"
+        )
+
+
+@router.post("/automacao/conveniados/executar")
+async def executar_automacao_conveniados(
+    user_data: dict = Depends(verify_admin)
+):
+    """
+    Executa manualmente o lote de automação das escolas conveniadas.
+
+    Fluxo executado por escola elegível:
+    1) Lançamento de pedidos (orçamento)
+    2) Aprovação com geração de OP
+    3) Download e organização de arquivos
+    4) Atualização de status/histórico de distribuição
+    """
+    try:
+        logger.info(
+            f"Usuário {user_data.get('username')} iniciou execução manual da automação de conveniados"
+        )
+        return await AutomacaoConveniadoService.executar_lote_conveniados()
+    except Exception as e:
+        logger.error(f"Erro na automação manual de conveniados: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro interno: {str(e)}"
