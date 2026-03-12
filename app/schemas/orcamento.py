@@ -125,6 +125,13 @@ class GerarOrcamentoCompleto(BaseModel):
     modo_agrupamento: str = Field("unidade", description="Modo de agrupamento: 'unidade' (por unidade) ou 'escola' (agrupado por escola)")
 
 
+class LoteDisparoEvento(BaseModel):
+    status: str
+    sucesso: bool
+    mensagem: Optional[str] = None
+    data_evento: Optional[str] = None
+
+
 class LoteDisparoItem(BaseModel):
     distribuicao_material_id: int
     status: str
@@ -134,6 +141,7 @@ class LoteDisparoItem(BaseModel):
     escola_nome: Optional[str] = None
     unidade_nome: Optional[str] = None
     material_descricao: Optional[str] = None
+    eventos: List[LoteDisparoEvento] = []
 
 
 class LoteDisparoResumo(BaseModel):
