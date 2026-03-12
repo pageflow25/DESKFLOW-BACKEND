@@ -8,7 +8,8 @@ from ..schemas.orcamento import (
     FluxoOrcamentoRequest,
     OrcamentoRequest,
     OrcamentoListResponse,
-    GerarOrcamentoCompleto
+    GerarOrcamentoCompleto,
+    LoteDisparoListResponse,
 )
 from ..controllers.orcamento_controller import OrcamentoController
 from ..services.auth_service import verify_token
@@ -107,6 +108,34 @@ async def gerar_orcamento(
         raise
     except Exception as e:
         logger.error(f"Erro no fluxo completo de orçamento: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro interno: {str(e)}"
+        )
+
+
+@router.get("/lotes/disparos", response_model=LoteDisparoListResponse)
+async def listar_lotes_disparo(
+    limit: int = 10,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    user_data: dict = Depends(verify_admin)
+):
+    """
+    Lista lotes de disparo de pedidos para acompanhamento/auditoria.
+
+    Retorna resumo por grupo_lote_id e detalhes por distribuição.
+    Suporta paginação via limit/offset.
+    """
+    try:
+        logger.info(
+            f"Usuário {user_data.get('username')} consultando lotes de disparo (limit={limit}, offset={offset})"
+        )
+        return await OrcamentoController.listar_lotes_disparo(db=db, limit=limit, offset=offset)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao listar lotes de disparo: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro interno: {str(e)}"

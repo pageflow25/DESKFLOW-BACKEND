@@ -123,3 +123,29 @@ class GerarOrcamentoCompleto(BaseModel):
     status_ids: Optional[List[int]] = Field(None, description="Lista de status_id para filtrar (padrão: [1])")
     grupo_lote_id: Optional[int] = Field(None, description="ID do grupo selecionado para disparo do lote")
     modo_agrupamento: str = Field("unidade", description="Modo de agrupamento: 'unidade' (por unidade) ou 'escola' (agrupado por escola)")
+
+
+class LoteDisparoItem(BaseModel):
+    distribuicao_material_id: int
+    status: str
+    sucesso: bool
+    mensagem: Optional[str] = None
+    data_evento: Optional[str] = None
+    escola_nome: Optional[str] = None
+    unidade_nome: Optional[str] = None
+    material_descricao: Optional[str] = None
+
+
+class LoteDisparoResumo(BaseModel):
+    grupo_lote_id: int
+    data_envio: Optional[str] = None
+    total_pedidos: int
+    total_sucesso: int
+    total_erro: int
+    itens: List[LoteDisparoItem] = []
+
+
+class LoteDisparoListResponse(BaseModel):
+    lotes: List[LoteDisparoResumo]
+    total_lotes: int
+    total_geral: int = 0

@@ -1,4 +1,5 @@
 import asyncio
+import json
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -9,7 +10,10 @@ from ..schemas.orcamento import (
     OrcamentoListResponse, 
     OrcamentoResponse,
     FluxoOrcamentoRequest, 
-    ProcessamentoResultado
+    ProcessamentoResultado,
+    LoteDisparoListResponse,
+    LoteDisparoResumo,
+    LoteDisparoItem,
 )
 from ..services.orcamento_service import OrcamentoService
 from ..services.orcamento_api_service import OrcamentoAPIService
@@ -26,6 +30,140 @@ DELAY_ENTRE_FASES = 2
 
 class OrcamentoController:
     """Controller para operações de orçamento"""
+    _execucao_lock = asyncio.Lock()
+    _execucoes_em_andamento: set[str] = set()
+
+    @staticmethod
+    def _gerar_chave_execucao(request: FluxoOrcamentoRequest) -> str:
+        payload_chave = {
+            "tipo_fluxo": request.tipo_fluxo,
+            "escola_id": request.escola_id,
+            "ids_produtos": sorted(request.ids_produtos or []),
+            "datas_saida": sorted([d.isoformat() for d in (request.datas_saida or [])]),
+            "divisoes_logistica": sorted(request.divisoes_logistica or []),
+            "dias_uteis_filtro": sorted(request.dias_uteis_filtro or []),
+            "ids_formularios": sorted(request.ids_formularios or []),
+            "status_ids": sorted(request.status_ids or []),
+            "modo_agrupamento": request.modo_agrupamento,
+            "grupo_lote_id": request.grupo_lote_id,
+            "aprovar_automaticamente": request.aprovar_automaticamente,
+            "baixar_arquivos": request.baixar_arquivos,
+            "gerar_op": request.gerar_op,
+            "usar_data_saida_distribuicao": request.usar_data_saida_distribuicao,
+        }
+        return json.dumps(payload_chave, ensure_ascii=False, sort_keys=True)
+
+    @staticmethod
+    async def listar_lotes_disparo(db: Session, limit: int = 10, offset: int = 0) -> LoteDisparoListResponse:
+        """Lista lotes de disparo com resumo e itens detalhados por distribuição. Suporta paginação."""
+        limite = max(1, min(limit, 100))
+        deslocamento = max(0, offset)
+
+        # Contagem total de lotes distintos para paginação
+        total_row = (
+            db.execute(
+                text(
+                    "SELECT COUNT(DISTINCT grupo_lote_id) AS total "
+                    "FROM historico_processamento WHERE grupo_lote_id IS NOT NULL"
+                )
+            )
+            .mappings()
+            .one()
+        )
+        total_geral = int(total_row["total"] or 0)
+
+        lotes_rows = (
+            db.execute(
+                text(
+                    """
+                    SELECT
+                        hp.grupo_lote_id,
+                        MIN(hp.data_evento) AS data_envio,
+                        COUNT(DISTINCT hp.distribuicao_material_id) AS total_pedidos,
+                        COUNT(DISTINCT CASE WHEN hp.sucesso IS TRUE THEN hp.distribuicao_material_id END) AS total_sucesso,
+                        COUNT(DISTINCT CASE WHEN hp.sucesso IS FALSE THEN hp.distribuicao_material_id END) AS total_erro
+                    FROM historico_processamento hp
+                    WHERE hp.grupo_lote_id IS NOT NULL
+                    GROUP BY hp.grupo_lote_id
+                    ORDER BY hp.grupo_lote_id DESC
+                    LIMIT :limit OFFSET :offset
+                    """
+                ),
+                {"limit": limite, "offset": deslocamento},
+            )
+            .mappings()
+            .all()
+        )
+
+        lotes: List[LoteDisparoResumo] = []
+
+        for lote in lotes_rows:
+            grupo_lote_id = int(lote["grupo_lote_id"])
+
+            itens_rows = (
+                db.execute(
+                    text(
+                        """
+                        WITH ultimos AS (
+                            SELECT DISTINCT ON (hp.distribuicao_material_id)
+                                hp.distribuicao_material_id,
+                                hp.status_novo_id,
+                                hp.sucesso,
+                                hp.mensagem,
+                                hp.data_evento
+                            FROM historico_processamento hp
+                            WHERE hp.grupo_lote_id = :grupo_lote_id
+                            ORDER BY hp.distribuicao_material_id, hp.data_evento DESC, hp.id DESC
+                        )
+                        SELECT
+                            u.distribuicao_material_id,
+                            COALESCE(s.codigo, 'desconhecido') AS status_codigo,
+                            u.sucesso,
+                            u.mensagem,
+                            u.data_evento,
+                            e.nome AS escola_nome,
+                            ue.nome AS unidade_nome,
+                            dm.descricao_material AS material_descricao
+                        FROM ultimos u
+                        LEFT JOIN status_deskflow_pedido s ON s.id = u.status_novo_id
+                        LEFT JOIN distribuicao_materiais dm ON dm.id = u.distribuicao_material_id
+                        LEFT JOIN unidades_escolares ue ON ue.id = dm.unidade_escolar_id
+                        LEFT JOIN escolas e ON e.id = ue.escola_id
+                        ORDER BY u.distribuicao_material_id
+                        """
+                    ),
+                    {"grupo_lote_id": grupo_lote_id},
+                )
+                .mappings()
+                .all()
+            )
+
+            itens = [
+                LoteDisparoItem(
+                    distribuicao_material_id=int(item["distribuicao_material_id"]),
+                    status=str(item["status_codigo"]),
+                    sucesso=bool(item["sucesso"]),
+                    mensagem=item["mensagem"],
+                    data_evento=item["data_evento"].isoformat() if item["data_evento"] else None,
+                    escola_nome=item["escola_nome"],
+                    unidade_nome=item["unidade_nome"],
+                    material_descricao=item["material_descricao"],
+                )
+                for item in itens_rows
+            ]
+
+            lotes.append(
+                LoteDisparoResumo(
+                    grupo_lote_id=grupo_lote_id,
+                    data_envio=lote["data_envio"].isoformat() if lote["data_envio"] else None,
+                    total_pedidos=int(lote["total_pedidos"] or 0),
+                    total_sucesso=int(lote["total_sucesso"] or 0),
+                    total_erro=int(lote["total_erro"] or 0),
+                    itens=itens,
+                )
+            )
+
+        return LoteDisparoListResponse(lotes=lotes, total_lotes=len(lotes), total_geral=total_geral)
     
     # ================================================================
     # GERAÇÃO LOCAL
@@ -430,6 +568,19 @@ class OrcamentoController:
             salvos=0, downloads=0, erros=[], detalhes=[]
         )
 
+        chave_execucao = OrcamentoController._gerar_chave_execucao(request)
+
+        async with OrcamentoController._execucao_lock:
+            if chave_execucao in OrcamentoController._execucoes_em_andamento:
+                logger.warning(
+                    "Processamento duplicado bloqueado para o mesmo lote/filtros em execução"
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Este lote já está em processamento. Aguarde a conclusão antes de reenviar."
+                )
+            OrcamentoController._execucoes_em_andamento.add(chave_execucao)
+
         api_service = OrcamentoAPIService()
         modo = getattr(request, 'modo_agrupamento', 'unidade')
 
@@ -476,6 +627,8 @@ class OrcamentoController:
             total_orcamentos = len(orcamentos_locais.orcamentos)
 
             for idx, orcamento in enumerate(orcamentos_locais.orcamentos):
+                fase02 = {"tem_op": False}
+
                 if idx > 0:
                     logger.info(f"Aguardando {DELAY_ENTRE_ORCAMENTOS}s antes da próxima requisição...")
                     await asyncio.sleep(DELAY_ENTRE_ORCAMENTOS)
@@ -532,6 +685,10 @@ class OrcamentoController:
                         logger.debug(f"Rollback realizado após erro no orçamento {idx}")
                     except Exception:
                         pass
+                    logger.warning(
+                        "Processamento interrompido após erro para evitar envios subsequentes sem OK da API."
+                    )
+                    break
 
             # Log final
             logger.info("=" * 60)
@@ -547,3 +704,6 @@ class OrcamentoController:
             logger.error(f"Erro geral no processamento: {str(e)}")
             resultado.erros.append(f"Erro geral: {str(e)}")
             return resultado
+        finally:
+            async with OrcamentoController._execucao_lock:
+                OrcamentoController._execucoes_em_andamento.discard(chave_execucao)
