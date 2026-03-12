@@ -231,40 +231,55 @@ class AutomacaoConveniadoService:
                                 )
                                 continue
 
-                            request = FluxoOrcamentoRequest(
-                                tipo_fluxo="com_distribuicao_sem_faturamento",
-                                escola_id=escola_id,
-                                ids_produtos=ids_produtos,
-                                datas_saida=datas_saida,
-                                divisoes_logistica=divisoes_logistica or None,
-                                dias_uteis_filtro=dias_uteis_filtro or None,
-                                aprovar_automaticamente=True,
-                                data_entrega=None,
-                                usar_data_saida_distribuicao=True,
-                                baixar_arquivos=True,
-                                gerar_op=True,
-                                ids_formularios=ids_formularios or None,
-                                status_ids=[STATUS_ID_PENDENTE_PROCESSAMENTO],
-                                grupo_lote_id=None,
-                                modo_agrupamento="unidade",
-                            )
+                            for data_saida in datas_saida:
+                                logger.info(
+                                    "Automação escola %s - processando data de saída %s em lote dedicado",
+                                    escola_id,
+                                    data_saida.isoformat(),
+                                )
 
-                            resultado = await OrcamentoController.processar_orcamento_com_distribuicao(
-                                db=db_escola,
-                                request=request,
-                            )
+                                request = FluxoOrcamentoRequest(
+                                    tipo_fluxo="com_distribuicao_sem_faturamento",
+                                    escola_id=escola_id,
+                                    ids_produtos=ids_produtos,
+                                    datas_saida=[data_saida],
+                                    divisoes_logistica=divisoes_logistica or None,
+                                    dias_uteis_filtro=dias_uteis_filtro or None,
+                                    aprovar_automaticamente=True,
+                                    data_entrega=None,
+                                    usar_data_saida_distribuicao=True,
+                                    baixar_arquivos=True,
+                                    gerar_op=True,
+                                    ids_formularios=ids_formularios or None,
+                                    status_ids=[STATUS_ID_PENDENTE_PROCESSAMENTO],
+                                    grupo_lote_id=None,
+                                    modo_agrupamento="unidade",
+                                )
 
-                            resultado_dict = resultado.model_dump()
-                            resultado_dict["escola_id"] = escola_id
-                            resultados.append(resultado_dict)
+                                resultado = await OrcamentoController.processar_orcamento_com_distribuicao(
+                                    db=db_escola,
+                                    request=request,
+                                )
 
-                            if resultado.erros:
-                                erros.extend([f"Escola {escola_id}: {erro}" for erro in resultado.erros])
+                                resultado_dict = resultado.model_dump()
+                                resultado_dict["escola_id"] = escola_id
+                                resultado_dict["data_saida_lote"] = data_saida.isoformat()
+                                resultados.append(resultado_dict)
 
-                            logger.info(
-                                f"Automação escola {escola_id}: total={resultado.total}, enviados={resultado.enviados}, "
-                                f"aprovados={resultado.aprovados}, downloads={resultado.downloads}, erros={len(resultado.erros)}"
-                            )
+                                if resultado.erros:
+                                    erros.extend(
+                                        [
+                                            f"Escola {escola_id} | Data {data_saida.isoformat()}: {erro}"
+                                            for erro in resultado.erros
+                                        ]
+                                    )
+
+                                logger.info(
+                                    f"Automação escola {escola_id} (data {data_saida.isoformat()}): "
+                                    f"total={resultado.total}, enviados={resultado.enviados}, "
+                                    f"aprovados={resultado.aprovados}, downloads={resultado.downloads}, "
+                                    f"erros={len(resultado.erros)}"
+                                )
 
                         except Exception as exc:
                             erro = f"Erro ao processar escola {escola_id}: {str(exc)}"
@@ -273,7 +288,7 @@ class AutomacaoConveniadoService:
 
                 return {
                     "executado": True,
-                    "escolas_processadas": len(resultados),
+                    "escolas_processadas": len({r.get("escola_id") for r in resultados}),
                     "erros": erros,
                     "resultados": resultados,
                 }
