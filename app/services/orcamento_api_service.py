@@ -32,7 +32,7 @@ class OrcamentoAPIService:
 
         try:
             data_obj = datetime.fromisoformat(valor[:10])
-            return data_obj.strftime("%Y-%m-%dT12:00:00.000-03:00")
+            return data_obj.strftime("%Y-%m-%dT18:00:00.000-03:00")
         except Exception:
             return None
     
