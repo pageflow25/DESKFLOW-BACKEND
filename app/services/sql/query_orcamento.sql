@@ -163,17 +163,34 @@ componentes AS (
         i.gramatura_miolo,
         i.gramatura_catalogo,
         CASE
-            WHEN bc.is_capa IS TRUE OR LOWER(COALESCE(bc.descricao, '')) LIKE '%%capa%%' THEN 1
-            WHEN bc.is_miolo IS TRUE OR LOWER(COALESCE(bc.descricao, '')) LIKE '%%miolo%%' THEN (
+            WHEN (bc.is_capa IS TRUE OR LOWER(COALESCE(bc.descricao, '')) LIKE '%%capa%%')
+             AND (bc.is_miolo IS TRUE OR LOWER(COALESCE(bc.descricao, '')) LIKE '%%miolo%%') THEN (
                 SELECT COALESCE(ap_pag.paginas, 0)
                 FROM arquivo_pdfs ap_pag
                 WHERE ap_pag.id_componente = bc.id_componente
-                  AND LOWER(COALESCE(ap_pag.tipo_arquivo, '')) = 'miolo'
                   AND (
                       (i.pares IS NOT NULL AND ap_pag.pares = i.pares AND ap_pag.formulario_id = i.formulario_id)
                       OR (i.pares IS NULL AND ap_pag.item_pedido_id = i.especificacao_id)
                   )
-                ORDER BY ap_pag.criado_em DESC
+                ORDER BY
+                    CASE WHEN LOWER(COALESCE(ap_pag.tipo_arquivo, '')) = 'miolo' THEN 0 ELSE 1 END,
+                    ap_pag.criado_em DESC
+                LIMIT 1
+            )
+            WHEN (bc.is_capa IS TRUE OR LOWER(COALESCE(bc.descricao, '')) LIKE '%%capa%%')
+             AND NOT (bc.is_miolo IS TRUE OR LOWER(COALESCE(bc.descricao, '')) LIKE '%%miolo%%') THEN 1
+            WHEN (bc.is_miolo IS TRUE OR LOWER(COALESCE(bc.descricao, '')) LIKE '%%miolo%%')
+             AND NOT (bc.is_capa IS TRUE OR LOWER(COALESCE(bc.descricao, '')) LIKE '%%capa%%') THEN (
+                SELECT COALESCE(ap_pag.paginas, 0)
+                FROM arquivo_pdfs ap_pag
+                WHERE ap_pag.id_componente = bc.id_componente
+                  AND (
+                      (i.pares IS NOT NULL AND ap_pag.pares = i.pares AND ap_pag.formulario_id = i.formulario_id)
+                      OR (i.pares IS NULL AND ap_pag.item_pedido_id = i.especificacao_id)
+                  )
+                ORDER BY
+                    CASE WHEN LOWER(COALESCE(ap_pag.tipo_arquivo, '')) = 'miolo' THEN 0 ELSE 1 END,
+                    ap_pag.criado_em DESC
                 LIMIT 1
             )
             ELSE (
