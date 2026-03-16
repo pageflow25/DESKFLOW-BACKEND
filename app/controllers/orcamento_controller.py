@@ -37,6 +37,11 @@ class OrcamentoController:
     _execucoes_em_andamento: set[str] = set()
 
     @staticmethod
+    def _agora_banco(db: Session) -> datetime:
+        """Obtém o horário corrente do banco para manter consistência de timezone."""
+        return db.execute(text("SELECT CURRENT_TIMESTAMP")).scalar_one()
+
+    @staticmethod
     def _gerar_chave_execucao(request: FluxoOrcamentoRequest) -> str:
         payload_chave = {
             "tipo_fluxo": request.tipo_fluxo,
@@ -766,9 +771,10 @@ class OrcamentoController:
         resultado.grupo_lote_id = grupo_lote_id
         lote_envio = OrcamentoService.obter_ou_criar_lote_envio(db, grupo_lote_id)
         lote_envio_id = lote_envio.id
+        agora_lote = OrcamentoController._agora_banco(db)
         lote_envio.status = "em_processamento"
-        lote_envio.data_envio = lote_envio.data_envio or datetime.utcnow()
-        lote_envio.data_ultima_atualizacao = datetime.utcnow()
+        lote_envio.data_envio = lote_envio.data_envio or agora_lote
+        lote_envio.data_ultima_atualizacao = agora_lote
         db.flush()
 
         try:
@@ -882,7 +888,7 @@ class OrcamentoController:
                 f"{resultado.aprovados} aprovados, {len(resultado.erros)} erros"
             )
             lote_envio.status = "concluido" if not resultado.erros else "concluido_com_erros"
-            lote_envio.data_ultima_atualizacao = datetime.utcnow()
+            lote_envio.data_ultima_atualizacao = OrcamentoController._agora_banco(db)
             db.commit()
             logger.info("=" * 60)
 
@@ -894,7 +900,7 @@ class OrcamentoController:
             try:
                 db.rollback()
                 lote_envio.status = "erro"
-                lote_envio.data_ultima_atualizacao = datetime.utcnow()
+                lote_envio.data_ultima_atualizacao = OrcamentoController._agora_banco(db)
                 db.commit()
             except Exception as status_error:
                 logger.warning(f"Falha ao persistir status de erro do lote: {status_error}")
