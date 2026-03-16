@@ -64,12 +64,26 @@ class AprovacaoAPI(Base):
         index=True,
         comment="Data e hora de criação do registro"
     )
+
+    envio_item_id = Column(
+        Integer,
+        ForeignKey('envio_item.id', ondelete='RESTRICT', onupdate='CASCADE'),
+        nullable=False,
+        index=True,
+        comment="ID do item de envio canônico associado a esta aprovação"
+    )
     
     # Relacionamentos
     distribuicao_material = relationship(
         "DistribuicaoMaterial",
         back_populates="aprovacao_api",
         foreign_keys=[distribuicao_material_id]
+    )
+
+    envio_item = relationship(
+        "EnvioItem",
+        back_populates="aprovacoes",
+        foreign_keys=[envio_item_id]
     )
     
     def __repr__(self):

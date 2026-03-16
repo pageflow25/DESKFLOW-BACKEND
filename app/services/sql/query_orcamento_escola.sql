@@ -67,6 +67,7 @@ especificacoes_unidade AS (
         AND (
             p.datas_saida IS NULL
             OR NULLIF(dm.data_saida, '')::date = ANY(p.datas_saida)
+            OR NULLIF(dm.data_saida, '') IS NULL
         )
         AND dm.status_id = ANY(p.status_ids)
         AND (p.ids_formularios IS NULL OR ap.formulario_id = ANY(p.ids_formularios))
@@ -90,6 +91,7 @@ distribuicao_ids AS (
         AND (
             p.datas_saida IS NULL
             OR NULLIF(dm.data_saida, '')::date = ANY(p.datas_saida)
+            OR NULLIF(dm.data_saida, '') IS NULL
         )
         AND dm.status_id = ANY(p.status_ids)
         AND (p.ids_formularios IS NULL OR ap.formulario_id = ANY(p.ids_formularios))
@@ -124,8 +126,8 @@ quantidades_por_cliente AS (
         qu.formulario_id,
         MAX(qu.quantidade) AS quantidade
     FROM quantidades_unicas qu
-    -- Filtra para somar apenas miolo, ignorando capa
-    WHERE LOWER(COALESCE(qu.tipo_arquivo, 'miolo')) = 'miolo'
+    -- Filtra para somar apenas miolo, ignorando capa pura
+    WHERE LOWER(COALESCE(qu.tipo_arquivo, 'miolo')) LIKE '%miolo%'
     GROUP BY
         qu.escola_id,
         qu.cliente_id,
