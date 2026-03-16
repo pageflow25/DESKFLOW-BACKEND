@@ -273,6 +273,11 @@ async def aprovar_orcamento_manual(
         
         # Extrair distribuicoes_ids na ordem dos registros
         distribuicoes_ids = [r.distribuicao_material_id for r in registros_orcamento]
+        envio_item_ids_por_distribuicao = {
+            r.distribuicao_material_id: r.envio_item_id
+            for r in registros_orcamento
+            if getattr(r, "envio_item_id", None)
+        }
         
         # Verificar se já foi aprovado
         from ..models.aprovacao_api import AprovacaoAPI
@@ -308,7 +313,8 @@ async def aprovar_orcamento_manual(
             id_orcamento=id_orcamento,
             resposta_completa=resposta_aprovacao,
             distribuicoes_ids=distribuicoes_ids,
-            payload_orcamento={}
+            payload_orcamento={},
+            envio_item_ids_por_distribuicao=envio_item_ids_por_distribuicao,
         )
         
         # Atualizar status de cada distribuição
@@ -319,7 +325,8 @@ async def aprovar_orcamento_manual(
                     distribuicao_id=dist_id,
                     novo_status="orcamento_aprovado",
                     mensagem=f"Orçamento aprovado manualmente - {len(registros_aprovacao)} OPs",
-                    sucesso=True
+                    sucesso=True,
+                    envio_item_id=envio_item_ids_por_distribuicao.get(dist_id),
                 )
             except Exception as e:
                 logger.warning(f"Erro ao atualizar status da distribuição {dist_id}: {e}")

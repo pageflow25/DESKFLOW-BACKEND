@@ -6,12 +6,15 @@ from ..models.aprovacao_api import AprovacaoAPI
 from ..models.distribuicao_material import DistribuicaoMaterial
 from ..models.historico_processamento import HistoricoProcessamento
 from ..models.status_deskflow_pedido import StatusDeskflowPedido
+from ..models.lote_envio import LoteEnvio
+from ..models.envio_item import EnvioItem
 from ..schemas.orcamento import (
     OrcamentoRequest, OrcamentoListResponse, OrcamentoData, 
     OrcamentoResponse, ItemOrcamento
 )
 from ..config.logging_config import get_logger
 from pathlib import Path
+from datetime import datetime
 
 
 logger = get_logger(__name__)
@@ -56,6 +59,135 @@ class OrcamentoService:
     def _invalidar_cache_status(cls):
         """Limpa o cache de status (usar quando dados de status são alterados externamente)."""
         cls._status_cache.clear()
+
+    @staticmethod
+    def obter_ou_criar_lote_envio(db: Session, grupo_lote_id: Optional[int]) -> LoteEnvio:
+        """Garante existência do lote canônico para a execução atual."""
+        if grupo_lote_id is None:
+            raise ValueError("grupo_lote_id é obrigatório para criar/obter lote_envio")
+
+        lote = db.query(LoteEnvio).filter(
+            LoteEnvio.legacy_grupo_lote_id == grupo_lote_id
+        ).first()
+
+        if lote:
+            return lote
+
+        lote = LoteEnvio(
+            identificador_lote=f"LEGACY-{grupo_lote_id}",
+            legacy_grupo_lote_id=grupo_lote_id,
+            status="em_processamento",
+        )
+        db.add(lote)
+        db.flush()
+        return lote
+
+    @staticmethod
+    def obter_ou_criar_envio_itens(
+        db: Session,
+        lote_envio_id: int,
+        distribuicoes_ids: List[int],
+    ) -> Dict[int, int]:
+        """
+        Garante um envio_item por distribuição dentro do lote e retorna mapa
+        distribuicao_material_id -> envio_item_id.
+        """
+        if not distribuicoes_ids:
+            return {}
+
+        if not lote_envio_id:
+            raise ValueError("lote_envio_id é obrigatório para criar/obter envio_item")
+
+        ids_unicos = sorted(set(distribuicoes_ids))
+
+        existentes = db.query(
+            EnvioItem.id,
+            EnvioItem.distribuicao_material_id,
+        ).filter(
+            EnvioItem.lote_envio_id == lote_envio_id,
+            EnvioItem.distribuicao_material_id.in_(ids_unicos),
+        ).all()
+
+        mapa: Dict[int, int] = {row.distribuicao_material_id: row.id for row in existentes}
+        faltantes = [did for did in ids_unicos if did not in mapa]
+
+        if faltantes:
+            distribuicoes = db.query(
+                DistribuicaoMaterial.id,
+                DistribuicaoMaterial.formulario_id,
+                DistribuicaoMaterial.id_orcamento,
+                DistribuicaoMaterial.id_ops,
+                DistribuicaoMaterial.descricao_material,
+                DistribuicaoMaterial.unidade_escolar_id,
+            ).filter(DistribuicaoMaterial.id.in_(faltantes)).all()
+
+            payload = []
+            for d in distribuicoes:
+                payload.append(
+                    {
+                        "lote_envio_id": lote_envio_id,
+                        "distribuicao_material_id": d.id,
+                        "status_envio": "em_processamento",
+                        "sucesso_ultimo_evento": False,
+                        "id_orcamento_snapshot": d.id_orcamento,
+                        "id_ops_snapshot": d.id_ops,
+                        "arquivo_nome_snapshot": d.descricao_material,
+                        "escola_id_snapshot": d.unidade_escolar_id,
+                        "formulario_id_snapshot": d.formulario_id,
+                    }
+                )
+
+            if payload:
+                db.bulk_insert_mappings(EnvioItem, payload)
+                db.flush()
+
+            recarregados = db.query(
+                EnvioItem.id,
+                EnvioItem.distribuicao_material_id,
+            ).filter(
+                EnvioItem.lote_envio_id == lote_envio_id,
+                EnvioItem.distribuicao_material_id.in_(ids_unicos),
+            ).all()
+            mapa = {row.distribuicao_material_id: row.id for row in recarregados}
+
+        return mapa
+
+    @staticmethod
+    def atualizar_snapshot_envio_itens(
+        db: Session,
+        envio_item_ids_por_distribuicao: Dict[int, int],
+        id_orcamento: Optional[int] = None,
+        id_ops_por_distribuicao: Optional[Dict[int, int]] = None,
+        status_envio: Optional[str] = None,
+        sucesso_ultimo_evento: Optional[bool] = None,
+    ) -> None:
+        """Atualiza snapshots do envio_item após cada fase do fluxo."""
+        if not envio_item_ids_por_distribuicao:
+            return
+
+        for dist_id, envio_item_id in envio_item_ids_por_distribuicao.items():
+            valores: Dict[str, Any] = {}
+
+            if id_orcamento is not None:
+                valores["id_orcamento_snapshot"] = id_orcamento
+
+            if id_ops_por_distribuicao and dist_id in id_ops_por_distribuicao:
+                valores["id_ops_snapshot"] = id_ops_por_distribuicao[dist_id]
+
+            if status_envio is not None:
+                valores["status_envio"] = status_envio
+
+            if sucesso_ultimo_evento is not None:
+                valores["sucesso_ultimo_evento"] = sucesso_ultimo_evento
+
+            if not valores:
+                continue
+
+            db.execute(
+                update(EnvioItem)
+                .where(EnvioItem.id == envio_item_id)
+                .values(**valores)
+            )
     
     @staticmethod
     def gerar_orcamento(db: Session, request: OrcamentoRequest) -> OrcamentoListResponse:
@@ -96,10 +228,14 @@ class OrcamentoService:
                 'ids_formularios': getattr(request, 'ids_formularios', None),
                 'status_ids': getattr(request, 'status_ids', None) or [1]
             }
-            
+
+            logger.info(f"Parâmetros da query ({sql_filename}): {params}")
+
             # Executar query
             result = db.execute(text(query_sql), params)
             orcamentos_raw = result.fetchall()
+
+            logger.info(f"Query retornou {len(orcamentos_raw)} linhas")
             
             # Processar resultados
             orcamentos = []
@@ -139,7 +275,8 @@ class OrcamentoService:
         id_orcamento: int, 
         itens_resposta: List[Dict[str, Any]], 
         resposta_completa: Dict[str, Any],
-        payload_enviado: Dict[str, Any]
+        payload_enviado: Dict[str, Any],
+        envio_item_ids_por_distribuicao: Dict[int, int],
     ) -> List[OrcamentoAPI]:
         """
         Salva o retorno da API de orçamento na tabela orcamento_api
@@ -201,12 +338,19 @@ class OrcamentoService:
                     logger.error(f"id_distribuicao não encontrado para item índice {i} (id_item={id_item})")
                     raise ValueError(f"id_distribuicao não encontrado para item índice {i}")
 
+                envio_item_id = envio_item_ids_por_distribuicao.get(id_distribuicao)
+                if not envio_item_id:
+                    raise ValueError(
+                        f"envio_item_id não encontrado para distribuicao_material_id={id_distribuicao}"
+                    )
+
                 mappings.append({
                     "distribuicao_material_id": id_distribuicao,
                     "id_orcamento": id_orcamento,
                     "id_item": id_item,
                     "itens": item_resposta,
                     "resposta_api": resposta_completa,
+                    "envio_item_id": envio_item_id,
                 })
                 logger.debug(
                     f"Item {i}: distribuicao_material_id={id_distribuicao}, "
@@ -256,7 +400,8 @@ class OrcamentoService:
         id_orcamento: int,
         resposta_completa: Dict[str, Any],
         distribuicoes_ids: List[int],
-        payload_orcamento: Dict[str, Any]
+        payload_orcamento: Dict[str, Any],
+        envio_item_ids_por_distribuicao: Dict[int, int],
     ) -> List[AprovacaoAPI]:
         """
         Salva o retorno da API de aprovação na tabela aprovacao_api
@@ -320,12 +465,19 @@ class OrcamentoService:
                         if not dist_id:
                             raise ValueError(f"Nenhuma distribuição disponível para OP {op_id}")
 
+                    envio_item_id = envio_item_ids_por_distribuicao.get(dist_id)
+                    if not envio_item_id:
+                        raise ValueError(
+                            f"envio_item_id não encontrado para distribuicao_material_id={dist_id}"
+                        )
+
                     mappings.append({
                         "distribuicao_material_id": dist_id,
                         "id_orcamento": id_orcamento,
                         "id_ops": op_id,
                         "pedidos": pedido,
                         "resposta_api": resposta_completa,
+                        "envio_item_id": envio_item_id,
                     })
                     logger.debug(f"OP {i}: distribuicao_material_id={dist_id}, id_ops={op_id}")
             else:
@@ -335,12 +487,18 @@ class OrcamentoService:
                     f"Salvando {len(distribuicoes_ids)} registro(s) com id_ops=None."
                 )
                 for dist_id in distribuicoes_ids:
+                    envio_item_id = envio_item_ids_por_distribuicao.get(dist_id)
+                    if not envio_item_id:
+                        raise ValueError(
+                            f"envio_item_id não encontrado para distribuicao_material_id={dist_id}"
+                        )
                     mappings.append({
                         "distribuicao_material_id": dist_id,
                         "id_orcamento": id_orcamento,
                         "id_ops": None,
                         "pedidos": pedido,
                         "resposta_api": resposta_completa,
+                        "envio_item_id": envio_item_id,
                     })
 
             # --- PASSO 2: delete único + bulk insert em uma única transação ---
@@ -371,7 +529,9 @@ class OrcamentoService:
     @staticmethod
     def atualizar_status_distribuicao(db: Session, distribuicao_id: int, 
                                     novo_status: str, mensagem: str, 
-                                    sucesso: bool = True) -> HistoricoProcessamento:
+                                    sucesso: bool = True,
+                                    lote_envio_id: Optional[int] = None,
+                                    envio_item_id: Optional[int] = None) -> HistoricoProcessamento:
         """
         Atualiza o status de uma distribuição e salva no histórico.
         
@@ -444,6 +604,27 @@ class OrcamentoService:
                 .values(status_id=status)
             )
 
+            # Garantir envio_item canônico para escrita do histórico
+            if envio_item_id is None:
+                if lote_envio_id is None:
+                    identificador_manual = f"MANUAL-{distribuicao_id}-{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}"
+                    lote_manual = LoteEnvio(
+                        identificador_lote=identificador_manual,
+                        status="manual",
+                        data_envio=datetime.utcnow(),
+                    )
+                    db.add(lote_manual)
+                    db.flush()
+                    lote_envio_id = lote_manual.id
+
+                mapa_envio = OrcamentoService.obter_ou_criar_envio_itens(
+                    db=db,
+                    lote_envio_id=lote_envio_id,
+                    distribuicoes_ids=ids_para_atualizar,
+                )
+            else:
+                mapa_envio = {dist_id: envio_item_id for dist_id in ids_para_atualizar}
+
             # Criar os registros de histórico em bulk
             historicos: List[Dict[str, Any]] = []
             for dist_id in ids_para_atualizar:
@@ -456,6 +637,7 @@ class OrcamentoService:
                     "status_novo_id": status,
                     "mensagem": msg,
                     "sucesso": sucesso,
+                    "envio_item_id": mapa_envio.get(dist_id),
                 })
 
             db.bulk_insert_mappings(HistoricoProcessamento, historicos)
@@ -485,7 +667,9 @@ class OrcamentoService:
         novo_status: str,
         mensagem: str,
         sucesso: bool = True,
-        grupo_lote_id: int = None
+        grupo_lote_id: int = None,
+        lote_envio_id: Optional[int] = None,
+        envio_item_ids_por_distribuicao: Optional[Dict[int, int]] = None,
     ) -> int:
         """
         Atualiza o status de múltiplas distribuições em uma única operação
@@ -569,6 +753,36 @@ class OrcamentoService:
                 return 0
 
             # -- 3. Bulk UPDATE em uma única query --
+            mapa_envio_item: Dict[int, int] = envio_item_ids_por_distribuicao or {}
+
+            if lote_envio_id is None and grupo_lote_id is not None:
+                lote = OrcamentoService.obter_ou_criar_lote_envio(db, grupo_lote_id)
+                lote_envio_id = lote.id
+
+            if lote_envio_id is not None:
+                mapa_envio_item = OrcamentoService.obter_ou_criar_envio_itens(
+                    db=db,
+                    lote_envio_id=lote_envio_id,
+                    distribuicoes_ids=ids_para_atualizar,
+                )
+
+            faltando_envio_item = [dist_id for dist_id in ids_para_atualizar if dist_id not in mapa_envio_item]
+            if faltando_envio_item:
+                lote_fallback = LoteEnvio(
+                    identificador_lote=f"BULK-{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}",
+                    status="manual",
+                    data_envio=datetime.utcnow(),
+                )
+                db.add(lote_fallback)
+                db.flush()
+
+                mapa_fallback = OrcamentoService.obter_ou_criar_envio_itens(
+                    db=db,
+                    lote_envio_id=lote_fallback.id,
+                    distribuicoes_ids=faltando_envio_item,
+                )
+                mapa_envio_item.update(mapa_fallback)
+
             if grupo_lote_id is not None:
                 # Raw SQL para atualizar grupo_id E acumular grupo_lote_ids
                 # sem sobrescrever o histórico de lotes anteriores
@@ -615,6 +829,7 @@ class OrcamentoService:
                     "status_novo_id": status,
                     "mensagem": msg,
                     "sucesso": sucesso,
+                    "envio_item_id": mapa_envio_item.get(dist_id),
                 }
                 if grupo_lote_id is not None:
                     hist_entry["grupo_lote_id"] = grupo_lote_id

@@ -62,6 +62,14 @@ class HistoricoProcessamento(Base):
         index=True,
         comment="ID do grupo selecionado ao disparar o lote de orçamentos"
     )
+
+    envio_item_id = Column(
+        Integer,
+        ForeignKey('envio_item.id', ondelete='RESTRICT', onupdate='CASCADE'),
+        nullable=False,
+        index=True,
+        comment="ID do item de envio canônico associado ao evento"
+    )
     
     data_evento = Column(
         DateTime,
@@ -88,6 +96,12 @@ class HistoricoProcessamento(Base):
         "StatusDeskflowPedido",
         foreign_keys=[status_novo_id],
         back_populates="historicos_como_status_novo"
+    )
+
+    envio_item = relationship(
+        "EnvioItem",
+        back_populates="historicos",
+        foreign_keys=[envio_item_id]
     )
     
     def __repr__(self):
