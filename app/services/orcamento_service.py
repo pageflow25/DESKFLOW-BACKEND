@@ -8,6 +8,7 @@ from ..models.historico_processamento import HistoricoProcessamento
 from ..models.status_deskflow_pedido import StatusDeskflowPedido
 from ..models.lote_envio import LoteEnvio
 from ..models.envio_item import EnvioItem
+from ..models.unidade_escolar import UnidadeEscolar
 from ..schemas.orcamento import (
     OrcamentoRequest, OrcamentoListResponse, OrcamentoData, 
     OrcamentoResponse, ItemOrcamento
@@ -118,7 +119,10 @@ class OrcamentoService:
                 DistribuicaoMaterial.id_orcamento,
                 DistribuicaoMaterial.id_ops,
                 DistribuicaoMaterial.descricao_material,
-                DistribuicaoMaterial.unidade_escolar_id,
+                UnidadeEscolar.escola_id,
+            ).outerjoin(
+                UnidadeEscolar,
+                UnidadeEscolar.id == DistribuicaoMaterial.unidade_escolar_id,
             ).filter(DistribuicaoMaterial.id.in_(faltantes)).all()
 
             payload = []
@@ -132,7 +136,7 @@ class OrcamentoService:
                         "id_orcamento_snapshot": d.id_orcamento,
                         "id_ops_snapshot": d.id_ops,
                         "arquivo_nome_snapshot": d.descricao_material,
-                        "escola_id_snapshot": d.unidade_escolar_id,
+                        "escola_id_snapshot": d.escola_id,
                         "formulario_id_snapshot": d.formulario_id,
                     }
                 )
