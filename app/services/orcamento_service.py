@@ -449,7 +449,10 @@ class OrcamentoService:
             pedidos_lista = data_item.get('pedidos', [])
             pedido = pedidos_lista[0] if pedidos_lista else {}
 
-            logger.info(f"OPs extraídas: {ops}, Pedido: {pedido}")
+            # Extrair id_pedido_venda do primeiro pedido
+            id_pedido_venda = pedido.get('id') if pedido else None
+
+            logger.info(f"OPs extraídas: {ops}, Pedido: {pedido}, id_pedido_venda: {id_pedido_venda}")
             logger.info(f"Distribuições IDs para correspondência: {distribuicoes_ids}")
 
             # --- PASSO 1: montar todos os mappings em memória ---
@@ -479,8 +482,8 @@ class OrcamentoService:
                         "distribuicao_material_id": dist_id,
                         "id_orcamento": id_orcamento,
                         "id_ops": op_id,
+                        "id_pedido_venda": id_pedido_venda,
                         "pedidos": pedido,
-                        "resposta_api": resposta_completa,
                         "envio_item_id": envio_item_id,
                     })
                     logger.debug(f"OP {i}: distribuicao_material_id={dist_id}, id_ops={op_id}")
@@ -500,8 +503,8 @@ class OrcamentoService:
                         "distribuicao_material_id": dist_id,
                         "id_orcamento": id_orcamento,
                         "id_ops": None,
+                        "id_pedido_venda": id_pedido_venda,
                         "pedidos": pedido,
-                        "resposta_api": resposta_completa,
                         "envio_item_id": envio_item_id,
                     })
 
