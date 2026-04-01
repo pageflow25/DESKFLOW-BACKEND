@@ -352,8 +352,6 @@ class OrcamentoService:
                     "distribuicao_material_id": id_distribuicao,
                     "id_orcamento": id_orcamento,
                     "id_item": id_item,
-                    "itens": item_resposta,
-                    "resposta_api": resposta_completa,
                     "envio_item_id": envio_item_id,
                 })
                 logger.debug(

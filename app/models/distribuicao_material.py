@@ -73,7 +73,6 @@ class DistribuicaoMaterial(Base):
     path_arquivos = Column(Text, nullable=True, comment="Caminho dos arquivos processados")
     id_orcamento = Column(Integer, nullable=True, comment="ID do orçamento retornado pela API DeskFlow")
     id_ops = Column(Integer, nullable=True, comment="ID das OPs (Ordens de Produção) geradas")
-    metadados = Column(Text, nullable=True, comment="Dados adicionais em formato JSON")
     criado_em = Column(DateTime, server_default=func.now(), nullable=False)
     atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
     
