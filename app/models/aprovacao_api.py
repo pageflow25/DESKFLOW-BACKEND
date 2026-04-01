@@ -45,6 +45,13 @@ class AprovacaoAPI(Base):
         comment="Um único ID de OP (Ordem de Produção) — uma linha por OP"
     )
     
+    id_pedido_venda = Column(
+        Integer,
+        nullable=True,
+        index=True,
+        comment="ID do pedido de venda gerado na aprovação"
+    )
+    
     pedidos = Column(
         JSONB,
         nullable=True,
