@@ -105,6 +105,7 @@ itens_produto AS (
         MAX(eu.largura_mm) AS largura,
         MAX(eu.gramatura_miolo) AS gramatura_miolo,
         MAX(eu.quantidade) AS quantidade_total,
+        MAX(form.observacoes) AS obs_producao,
         CASE
             WHEN (MAX(eu.paginas) > 2 AND UPPER(MAX(eu.frente_verso)) = 'FV' AND UPPER(MAX(eu."categoria_Prod")) = 'PROVA')
               OR (MAX(eu.paginas) > 1 AND UPPER(MAX(eu.frente_verso)) = 'SF' AND UPPER(MAX(eu."categoria_Prod")) = 'PROVA')
@@ -265,6 +266,7 @@ SELECT json_build_object(
                 json_build_object(
                     'id_produto', ip.id_produto,
                     'titulo', ip.nome_arquivo,
+                    'obs_producao', ip.obs_producao,
                     'quantidade', ip.quantidade_total,
                     'usar_listapreco', 1,
                     'manter_estrutura_mod_produto', 1,
