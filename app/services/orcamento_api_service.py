@@ -221,6 +221,7 @@ class OrcamentoAPIService:
                     {
                         "id_produto": item.id_produto,
                         "titulo": item.titulo or f"Produto {item.id_produto}",
+                        "obs_producao": item.obs_producao,
                         "quantidade": item.quantidade,
                         "usar_listapreco": item.usar_listapreco,
                         "manter_estrutura_mod_produto": item.manter_estrutura_mod_produto,

@@ -186,6 +186,7 @@ itens_produto AS (
         (SELECT MAX(eu_meta.largura_mm) FROM especificacoes_unidade eu_meta WHERE eu_meta.especificacao_id = qe.especificacao_id) AS largura,
         (SELECT MAX(eu_meta.gramatura_miolo) FROM especificacoes_unidade eu_meta WHERE eu_meta.especificacao_id = qe.especificacao_id) AS gramatura_miolo,
         qe.quantidade_total,
+        (SELECT MAX(form.observacoes) FROM formularios form WHERE form.id = qe.formulario_id) AS obs_producao,
         CASE
             WHEN EXISTS (
                 SELECT 1 FROM especificacoes_unidade eu_tipo
@@ -345,6 +346,7 @@ SELECT json_build_object(
                 json_build_object(
                     'id_produto', ip.id_produto,
                     'titulo', ip.nome_arquivo,
+                    'obs_producao', ip.obs_producao,
                     'quantidade', ip.quantidade_total,
                     'usar_listapreco', 1,
                     'manter_estrutura_mod_produto', 1,

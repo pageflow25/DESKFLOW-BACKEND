@@ -42,6 +42,7 @@ class ItemOrcamento(BaseModel):
     """Item do orçamento"""
     id_produto: int
     titulo: Optional[str] = "Sem descrição"
+    obs_producao: Optional[str] = Field(None, description="Observações de produção (formulário.observacoes)")
     quantidade: int
     usar_listapreco: int = 1
     manter_estrutura_mod_produto: int = 1
