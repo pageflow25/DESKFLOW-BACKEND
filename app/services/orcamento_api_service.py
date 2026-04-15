@@ -240,7 +240,11 @@ class OrcamentoAPIService:
                                 "gramaturasubstratoimpressao": comp.gramaturasubstratoimpressao,
                                 "corfrente": comp.corfrente,
                                 "corverso": comp.corverso,
-                                "perguntas_componente": comp.perguntas_componente
+                                "perguntas_componente": comp.perguntas_componente,
+                                "tarefas_componente": [
+                                    {"id": t.id, "descricao": t.descricao}
+                                    for t in comp.tarefas_componente
+                                ]
                             }
                             for comp in item.componentes
                         ],
@@ -252,6 +256,10 @@ class OrcamentoAPIService:
                                 "id_pergunta": pg.id_pergunta
                             }
                             for pg in item.perguntas_gerais
+                        ],
+                        "tarefas_gerais": [
+                            {"id": t.id, "descricao": t.descricao}
+                            for t in item.tarefas_gerais
                         ]
                     }
                     for item in orcamento.data.itens

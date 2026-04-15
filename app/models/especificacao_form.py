@@ -130,5 +130,12 @@ class EspecificacaoForm(Base):
         cascade="all, delete-orphan"
     )
 
+    # Relacionamento N:N com bremen_tarefas via tabela pivot
+    especificacao_tarefas = relationship(
+        "BremenEspecificacaoTarefa",
+        back_populates="especificacao",
+        cascade="all, delete-orphan"
+    )
+
     def __repr__(self):
         return f"<EspecificacaoForm(id={self.id}, nome_item='{self.nome_item}', formulario_id={self.formulario_id})>"

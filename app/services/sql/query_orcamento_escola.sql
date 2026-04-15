@@ -332,6 +332,30 @@ respostas_gerais AS (
     LEFT JOIN bremen_respostas br ON br.id = bed.resposta_id
     WHERE br.valor IS NOT NULL
     ORDER BY i.especificacao_id, bp.id
+),
+
+-- Tarefas de escopo componente vinculadas à especificação via tabela pivot
+tarefas_componentes AS (
+    SELECT DISTINCT
+        bet.especificacao_id,
+        bt.id_tarefa,
+        bt.descricao,
+        bt.descricao_pf
+    FROM bremen_especificacao_tarefas bet
+    JOIN bremen_tarefas bt ON bt.id = bet.tarefa_id
+    WHERE bt.id_componente IS TRUE
+),
+
+-- Tarefas de escopo geral vinculadas à especificação via tabela pivot
+tarefas_gerais AS (
+    SELECT DISTINCT
+        bet.especificacao_id,
+        bt.id_tarefa,
+        bt.descricao,
+        bt.descricao_pf
+    FROM bremen_especificacao_tarefas bet
+    JOIN bremen_tarefas bt ON bt.id = bet.tarefa_id
+    WHERE bt.id_geral IS TRUE
 )
 
 SELECT json_build_object(
@@ -394,6 +418,17 @@ SELECT json_build_object(
                                                 AND rc.id_componente = comp_sel.id_componente
                                                 AND rc.especificacao_id = comp_sel.especificacao_id
                                             WHERE bp.id_componente = comp_sel.id_componente
+                                        ), '[]'::json),
+                                        'tarefas_componente', COALESCE((
+                                            SELECT json_agg(
+                                                json_build_object(
+                                                    'id', tc.id_tarefa,
+                                                    'descricao', tc.descricao
+                                                )
+                                                ORDER BY tc.id_tarefa
+                                            )
+                                            FROM tarefas_componentes tc
+                                            WHERE tc.especificacao_id = comp_sel.especificacao_id
                                         ), '[]'::json)
                                     ))
 
@@ -463,6 +498,17 @@ SELECT json_build_object(
                                                     AND rc.id_componente = comp_sel.id_componente
                                                     AND rc.especificacao_id = comp_sel.especificacao_id
                                                 WHERE bp.id_componente = comp_sel.id_componente
+                                            ), '[]'::json),
+                                            'tarefas_componente', COALESCE((
+                                                SELECT json_agg(
+                                                    json_build_object(
+                                                        'id', tc.id_tarefa,
+                                                        'descricao', tc.descricao
+                                                    )
+                                                    ORDER BY tc.id_tarefa
+                                                )
+                                                FROM tarefas_componentes tc
+                                                WHERE tc.especificacao_id = comp_sel.especificacao_id
                                             ), '[]'::json)
                                         )
                                     )
@@ -492,6 +538,17 @@ SELECT json_build_object(
                                                 AND rc.id_componente = comp_sel.id_componente
                                                 AND rc.especificacao_id = comp_sel.especificacao_id
                                             WHERE bp.id_componente = comp_sel.id_componente
+                                        ), '[]'::json),
+                                        'tarefas_componente', COALESCE((
+                                            SELECT json_agg(
+                                                json_build_object(
+                                                    'id', tc.id_tarefa,
+                                                    'descricao', tc.descricao
+                                                )
+                                                ORDER BY tc.id_tarefa
+                                            )
+                                            FROM tarefas_componentes tc
+                                            WHERE tc.especificacao_id = comp_sel.especificacao_id
                                         ), '[]'::json)
                                     )
                             END
@@ -540,6 +597,18 @@ SELECT json_build_object(
                         FROM bremen_perguntas bp
                         INNER JOIN respostas_gerais rg ON rg.pergunta_id = bp.id AND rg.especificacao_id = ip.especificacao_id
                         WHERE bp.id_geral = ip.id_produto
+                    ), '[]'::json),
+                    'tarefas_gerais', COALESCE((
+                        SELECT json_agg(
+                            json_build_object(
+                                'id_tarefa', tg.id_tarefa,
+                                'descricao', tg.descricao,
+                                'descricao_pf', tg.descricao_pf
+                            )
+                            ORDER BY tg.id_tarefa
+                        )
+                        FROM tarefas_gerais tg
+                        WHERE tg.especificacao_id = ip.especificacao_id
                     ), '[]'::json)
                 )
                 ORDER BY ip.chave_agrupamento
