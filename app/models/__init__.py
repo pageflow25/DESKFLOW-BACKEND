@@ -25,6 +25,8 @@ from .historico_processamento import HistoricoProcessamento
 from .download_bremen import DownloadBremen
 from .lote_envio import LoteEnvio
 from .envio_item import EnvioItem
+from .bremen_tarefa import BremenTarefa
+from .bremen_especificacao_tarefa import BremenEspecificacaoTarefa
 
 __all__ = [
     "Usuario", 
@@ -53,4 +55,6 @@ __all__ = [
     "DownloadBremen",
     "LoteEnvio",
     "EnvioItem",
+    "BremenTarefa",
+    "BremenEspecificacaoTarefa",
 ]
