@@ -15,6 +15,12 @@ class OrcamentoRequest(BaseModel):
     modo_agrupamento: str = Field("unidade", description="Modo de agrupamento: 'unidade' (por unidade) ou 'escola' (agrupado por escola)")
 
 
+class TarefaItem(BaseModel):
+    """Tarefa vinculada a um componente ou a um item (escopo geral)"""
+    id: int
+    descricao: str
+
+
 class ComponenteInfo(BaseModel):
     """Informações do componente"""
     id: int
@@ -28,6 +34,7 @@ class ComponenteInfo(BaseModel):
     corfrente: Optional[int] = None
     corverso: Optional[int] = None
     perguntas_componente: List[dict] = []
+    tarefas_componente: List[TarefaItem] = []
 
 
 class PerguntaGeral(BaseModel):
@@ -49,6 +56,7 @@ class ItemOrcamento(BaseModel):
     ids_distribuicao: Optional[List[int]] = Field(None, description="IDs de distribuição agrupados (modo escola)")
     componentes: List[ComponenteInfo] = []
     perguntas_gerais: List[PerguntaGeral] = []
+    tarefas_gerais: List[TarefaItem] = []
 
 
 class OrcamentoData(BaseModel):
