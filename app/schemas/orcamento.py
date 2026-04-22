@@ -61,6 +61,8 @@ class ItemOrcamento(BaseModel):
 
 class OrcamentoData(BaseModel):
     """Dados do orçamento"""
+    id_escola: Optional[int] = Field(None, description="ID da escola (modo escola)")
+    nome_unidade: Optional[str] = Field(None, description="Nome da unidade escolar (modo unidade)")
     id_cliente: Optional[int] = None
     id_vendedor: Optional[int] = 2285
     id_forma_pagamento: str = "11"

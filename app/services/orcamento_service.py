@@ -248,6 +248,8 @@ class OrcamentoService:
                 
                 # Converter para schema
                 data = OrcamentoData(
+                    id_escola=orcamento_data['data'].get('id_escola'),
+                    nome_unidade=orcamento_data['data'].get('nome_unidade'),
                     id_cliente=orcamento_data['data'].get('id_cliente'),
                     id_vendedor=orcamento_data['data'].get('id_vendedor') or 2285,
                     id_forma_pagamento=str(orcamento_data['data']['id_forma_pagamento']),  # Converter para string
@@ -573,14 +575,27 @@ class OrcamentoService:
             status_anteriores: Dict[int, Optional[int]] = {distribuicao_id: distribuicao.status_id}
 
             if distribuicao.formulario_id and distribuicao.unidade_escolar_id:
-                relacionadas = db.query(
+                # Cascata por escopo: mesmo formulário + unidade + turma.
+                # Distribuições sem turma (id_turma IS NULL) cascatam apenas entre si.
+                relacionadas_query = db.query(
                     DistribuicaoMaterial.id,
                     DistribuicaoMaterial.status_id
                 ).filter(
                     DistribuicaoMaterial.formulario_id == distribuicao.formulario_id,
                     DistribuicaoMaterial.unidade_escolar_id == distribuicao.unidade_escolar_id,
                     DistribuicaoMaterial.id != distribuicao_id
-                ).all()
+                )
+
+                if distribuicao.id_turma is None:
+                    relacionadas_query = relacionadas_query.filter(
+                        DistribuicaoMaterial.id_turma.is_(None)
+                    )
+                else:
+                    relacionadas_query = relacionadas_query.filter(
+                        DistribuicaoMaterial.id_turma == distribuicao.id_turma
+                    )
+
+                relacionadas = relacionadas_query.all()
 
                 if relacionadas:
                     ids_relacionadas = [r.id for r in relacionadas]
@@ -711,34 +726,39 @@ class OrcamentoService:
                 DistribuicaoMaterial.status_id,
                 DistribuicaoMaterial.formulario_id,
                 DistribuicaoMaterial.unidade_escolar_id,
+                DistribuicaoMaterial.id_turma,
             ).filter(DistribuicaoMaterial.id.in_(distribuicoes_ids)).all()
 
             if not distribuicoes_base:
                 logger.warning(f"Nenhuma distribuição encontrada para os IDs: {distribuicoes_ids}")
                 return 0
 
-            # Buscar pares capa/miolo para todas as distribuições de uma vez
-            chaves_cascata = [
-                (d.formulario_id, d.unidade_escolar_id)
-                for d in distribuicoes_base
-                if d.formulario_id and d.unidade_escolar_id
-            ]
+            # Construir condições de cascata por (formulario_id, unidade_escolar_id, id_turma).
+            # Distribuições sem turma cascatam apenas entre si (id_turma IS NULL).
+            from sqlalchemy import and_, or_
+            condicoes_cascata = []
+            for d in distribuicoes_base:
+                if not (d.formulario_id and d.unidade_escolar_id):
+                    continue
+                cond = and_(
+                    DistribuicaoMaterial.formulario_id == d.formulario_id,
+                    DistribuicaoMaterial.unidade_escolar_id == d.unidade_escolar_id,
+                    (DistribuicaoMaterial.id_turma.is_(None)
+                        if d.id_turma is None
+                        else DistribuicaoMaterial.id_turma == d.id_turma),
+                )
+                condicoes_cascata.append(cond)
 
             # IDs já conhecidos (os passados + suas cascatas)
             todos_ids_set: set = set(distribuicoes_ids)
             status_map: Dict[int, Optional[int]] = {d.id: d.status_id for d in distribuicoes_base}
 
-            if chaves_cascata:
-                # Construir filtro para todas as chaves (formulario_id, unidade_escolar_id)
-                from sqlalchemy import tuple_
+            if condicoes_cascata:
                 relacionadas = db.query(
                     DistribuicaoMaterial.id,
                     DistribuicaoMaterial.status_id,
                 ).filter(
-                    tuple_(
-                        DistribuicaoMaterial.formulario_id,
-                        DistribuicaoMaterial.unidade_escolar_id
-                    ).in_(chaves_cascata),
+                    or_(*condicoes_cascata),
                     DistribuicaoMaterial.id.notin_(distribuicoes_ids)
                 ).all()
 
