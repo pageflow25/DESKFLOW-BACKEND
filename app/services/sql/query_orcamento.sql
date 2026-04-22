@@ -46,6 +46,8 @@ especificacoes_unidade AS (
         dm.data_saida,
         
         dm.id AS id_distribuicao, 
+        dm.id_turma,
+        t.nome AS nome_turma,
         
         ap.pares,
         ap.formulario_id,
@@ -59,6 +61,7 @@ especificacoes_unidade AS (
     CROSS JOIN parametros p
     JOIN distribuicao_materiais dm ON dm.unidade_escolar_id = uf.id
     JOIN especificacoes_form ef ON ef.id = dm.especificacao_form_id
+    LEFT JOIN turmas t ON t.id = dm.id_turma
     LEFT JOIN bremen_gramatura bg ON bg.id = ef.id_gramatura
     LEFT JOIN bremen_tamanho_papel bt ON bt.id = ef.id_papel
     LEFT JOIN arquivo_pdfs ap ON ap.item_pedido_id = ef.id
@@ -78,7 +81,11 @@ itens_produto AS (
     SELECT
         eu.unidade_id,
         eu.cliente_id,
-        COALESCE(eu.pares::text, eu.especificacao_id::text) AS chave_agrupamento,
+        eu.id_turma,
+        eu.nome_turma,
+        -- Inclui id_turma na chave de agrupamento para gerar um item por turma
+        COALESCE(eu.pares::text, eu.especificacao_id::text)
+            || '|t:' || COALESCE(eu.id_turma::text, 'null') AS chave_agrupamento,
         eu.pares,
         eu.formulario_id,
         MAX(eu.especificacao_id) AS especificacao_id,
@@ -94,12 +101,23 @@ itens_produto AS (
         MAX(eu.id_distribuicao) AS id_distribuicao,
         
         (
-            UPPER(TRIM(REGEXP_REPLACE(REGEXP_REPLACE(
-                COALESCE(
-                    MAX(CASE WHEN LOWER(eu.tipo_arquivo) = 'miolo' THEN eu.arquivo_nome END),
-                    MAX(eu.arquivo_nome)
-                ), '\.pdf$', '', 'i'), '[_-]+', ' ', 'g')))
-            || ' (#' || MAX(form.id) || ')'
+            CASE
+                WHEN eu.id_turma IS NOT NULL AND NULLIF(TRIM(eu.nome_turma), '') IS NOT NULL THEN
+                    '(*' || TRIM(eu.nome_turma) || ') - '
+                    || UPPER(TRIM(REGEXP_REPLACE(REGEXP_REPLACE(
+                        COALESCE(
+                            MAX(CASE WHEN LOWER(eu.tipo_arquivo) = 'miolo' THEN eu.arquivo_nome END),
+                            MAX(eu.arquivo_nome)
+                        ), '\.pdf$', '', 'i'), '[_-]+', ' ', 'g')))
+                    || ' - (#' || MAX(form.id) || ')'
+                ELSE
+                    UPPER(TRIM(REGEXP_REPLACE(REGEXP_REPLACE(
+                        COALESCE(
+                            MAX(CASE WHEN LOWER(eu.tipo_arquivo) = 'miolo' THEN eu.arquivo_nome END),
+                            MAX(eu.arquivo_nome)
+                        ), '\.pdf$', '', 'i'), '[_-]+', ' ', 'g')))
+                    || ' (#' || MAX(form.id) || ')'
+            END
         ) AS nome_arquivo,
         MAX(eu.altura_mm) AS altura,
         MAX(eu.largura_mm) AS largura,
@@ -117,7 +135,10 @@ itens_produto AS (
     GROUP BY
         eu.unidade_id,
         eu.cliente_id,
-        COALESCE(eu.pares::text, eu.especificacao_id::text),
+        eu.id_turma,
+        eu.nome_turma,
+        COALESCE(eu.pares::text, eu.especificacao_id::text)
+            || '|t:' || COALESCE(eu.id_turma::text, 'null'),
         eu.pares,
         eu.formulario_id
 ),
