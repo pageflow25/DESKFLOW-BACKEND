@@ -48,6 +48,7 @@ especificacoes_unidade AS (
         dm.id AS id_distribuicao, 
         dm.id_turma,
         t.nome AS nome_turma,
+        t.area AS area_turma,
         
         ap.pares,
         ap.formulario_id,
@@ -124,6 +125,16 @@ itens_produto AS (
         MAX(eu.gramatura_miolo) AS gramatura_miolo,
         MAX(eu.quantidade) AS quantidade_total,
         MAX(form.observacoes) AS obs_producao,
+        -- Campos extras para obs_producao condicional (cliente_id = 151)
+        MAX(form.titulo) AS form_titulo,
+        MAX(form.criado_em::text) AS data_pedido,
+        MAX(u.nome) AS solicitante_nome,
+        MAX(u.email) AS solicitante_email,
+        MAX(eu.area_turma) AS area_turma,
+        COALESCE(
+            MAX(CASE WHEN LOWER(eu.tipo_arquivo) = 'miolo' THEN eu.arquivo_nome END),
+            MAX(eu.arquivo_nome)
+        ) AS arquivo_nome_raw,
         CASE
             WHEN (MAX(eu.paginas) > 2 AND UPPER(MAX(eu.frente_verso)) = 'FV' AND UPPER(MAX(eu."categoria_Prod")) = 'PROVA')
               OR (MAX(eu.paginas) > 1 AND UPPER(MAX(eu.frente_verso)) = 'SF' AND UPPER(MAX(eu."categoria_Prod")) = 'PROVA')
@@ -132,6 +143,7 @@ itens_produto AS (
         END AS tipo_agrupamento
     FROM especificacoes_unidade eu
     JOIN formularios form ON form.id = eu.formulario_id
+    LEFT JOIN usuarios u ON u.id = form.usuario_id
     GROUP BY
         eu.unidade_id,
         eu.cliente_id,
@@ -311,7 +323,24 @@ SELECT json_build_object(
                 json_build_object(
                     'id_produto', ip.id_produto,
                     'titulo', ip.nome_arquivo,
-                    'obs_producao', ip.obs_producao,
+                    'obs_producao', CASE
+                        WHEN ip.cliente_id = 151 THEN
+                            CONCAT_WS(
+                                CHR(10) || CHR(10),
+                                ip.obs_producao,
+                                CONCAT_WS(
+                                    CHR(10),
+                                    'Turma: ' || COALESCE(ip.nome_turma, '-'),
+                                    'Segmento: ' || COALESCE(ip.area_turma, '-'),
+                                    'Solicitante: ' || COALESCE(ip.solicitante_nome, '-'),
+                                    'E-mail: ' || COALESCE(ip.solicitante_email, '-'),
+                                    'Arquivo: ' || COALESCE(ip.arquivo_nome_raw, '-'),
+                                    'Data do Pedido: ' || COALESCE(ip.data_pedido, '-'),
+                                    'Título: ' || COALESCE(ip.form_titulo, '-')
+                                )
+                            )
+                        ELSE ip.obs_producao
+                    END,
                     'quantidade', ip.quantidade_total,
                     'usar_listapreco', 1,
                     'manter_estrutura_mod_produto', 1,
