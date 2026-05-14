@@ -1,4 +1,4 @@
-﻿-- Query para geração de orçamentos por unidade escolar
+-- Query para geração de orçamentos por unidade escolar
 -- Parâmetros: :escola_id, :ids_produtos, :datas_saida, :divisoes_logistica, :dias_uteis_filtro, :ids_formularios, :status_ids
 
 WITH parametros AS (
