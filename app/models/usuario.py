@@ -15,7 +15,7 @@ class Usuario(Base):
     is_admin = Column(Boolean, default=False)
     is_ativo = Column(Boolean, default=True)
     roles = Column(String, default="usuario")
-    escola_id = Column(Integer, ForeignKey('escolas.id'), nullable=True)  # FK para escola
+    escola_id = Column(Integer, ForeignKey('escola_escolas.id'), nullable=True)  # FK para escola
     metadados = Column(JSONB, nullable=True, comment="Dados adicionais do usuário em formato JSON")
     emails_vinculados = Column(Text, nullable=True)
     criado_em = Column(DateTime, server_default=func.now(), nullable=False)

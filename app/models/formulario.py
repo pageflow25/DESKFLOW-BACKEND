@@ -4,7 +4,7 @@ from sqlalchemy.sql import func
 from app.config.database import Base
 
 class Formulario(Base):
-    __tablename__ = "formularios"
+    __tablename__ = "pedido_formularios"
     
     id = Column(Integer, primary_key=True, index=True)
     nome = Column(String, nullable=True)

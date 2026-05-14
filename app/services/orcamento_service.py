@@ -813,7 +813,7 @@ class OrcamentoService:
                 # sem sobrescrever o histórico de lotes anteriores
                 db.execute(
                     text("""
-                        UPDATE distribuicao_materiais
+                        UPDATE pedido_distribuicoes
                         SET
                             status_id = :status_id,
                             grupo_id  = :lote_id,

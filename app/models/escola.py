@@ -24,7 +24,7 @@ class Escola(Base):
     Modelo Escola
     Representa as escolas/instituições de ensino
     """
-    __tablename__ = "escolas"
+    __tablename__ = "escola_escolas"
     
     id = Column(Integer, primary_key=True, index=True)
     nome = Column(String(255), nullable=False, comment="Nome da escola/instituição")

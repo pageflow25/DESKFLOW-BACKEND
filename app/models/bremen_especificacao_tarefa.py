@@ -9,12 +9,12 @@ class BremenEspecificacaoTarefa(Base):
     Tabela pivot N:N entre especificacoes_form e bremen_tarefas.
     Permite múltiplas tarefas por especificação (ex: corte + plastificação).
     """
-    __tablename__ = "bremen_especificacao_tarefas"
+    __tablename__ = "pedido_especificacoes_tarefas"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     especificacao_id = Column(
         Integer,
-        ForeignKey("especificacoes_form.id", onupdate="CASCADE", ondelete="CASCADE"),
+        ForeignKey("pedido_especificacoes.id", onupdate="CASCADE", ondelete="CASCADE"),
         nullable=False,
         comment="Referência para especificacoes_form.id"
     )

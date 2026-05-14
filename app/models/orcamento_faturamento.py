@@ -21,7 +21,7 @@ class OrcamentoFaturamento(Base):
     
     distribuicao_material_id = Column(
         Integer,
-        ForeignKey('distribuicao_materiais.id', ondelete='CASCADE', onupdate='CASCADE'),
+        ForeignKey('pedido_distribuicoes.id', ondelete='CASCADE', onupdate='CASCADE'),
         nullable=False,
         unique=True,
         index=True,

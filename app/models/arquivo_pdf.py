@@ -4,7 +4,7 @@ from sqlalchemy.sql import func
 from app.config.database import Base
 
 class ArquivoPdf(Base):
-    __tablename__ = "arquivo_pdfs"
+    __tablename__ = "pedido_arquivos_pdf"
     
     id = Column(Integer, primary_key=True, index=True)
     nome = Column(String, nullable=False, comment="Nome do arquivo PDF")
@@ -21,8 +21,8 @@ class ArquivoPdf(Base):
         nullable=True,
         comment="Referência ao componente Bremen associado ao arquivo PDF"
     )
-    formulario_id = Column(Integer, ForeignKey('formularios.id'), nullable=True, comment="FK para formulário")
-    item_pedido_id = Column(Integer, ForeignKey('especificacoes_form.id', ondelete='SET NULL', onupdate='CASCADE'), nullable=True, comment="ID da especificação relacionada")
+    formulario_id = Column(Integer, ForeignKey('pedido_formularios.id'), nullable=True, comment="FK para formulário")
+    item_pedido_id = Column(Integer, ForeignKey('pedido_especificacoes.id', ondelete='SET NULL', onupdate='CASCADE'), nullable=True, comment="ID da especificação relacionada")
     criado_em = Column(DateTime, server_default=func.now(), nullable=False)
     atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
     
