@@ -1,7 +1,15 @@
-﻿-- Query para buscar pedidos de uma escola em estrutura hierárquica (cascata)
+-- Query para buscar pedidos de uma escola em estrutura hierárquica (cascata)
 -- Parâmetros: :escola_id, :tipo_formulario, :ids_formularios, :status_ids
 
-WITH dados_normalizados AS (
+WITH parametros AS (
+    SELECT
+        :escola_id AS escola_id,
+        NULLIF(TRIM(CAST(:tipo_formulario AS TEXT)), '') AS tipo_formulario,
+        CAST(:ids_formularios AS int[]) AS ids_formularios,
+        CAST(:status_ids AS int[]) AS status_ids
+),
+
+dados_normalizados AS (
     SELECT
         -- TRATAMENTO DE NULOS
         COALESCE(uc.divisao_logistica, 'Sem divisão') AS divisao_logistica,
@@ -13,7 +21,7 @@ WITH dados_normalizados AS (
 
         -- DATA DE SAÍDA
         COALESCE(
-            TO_CHAR(CAST(distri.data_saida AS DATE), 'YYYY-MM-DD'),
+            TO_CHAR(NULLIF(distri.data_saida, '')::DATE, 'YYYY-MM-DD'),
             'Sem data saida'
         ) AS data_saida_formatada,
 
@@ -28,6 +36,7 @@ WITH dados_normalizados AS (
         ar.paginas as paginas
 
     FROM pedido_formularios f
+    CROSS JOIN parametros p
     INNER JOIN pedido_especificacoes e 
         ON f.id = e.formulario_id
     INNER JOIN pedido_distribuicoes distri 
@@ -39,14 +48,12 @@ WITH dados_normalizados AS (
     LEFT JOIN bremen_itens b 
         ON e.id_produto = b.id_produto
     WHERE (
-            :tipo_formulario IS NULL
-            OR TRIM(CAST(:tipo_formulario AS TEXT)) = ''
-            OR UPPER(f.tipo_formulario) = UPPER(:tipo_formulario)
+            p.tipo_formulario IS NULL
+            OR UPPER(f.tipo_formulario) = UPPER(p.tipo_formulario)
         )
-        AND uc.escola_id = :escola_id
-        AND (:status_ids IS NULL OR distri.status_id = ANY(CAST(:status_ids AS int[])))
-        AND (CAST(:ids_formularios AS int[]) IS NULL OR f.id = ANY(CAST(:ids_formularios AS int[]))
-        )
+        AND uc.escola_id = p.escola_id
+        AND (p.status_ids IS NULL OR distri.status_id = ANY(p.status_ids))
+        AND (p.ids_formularios IS NULL OR f.id = ANY(p.ids_formularios))
 ),
 
 -- NÍVEL 5: ARQUIVOS (agrupados por divisão + produto + data + unidade)
