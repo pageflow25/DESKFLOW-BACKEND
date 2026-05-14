@@ -29,13 +29,13 @@ class DashboardService:
                 e.codigo AS codigo_escola,
                 COUNT(DISTINCT f.id) AS total_pedidos,
                 CASE WHEN COUNT(DISTINCT f.id) > 0 THEN TRUE ELSE FALSE END AS possui_pedidos_alerta
-            FROM escolas e
-            LEFT JOIN unidades_escolares ue
+            FROM escola_escolas e
+            LEFT JOIN escola_unidades ue
                 ON ue.escola_id = e.id
-            LEFT JOIN distribuicao_materiais dm
+            LEFT JOIN pedido_distribuicoes dm
                 ON dm.unidade_escolar_id = ue.id
                AND dm.status_id = 1
-            LEFT JOIN formularios f
+            LEFT JOIN pedido_formularios f
                 ON f.id = dm.formulario_id
             GROUP BY
                 e.id,

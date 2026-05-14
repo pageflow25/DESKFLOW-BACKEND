@@ -13,7 +13,7 @@ class BremenEspecificacaoDetalhe(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     especificacao_id = Column(
         Integer,
-        ForeignKey('especificacoes_form.id', ondelete='CASCADE'),
+        ForeignKey('pedido_especificacoes.id', ondelete='CASCADE'),
         nullable=False,
         comment="Referência à especificação do formulário"
     )

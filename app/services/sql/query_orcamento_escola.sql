@@ -1,4 +1,4 @@
--- Query para geração de orçamentos AGRUPADOS POR ESCOLA (soma quantidades de todas as unidades)
+﻿-- Query para geração de orçamentos AGRUPADOS POR ESCOLA (soma quantidades de todas as unidades)
 -- Diferença do modo "por unidade": aqui agrupa tudo da escola em um único orçamento
 -- Usa ids_distribuicao (array) em vez de id_distribuicao (único) nos itens
 -- Parâmetros: :escola_id, :ids_produtos, :datas_saida, :divisoes_logistica, :dias_uteis_filtro, :ids_formularios, :status_ids
@@ -23,7 +23,7 @@ unidades_filtradas AS (
         ue.escola_id,
         ue.client_id_venda,
         ue.vendedor_id_venda
-    FROM unidades_escolares ue
+    FROM escola_unidades ue
     CROSS JOIN parametros p
     WHERE ue.escola_id = p.escola_id
     AND (p.divisoes_logistica IS NULL OR ue.divisao_logistica = ANY(p.divisoes_logistica))
@@ -58,12 +58,12 @@ especificacoes_unidade AS (
         t.nome AS nome_turma
     FROM unidades_filtradas uf
     CROSS JOIN parametros p
-    JOIN distribuicao_materiais dm ON dm.unidade_escolar_id = uf.id
-    JOIN especificacoes_form ef ON ef.id = dm.especificacao_form_id
-    LEFT JOIN turmas t ON t.id = dm.id_turma
+    JOIN pedido_distribuicoes dm ON dm.unidade_escolar_id = uf.id
+    JOIN pedido_especificacoes ef ON ef.id = dm.especificacao_form_id
+    LEFT JOIN escola_turmas t ON t.id = dm.id_turma
     LEFT JOIN bremen_gramatura bg ON bg.id = ef.id_gramatura
     LEFT JOIN bremen_tamanho_papel bt ON bt.id = ef.id_papel
-    LEFT JOIN arquivo_pdfs ap ON ap.item_pedido_id = ef.id
+    LEFT JOIN pedido_arquivos_pdf ap ON ap.item_pedido_id = ef.id
     LEFT JOIN bremen_itens bi ON bi.id_produto = ef.id_produto
     WHERE dm.quantidade > 0
         AND (p.ids_produtos IS NULL OR ef.id_produto = ANY(p.ids_produtos))
@@ -88,9 +88,9 @@ distribuicao_ids AS (
         dm.id_turma
     FROM unidades_filtradas uf
     CROSS JOIN parametros p
-    JOIN distribuicao_materiais dm ON dm.unidade_escolar_id = uf.id
-    JOIN especificacoes_form ef ON ef.id = dm.especificacao_form_id
-    LEFT JOIN arquivo_pdfs ap ON ap.item_pedido_id = ef.id
+    JOIN pedido_distribuicoes dm ON dm.unidade_escolar_id = uf.id
+    JOIN pedido_especificacoes ef ON ef.id = dm.especificacao_form_id
+    LEFT JOIN pedido_arquivos_pdf ap ON ap.item_pedido_id = ef.id
     WHERE dm.quantidade > 0
         AND (p.ids_produtos IS NULL OR ef.id_produto = ANY(p.ids_produtos))
         AND (
@@ -200,7 +200,7 @@ itens_produto AS (
                              WHERE eu_nome.especificacao_id = qe.especificacao_id
                              LIMIT 1)
                         ), '\.pdf$', '', 'i'), '[_-]+', ' ', 'g')))
-                    || ' - (#' || (SELECT form.id FROM formularios form WHERE form.id = qe.formulario_id LIMIT 1) || ')'
+                    || ' - (#' || (SELECT form.id FROM pedido_formularios form WHERE form.id = qe.formulario_id LIMIT 1) || ')'
                 ELSE
                     UPPER(TRIM(REGEXP_REPLACE(REGEXP_REPLACE(
                         COALESCE(
@@ -212,7 +212,7 @@ itens_produto AS (
                              WHERE eu_nome.especificacao_id = qe.especificacao_id
                              LIMIT 1)
                 ), '\.pdf$', '', 'i'), '[_-]+', ' ', 'g')))
-                    || ' (#' || (SELECT form.id FROM formularios form WHERE form.id = qe.formulario_id LIMIT 1) || ')'
+                    || ' (#' || (SELECT form.id FROM pedido_formularios form WHERE form.id = qe.formulario_id LIMIT 1) || ')'
             END,
             'Produto ' || qe.id_produto
         ) AS nome_arquivo,
@@ -220,7 +220,7 @@ itens_produto AS (
         (SELECT MAX(eu_meta.largura_mm) FROM especificacoes_unidade eu_meta WHERE eu_meta.especificacao_id = qe.especificacao_id) AS largura,
         (SELECT MAX(eu_meta.gramatura_miolo) FROM especificacoes_unidade eu_meta WHERE eu_meta.especificacao_id = qe.especificacao_id) AS gramatura_miolo,
         qe.quantidade_total,
-        (SELECT MAX(form.observacoes) FROM formularios form WHERE form.id = qe.formulario_id) AS obs_producao,
+        (SELECT MAX(form.observacoes) FROM pedido_formularios form WHERE form.id = qe.formulario_id) AS obs_producao,
         CASE
             WHEN EXISTS (
                 SELECT 1 FROM especificacoes_unidade eu_tipo
@@ -281,7 +281,7 @@ componentes AS (
             WHEN (bc.is_capa IS TRUE OR LOWER(COALESCE(bc.descricao, '')) LIKE '%%capa%%')
              AND (bc.is_miolo IS TRUE OR LOWER(COALESCE(bc.descricao, '')) LIKE '%%miolo%%') THEN (
                 SELECT COALESCE(ap_pag.paginas, 0)
-                FROM arquivo_pdfs ap_pag
+                FROM pedido_arquivos_pdf ap_pag
                 WHERE ap_pag.id_componente = bc.id_componente
                   AND (
                       (i.pares IS NOT NULL AND ap_pag.pares = i.pares AND ap_pag.formulario_id = i.formulario_id)
@@ -297,7 +297,7 @@ componentes AS (
             WHEN (bc.is_miolo IS TRUE OR LOWER(COALESCE(bc.descricao, '')) LIKE '%%miolo%%')
              AND NOT (bc.is_capa IS TRUE OR LOWER(COALESCE(bc.descricao, '')) LIKE '%%capa%%') THEN (
                 SELECT COALESCE(ap_pag.paginas, 0)
-                FROM arquivo_pdfs ap_pag
+                FROM pedido_arquivos_pdf ap_pag
                 WHERE ap_pag.id_componente = bc.id_componente
                   AND (
                       (i.pares IS NOT NULL AND ap_pag.pares = i.pares AND ap_pag.formulario_id = i.formulario_id)
@@ -310,7 +310,7 @@ componentes AS (
             )
             ELSE (
                 SELECT ap_pag.paginas
-                FROM arquivo_pdfs ap_pag
+                FROM pedido_arquivos_pdf ap_pag
                 WHERE ap_pag.id_componente = bc.id_componente
                   AND (
                       (i.pares IS NOT NULL AND ap_pag.pares = i.pares AND ap_pag.formulario_id = i.formulario_id)
@@ -322,7 +322,7 @@ componentes AS (
         END AS quantidade_paginas
     FROM itens i
     JOIN bremen_componentes bc ON bc.id_produto = i.id_produto
-    LEFT JOIN arquivo_pdfs ap_sel
+    LEFT JOIN pedido_arquivos_pdf ap_sel
         ON ap_sel.item_pedido_id = i.especificacao_id
        AND ap_sel.id_componente = bc.id_componente
        AND (
@@ -375,7 +375,7 @@ tarefas_componentes AS (
         bt.id_tarefa,
         bt.descricao,
         bt.descricao_pf
-    FROM bremen_especificacao_tarefas bet
+    FROM pedido_especificacoes_tarefas bet
     JOIN bremen_tarefas bt ON bt.id = bet.tarefa_id
     WHERE bt.id_componente IS TRUE
 ),
@@ -387,7 +387,7 @@ tarefas_gerais AS (
         bt.id_tarefa,
         bt.descricao,
         bt.descricao_pf
-    FROM bremen_especificacao_tarefas bet
+    FROM pedido_especificacoes_tarefas bet
     JOIN bremen_tarefas bt ON bt.id = bet.tarefa_id
     WHERE bt.id_geral IS TRUE
 )

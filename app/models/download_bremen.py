@@ -23,7 +23,7 @@ class DownloadBremen(Base):
     
     distribuicao_material_id = Column(
         Integer,
-        ForeignKey('distribuicao_materiais.id', ondelete='CASCADE', onupdate='CASCADE'),
+        ForeignKey('pedido_distribuicoes.id', ondelete='CASCADE', onupdate='CASCADE'),
         nullable=False,
         index=True,
         comment="ID da distribuição de material vinculada a este download"
@@ -38,7 +38,7 @@ class DownloadBremen(Base):
     
     arquivo_pdf_id = Column(
         Integer,
-        ForeignKey('arquivo_pdfs.id', ondelete='SET NULL', onupdate='CASCADE'),
+        ForeignKey('pedido_arquivos_pdf.id', ondelete='SET NULL', onupdate='CASCADE'),
         nullable=True,
         index=True,
         comment="FK para arquivo_pdfs.id"

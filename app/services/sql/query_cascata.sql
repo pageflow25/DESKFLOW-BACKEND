@@ -1,4 +1,4 @@
--- Query para buscar pedidos de uma escola em estrutura hierárquica (cascata)
+﻿-- Query para buscar pedidos de uma escola em estrutura hierárquica (cascata)
 -- Parâmetros: :escola_id, :tipo_formulario, :ids_formularios, :status_ids
 
 WITH dados_normalizados AS (
@@ -27,14 +27,14 @@ WITH dados_normalizados AS (
         distri.quantidade as quantidade,
         ar.paginas as paginas
 
-    FROM formularios f
-    INNER JOIN especificacoes_form e 
+    FROM pedido_formularios f
+    INNER JOIN pedido_especificacoes e 
         ON f.id = e.formulario_id
-    INNER JOIN distribuicao_materiais distri 
+    INNER JOIN pedido_distribuicoes distri 
         ON distri.especificacao_form_id = e.id
-    INNER JOIN unidades_escolares uc 
+    INNER JOIN escola_unidades uc 
         ON distri.unidade_escolar_id = uc.id
-    LEFT JOIN arquivo_pdfs ar
+    LEFT JOIN pedido_arquivos_pdf ar
         ON ar.id = distri.arquivo_pdf_id
     LEFT JOIN bremen_itens b 
         ON e.id_produto = b.id_produto

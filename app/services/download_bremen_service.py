@@ -371,7 +371,7 @@ class DownloadBremenService:
             FROM downloads_bremen db
             JOIN aprovacao_api aa ON aa.id_ops = db.id_ops 
                 AND aa.distribuicao_material_id = db.distribuicao_material_id
-            LEFT JOIN arquivo_pdfs ap ON ap.id = db.arquivo_pdf_id
+            LEFT JOIN pedido_arquivos_pdf ap ON ap.id = db.arquivo_pdf_id
             WHERE aa.id_orcamento = :id_orcamento
             ORDER BY db.id_ops, db.tipo_arquivo
         """)
