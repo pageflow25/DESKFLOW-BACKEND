@@ -1,5 +1,5 @@
--- Query para geração de orçamentos por unidade escolar
--- Parâmetros: :escola_id, :ids_produtos, :datas_saida, :divisoes_logistica, :dias_uteis_filtro, :ids_formularios, :status_ids
+﻿-- Query para geração de orçamentos por unidade escolar
+-- Parâmetros: :escola_id, :ids_produtos, :datas_saida, :divisoes_logistica, :dias_uteis_filtro, :ids_formularios, :status_ids, :ids_unidades
 
 WITH parametros AS (
     SELECT
@@ -9,7 +9,9 @@ WITH parametros AS (
         CAST(:divisoes_logistica AS text[]) AS divisoes_logistica, 
         CAST(:dias_uteis_filtro AS int[]) AS dias_uteis_filtro,
         CAST(:ids_formularios AS int[]) AS ids_formularios,
-        CAST(:status_ids AS int[]) AS status_ids
+        CAST(:status_ids AS int[]) AS status_ids,
+        CAST(:ids_unidades AS int[]) AS ids_unidades,
+        CAST(:ids_arquivos AS int[]) AS ids_arquivos
 ),
 
 unidades_filtradas AS (
@@ -21,11 +23,12 @@ unidades_filtradas AS (
         ue.escola_id,
         ue.client_id_venda,
         ue.vendedor_id  -- switched from vendedor_id_venda to vendedor_id
-    FROM unidades_escolares ue
+    FROM escola_unidades ue
     CROSS JOIN parametros p
     WHERE ue.escola_id = p.escola_id
     AND (p.divisoes_logistica IS NULL OR ue.divisao_logistica = ANY(p.divisoes_logistica))
     AND (p.dias_uteis_filtro IS NULL OR ue.dias_uteis = ANY(p.dias_uteis_filtro))
+    AND (p.ids_unidades IS NULL OR ue.id = ANY(p.ids_unidades))
 ),
 
 especificacoes_unidade AS (
@@ -46,6 +49,9 @@ especificacoes_unidade AS (
         dm.data_saida,
         
         dm.id AS id_distribuicao, 
+        dm.id_turma,
+        t.nome AS nome_turma,
+        t.area AS area_turma,
         
         ap.pares,
         ap.formulario_id,
@@ -57,11 +63,12 @@ especificacoes_unidade AS (
         bi."categoria_Prod"
     FROM unidades_filtradas uf
     CROSS JOIN parametros p
-    JOIN distribuicao_materiais dm ON dm.unidade_escolar_id = uf.id
-    JOIN especificacoes_form ef ON ef.id = dm.especificacao_form_id
+    JOIN pedido_distribuicoes dm ON dm.unidade_escolar_id = uf.id
+    JOIN pedido_especificacoes ef ON ef.id = dm.especificacao_form_id
+    LEFT JOIN escola_turmas t ON t.id = dm.id_turma
     LEFT JOIN bremen_gramatura bg ON bg.id = ef.id_gramatura
     LEFT JOIN bremen_tamanho_papel bt ON bt.id = ef.id_papel
-    LEFT JOIN arquivo_pdfs ap ON ap.item_pedido_id = ef.id
+    LEFT JOIN pedido_arquivos_pdf ap ON ap.item_pedido_id = ef.id
     LEFT JOIN bremen_itens bi ON bi.id_produto = ef.id_produto
     WHERE dm.quantidade > 0
         AND (p.ids_produtos IS NULL OR ef.id_produto = ANY(p.ids_produtos))
@@ -72,13 +79,18 @@ especificacoes_unidade AS (
         ) 
         AND dm.status_id = ANY(p.status_ids)
         AND (p.ids_formularios IS NULL OR ap.formulario_id = ANY(p.ids_formularios))
+        AND (p.ids_arquivos IS NULL OR ap.id = ANY(p.ids_arquivos))
 ),
 
 itens_produto AS (
     SELECT
         eu.unidade_id,
         eu.cliente_id,
-        COALESCE(eu.pares::text, eu.especificacao_id::text) AS chave_agrupamento,
+        eu.id_turma,
+        eu.nome_turma,
+        -- Inclui id_turma na chave de agrupamento para gerar um item por turma
+        COALESCE(eu.pares::text, eu.especificacao_id::text)
+            || '|t:' || COALESCE(eu.id_turma::text, 'null') AS chave_agrupamento,
         eu.pares,
         eu.formulario_id,
         MAX(eu.especificacao_id) AS especificacao_id,
@@ -94,18 +106,39 @@ itens_produto AS (
         MAX(eu.id_distribuicao) AS id_distribuicao,
         
         (
-            UPPER(TRIM(REGEXP_REPLACE(REGEXP_REPLACE(
-                COALESCE(
-                    MAX(CASE WHEN LOWER(eu.tipo_arquivo) = 'miolo' THEN eu.arquivo_nome END),
-                    MAX(eu.arquivo_nome)
-                ), '\.pdf$', '', 'i'), '[_-]+', ' ', 'g')))
-            || ' (#' || MAX(form.id) || ')'
+            CASE
+                WHEN eu.id_turma IS NOT NULL AND NULLIF(TRIM(eu.nome_turma), '') IS NOT NULL THEN
+                    '(*' || TRIM(eu.nome_turma) || ') - '
+                    || UPPER(TRIM(REGEXP_REPLACE(REGEXP_REPLACE(
+                        COALESCE(
+                            MAX(CASE WHEN LOWER(eu.tipo_arquivo) = 'miolo' THEN eu.arquivo_nome END),
+                            MAX(eu.arquivo_nome)
+                        ), '\.pdf$', '', 'i'), '[_-]+', ' ', 'g')))
+                    || ' - (#' || MAX(form.id) || ')'
+                ELSE
+                    UPPER(TRIM(REGEXP_REPLACE(REGEXP_REPLACE(
+                        COALESCE(
+                            MAX(CASE WHEN LOWER(eu.tipo_arquivo) = 'miolo' THEN eu.arquivo_nome END),
+                            MAX(eu.arquivo_nome)
+                        ), '\.pdf$', '', 'i'), '[_-]+', ' ', 'g')))
+                    || ' (#' || MAX(form.id) || ')'
+            END
         ) AS nome_arquivo,
         MAX(eu.altura_mm) AS altura,
         MAX(eu.largura_mm) AS largura,
         MAX(eu.gramatura_miolo) AS gramatura_miolo,
         MAX(eu.quantidade) AS quantidade_total,
         MAX(form.observacoes) AS obs_producao,
+        -- Campos extras para obs_producao condicional (cliente_id = 151)
+        MAX(form.titulo) AS form_titulo,
+        MAX(form.criado_em::text) AS data_pedido,
+        MAX(u.nome) AS solicitante_nome,
+        MAX(u.email) AS solicitante_email,
+        MAX(eu.area_turma) AS area_turma,
+        COALESCE(
+            MAX(CASE WHEN LOWER(eu.tipo_arquivo) = 'miolo' THEN eu.arquivo_nome END),
+            MAX(eu.arquivo_nome)
+        ) AS arquivo_nome_raw,
         CASE
             WHEN (MAX(eu.paginas) > 2 AND UPPER(MAX(eu.frente_verso)) = 'FV' AND UPPER(MAX(eu."categoria_Prod")) = 'PROVA')
               OR (MAX(eu.paginas) > 1 AND UPPER(MAX(eu.frente_verso)) = 'SF' AND UPPER(MAX(eu."categoria_Prod")) = 'PROVA')
@@ -113,11 +146,15 @@ itens_produto AS (
             ELSE 'separado'
         END AS tipo_agrupamento
     FROM especificacoes_unidade eu
-    JOIN formularios form ON form.id = eu.formulario_id
+    JOIN pedido_formularios form ON form.id = eu.formulario_id
+    LEFT JOIN usuarios u ON u.id = form.usuario_id
     GROUP BY
         eu.unidade_id,
         eu.cliente_id,
-        COALESCE(eu.pares::text, eu.especificacao_id::text),
+        eu.id_turma,
+        eu.nome_turma,
+        COALESCE(eu.pares::text, eu.especificacao_id::text)
+            || '|t:' || COALESCE(eu.id_turma::text, 'null'),
         eu.pares,
         eu.formulario_id
 ),
@@ -167,7 +204,7 @@ componentes AS (
             WHEN (bc.is_capa IS TRUE OR LOWER(COALESCE(bc.descricao, '')) LIKE '%%capa%%')
              AND (bc.is_miolo IS TRUE OR LOWER(COALESCE(bc.descricao, '')) LIKE '%%miolo%%') THEN (
                 SELECT COALESCE(ap_pag.paginas, 0)
-                FROM arquivo_pdfs ap_pag
+                FROM pedido_arquivos_pdf ap_pag
                 WHERE ap_pag.id_componente = bc.id_componente
                   AND (
                       (i.pares IS NOT NULL AND ap_pag.pares = i.pares AND ap_pag.formulario_id = i.formulario_id)
@@ -183,7 +220,7 @@ componentes AS (
             WHEN (bc.is_miolo IS TRUE OR LOWER(COALESCE(bc.descricao, '')) LIKE '%%miolo%%')
              AND NOT (bc.is_capa IS TRUE OR LOWER(COALESCE(bc.descricao, '')) LIKE '%%capa%%') THEN (
                 SELECT COALESCE(ap_pag.paginas, 0)
-                FROM arquivo_pdfs ap_pag
+                FROM pedido_arquivos_pdf ap_pag
                 WHERE ap_pag.id_componente = bc.id_componente
                   AND (
                       (i.pares IS NOT NULL AND ap_pag.pares = i.pares AND ap_pag.formulario_id = i.formulario_id)
@@ -196,7 +233,7 @@ componentes AS (
             )
             ELSE (
                 SELECT ap_pag.paginas
-                FROM arquivo_pdfs ap_pag
+                FROM pedido_arquivos_pdf ap_pag
                 WHERE ap_pag.id_componente = bc.id_componente
                   AND (
                       (i.pares IS NOT NULL AND ap_pag.pares = i.pares AND ap_pag.formulario_id = i.formulario_id)
@@ -208,7 +245,7 @@ componentes AS (
         END AS quantidade_paginas
     FROM itens i
     JOIN bremen_componentes bc ON bc.id_produto = i.id_produto
-    LEFT JOIN arquivo_pdfs ap_sel
+    LEFT JOIN pedido_arquivos_pdf ap_sel
         ON ap_sel.item_pedido_id = i.especificacao_id
        AND ap_sel.id_componente = bc.id_componente
        AND (
@@ -252,6 +289,30 @@ respostas_gerais AS (
     LEFT JOIN bremen_respostas br ON br.id = bed.resposta_id
     WHERE br.valor IS NOT NULL
     ORDER BY i.especificacao_id, bp.id
+),
+
+-- Tarefas de escopo componente vinculadas à especificação via tabela pivot
+tarefas_componentes AS (
+    SELECT DISTINCT
+        bet.especificacao_id,
+        bt.id_tarefa,
+        bt.descricao,
+        bt.descricao_pf
+    FROM pedido_especificacoes_tarefas bet
+    JOIN bremen_tarefas bt ON bt.id = bet.tarefa_id
+    WHERE bt.id_componente IS TRUE
+),
+
+-- Tarefas de escopo geral vinculadas à especificação via tabela pivot
+tarefas_gerais AS (
+    SELECT DISTINCT
+        bet.especificacao_id,
+        bt.id_tarefa,
+        bt.descricao,
+        bt.descricao_pf
+    FROM pedido_especificacoes_tarefas bet
+    JOIN bremen_tarefas bt ON bt.id = bet.tarefa_id
+    WHERE bt.id_geral IS TRUE
 )
 
 SELECT json_build_object(
@@ -266,7 +327,24 @@ SELECT json_build_object(
                 json_build_object(
                     'id_produto', ip.id_produto,
                     'titulo', ip.nome_arquivo,
-                    'obs_producao', ip.obs_producao,
+                    'obs_producao', CASE
+                        WHEN ip.cliente_id = 151 THEN
+                            CONCAT_WS(
+                                CHR(10) || CHR(10),
+                                ip.obs_producao,
+                                CONCAT_WS(
+                                    CHR(10),
+                                    'Turma: ' || COALESCE(ip.nome_turma, '-'),
+                                    'Segmento: ' || COALESCE(ip.area_turma, '-'),
+                                    'Solicitante: ' || COALESCE(ip.solicitante_nome, '-'),
+                                    'E-mail: ' || COALESCE(ip.solicitante_email, '-'),
+                                    'Arquivo: ' || COALESCE(ip.arquivo_nome_raw, '-'),
+                                    'Data do Pedido: ' || COALESCE(ip.data_pedido, '-'),
+                                    'Título: ' || COALESCE(ip.form_titulo, '-')
+                                )
+                            )
+                        ELSE ip.obs_producao
+                    END,
                     'quantidade', ip.quantidade_total,
                     'usar_listapreco', 1,
                     'manter_estrutura_mod_produto', 1,
@@ -307,6 +385,17 @@ SELECT json_build_object(
                                                 AND rc.id_componente = comp_sel.id_componente
                                                 AND rc.especificacao_id = comp_sel.especificacao_id
                                             WHERE bp.id_componente = comp_sel.id_componente
+                                        ), '[]'::json),
+                                        'tarefas_componente', COALESCE((
+                                            SELECT json_agg(
+                                                json_build_object(
+                                                    'id', tc.id_tarefa,
+                                                    'descricao', tc.descricao
+                                                )
+                                                ORDER BY tc.id_tarefa
+                                            )
+                                            FROM tarefas_componentes tc
+                                            WHERE tc.especificacao_id = comp_sel.especificacao_id
                                         ), '[]'::json)
                                     )
 
@@ -374,6 +463,17 @@ SELECT json_build_object(
                                                     AND rc.id_componente = comp_sel.id_componente
                                                     AND rc.especificacao_id = comp_sel.especificacao_id
                                                 WHERE bp.id_componente = comp_sel.id_componente
+                                            ), '[]'::json),
+                                            'tarefas_componente', COALESCE((
+                                                SELECT json_agg(
+                                                    json_build_object(
+                                                        'id', tc.id_tarefa,
+                                                        'descricao', tc.descricao
+                                                    )
+                                                    ORDER BY tc.id_tarefa
+                                                )
+                                                FROM tarefas_componentes tc
+                                                WHERE tc.especificacao_id = comp_sel.especificacao_id
                                             ), '[]'::json)
                                         )
                                     )
@@ -408,6 +508,17 @@ SELECT json_build_object(
                                                 AND rc.id_componente = comp_sel.id_componente
                                                 AND rc.especificacao_id = comp_sel.especificacao_id
                                             WHERE bp.id_componente = comp_sel.id_componente
+                                        ), '[]'::json),
+                                        'tarefas_componente', COALESCE((
+                                            SELECT json_agg(
+                                                json_build_object(
+                                                    'id', tc.id_tarefa,
+                                                    'descricao', tc.descricao
+                                                )
+                                                ORDER BY tc.id_tarefa
+                                            )
+                                            FROM tarefas_componentes tc
+                                            WHERE tc.especificacao_id = comp_sel.especificacao_id
                                         ), '[]'::json)
                                     )
                             END
@@ -454,6 +565,18 @@ SELECT json_build_object(
                         FROM bremen_perguntas bp
                         INNER JOIN respostas_gerais rg ON rg.pergunta_id = bp.id AND rg.especificacao_id = ip.especificacao_id
                         WHERE bp.id_geral = ip.id_produto
+                    ), '[]'::json),
+                    'tarefas_gerais', COALESCE((
+                        SELECT json_agg(
+                            json_build_object(
+                                'id_tarefa', tg.id_tarefa,
+                                'descricao', tg.descricao,
+                                'descricao_pf', tg.descricao_pf
+                            )
+                            ORDER BY tg.id_tarefa
+                        )
+                        FROM tarefas_gerais tg
+                        WHERE tg.especificacao_id = ip.especificacao_id
                     ), '[]'::json)
                 )
                 ORDER BY ip.chave_agrupamento

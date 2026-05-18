@@ -18,7 +18,7 @@ class DistribuicaoMaterial(Base):
     Modelo DistribuicaoMaterial
     Representa a distribuição de materiais para unidades escolares em um formulário
     """
-    __tablename__ = "distribuicao_materiais"
+    __tablename__ = "pedido_distribuicoes"
     
     id = Column(Integer, primary_key=True, index=True)
     grupo_id = Column(Integer, nullable=True, comment="ID do grupo/lote mais recente atribuído à distribuição")
@@ -35,31 +35,31 @@ class DistribuicaoMaterial(Base):
     data_saida = Column(String(255), nullable=True, comment="Data real da saída do material da unidade")
     arquivo_pdf_id = Column(
         Integer,
-        ForeignKey('arquivo_pdfs.id', ondelete='SET NULL', onupdate='CASCADE'),
+        ForeignKey('pedido_arquivos_pdf.id', ondelete='SET NULL', onupdate='CASCADE'),
         nullable=True,
         comment="ID do arquivo PDF relacionado a esta distribuição"
     )
     formulario_id = Column(
         Integer,
-        ForeignKey('formularios.id', ondelete='CASCADE', onupdate='CASCADE'),
+        ForeignKey('pedido_formularios.id', ondelete='CASCADE', onupdate='CASCADE'),
         nullable=False,
         comment="ID do formulário ao qual esta distribuição pertence"
     )
     unidade_escolar_id = Column(
         Integer,
-        ForeignKey('unidades_escolares.id', ondelete='SET NULL', onupdate='CASCADE'),
+        ForeignKey('escola_unidades.id', ondelete='SET NULL', onupdate='CASCADE'),
         nullable=True,
         comment="ID da unidade escolar que receberá o material - pode ser nulo para distribuições virtuais por turma"
     )
     especificacao_form_id = Column(
         Integer,
-        ForeignKey('especificacoes_form.id', ondelete='SET NULL', onupdate='CASCADE'),
+        ForeignKey('pedido_especificacoes.id', ondelete='SET NULL', onupdate='CASCADE'),
         nullable=True,
         comment="ID da especificação do formulário (se aplicável)"
     )
     id_turma = Column(
         Integer,
-        ForeignKey('turmas.id', ondelete='SET NULL', onupdate='CASCADE'),
+        ForeignKey('escola_turmas.id', ondelete='SET NULL', onupdate='CASCADE'),
         nullable=True,
         comment="ID da turma que receberá o material (se aplicável)"
     )

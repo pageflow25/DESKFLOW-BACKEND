@@ -25,7 +25,7 @@ class AprovacaoAPI(Base):
     
     distribuicao_material_id = Column(
         Integer,
-        ForeignKey('distribuicao_materiais.id', ondelete='CASCADE', onupdate='CASCADE'),
+        ForeignKey('pedido_distribuicoes.id', ondelete='CASCADE', onupdate='CASCADE'),
         nullable=False,
         index=True,
         comment="ID da distribuição de material vinculada a esta aprovação (um por OP)"

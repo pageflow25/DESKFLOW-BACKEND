@@ -24,7 +24,7 @@ class UnidadeEscolar(Base):
     Modelo UnidadeEscolar
     Representa as unidades/filiais de uma escola
     """
-    __tablename__ = "unidades_escolares"
+    __tablename__ = "escola_unidades"
     
     id = Column(Integer, primary_key=True, index=True)
     nome = Column(String(255), nullable=False, comment="Nome da unidade escolar")
@@ -49,7 +49,7 @@ class UnidadeEscolar(Base):
     status = Column(SQLEnum(StatusUnidade), nullable=False, default=StatusUnidade.ATIVO, comment="Status da unidade")
     data_inauguracao = Column(Date, nullable=True, comment="Data de inauguração da unidade")
     observacoes = Column(Text, nullable=True, comment="Observações sobre a unidade")
-    escola_id = Column(Integer, ForeignKey('escolas.id', ondelete='CASCADE', onupdate='CASCADE'), nullable=False, comment="ID da escola à qual a unidade pertence")
+    escola_id = Column(Integer, ForeignKey('escola_escolas.id', ondelete='CASCADE', onupdate='CASCADE'), nullable=False, comment="ID da escola à qual a unidade pertence")
     coordenadas_latitude = Column(DECIMAL(10, 8), nullable=True, comment="Latitude da localização da unidade")
     coordenadas_longitude = Column(DECIMAL(11, 8), nullable=True, comment="Longitude da localização da unidade")
     divisao_logistica = Column(String(100), nullable=True, comment="Divisão logística responsável pela unidade")

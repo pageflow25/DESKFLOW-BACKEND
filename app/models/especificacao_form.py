@@ -15,7 +15,7 @@ class EspecificacaoForm(Base):
     - Item 2: Miolo P&B (papel offset, gramatura 75g)
     - Item 3: Miolo Colorido (papel couché, gramatura 90g)
     """
-    __tablename__ = "especificacoes_form"
+    __tablename__ = "pedido_especificacoes"
     
     id = Column(Integer, primary_key=True, index=True)
     nome_item = Column(String(255), nullable=True, comment="Nome descritivo do item (ex: Capa e Contracapa, Miolo Colorido, Miolo P&B)")
@@ -76,7 +76,7 @@ class EspecificacaoForm(Base):
     # Relacionamentos com tabelas
     formulario_id = Column(
         Integer,
-        ForeignKey('formularios.id', ondelete='CASCADE', onupdate='CASCADE'),
+        ForeignKey('pedido_formularios.id', ondelete='CASCADE', onupdate='CASCADE'),
         nullable=True
     )
     
@@ -126,6 +126,13 @@ class EspecificacaoForm(Base):
     # Relacionamento com detalhes de especificação (perguntas e respostas)
     detalhes = relationship(
         "BremenEspecificacaoDetalhe",
+        back_populates="especificacao",
+        cascade="all, delete-orphan"
+    )
+
+    # Relacionamento N:N com bremen_tarefas via tabela pivot
+    especificacao_tarefas = relationship(
+        "BremenEspecificacaoTarefa",
         back_populates="especificacao",
         cascade="all, delete-orphan"
     )

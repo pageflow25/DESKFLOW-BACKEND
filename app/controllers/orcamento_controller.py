@@ -174,7 +174,7 @@ class OrcamentoController:
                             ap.nome AS arquivo_nome
                         FROM ultimos u
                         LEFT JOIN status_deskflow_pedido s ON s.id = u.status_novo_id
-                        LEFT JOIN distribuicao_materiais dm ON dm.id = u.distribuicao_material_id
+                        LEFT JOIN pedido_distribuicoes dm ON dm.id = u.distribuicao_material_id
                         LEFT JOIN (
                             SELECT
                                 distribuicao_material_id,
@@ -183,9 +183,9 @@ class OrcamentoController:
                             WHERE id_orcamento IS NOT NULL
                             GROUP BY distribuicao_material_id
                         ) oa_agg ON oa_agg.distribuicao_material_id = dm.id
-                        LEFT JOIN unidades_escolares ue ON ue.id = dm.unidade_escolar_id
-                        LEFT JOIN escolas e ON e.id = ue.escola_id
-                        LEFT JOIN arquivo_pdfs ap ON ap.id = dm.arquivo_pdf_id
+                        LEFT JOIN escola_unidades ue ON ue.id = dm.unidade_escolar_id
+                        LEFT JOIN escola_escolas e ON e.id = ue.escola_id
+                        LEFT JOIN pedido_arquivos_pdf ap ON ap.id = dm.arquivo_pdf_id
                         ORDER BY dm.id_orcamento NULLS LAST, u.distribuicao_material_id
                         """
                     ),
@@ -789,6 +789,8 @@ class OrcamentoController:
                     dias_uteis_filtro=request.dias_uteis_filtro,
                     ids_formularios=request.ids_formularios,
                     status_ids=request.status_ids,
+                    ids_unidades=getattr(request, 'ids_unidades', None),
+                    ids_arquivos=getattr(request, 'ids_arquivos', None),
                     modo_agrupamento=modo
                 )
             )

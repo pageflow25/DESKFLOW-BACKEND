@@ -10,9 +10,17 @@ class OrcamentoRequest(BaseModel):
     datas_saida: List[date] = Field(..., min_length=1, description="Lista de datas de saída")
     divisoes_logistica: Optional[List[str]] = Field(None, description="Lista de divisões logísticas (opcional)")
     dias_uteis_filtro: Optional[List[int]] = Field(None, description="Lista de dias úteis (opcional)")
+    ids_unidades: Optional[List[int]] = Field(None, description="Lista de IDs de unidades escolares para filtrar (opcional)")
+    ids_arquivos: Optional[List[int]] = Field(None, description="Lista de IDs de arquivos PDF para filtrar (opcional)")
     ids_formularios: Optional[List[int]] = Field(None, description="Lista de IDs de formulários para filtrar (opcional)")
     status_ids: Optional[List[int]] = Field(None, description="Lista de status_id para filtrar (padrão: [1])")
     modo_agrupamento: str = Field("unidade", description="Modo de agrupamento: 'unidade' (por unidade) ou 'escola' (agrupado por escola)")
+
+
+class TarefaItem(BaseModel):
+    """Tarefa vinculada a um componente ou a um item (escopo geral)"""
+    id: int
+    descricao: str
 
 
 class ComponenteInfo(BaseModel):
@@ -28,6 +36,7 @@ class ComponenteInfo(BaseModel):
     corfrente: Optional[int] = None
     corverso: Optional[int] = None
     perguntas_componente: List[dict] = []
+    tarefas_componente: List[TarefaItem] = []
 
 
 class PerguntaGeral(BaseModel):
@@ -49,10 +58,13 @@ class ItemOrcamento(BaseModel):
     ids_distribuicao: Optional[List[int]] = Field(None, description="IDs de distribuição agrupados (modo escola)")
     componentes: List[ComponenteInfo] = []
     perguntas_gerais: List[PerguntaGeral] = []
+    tarefas_gerais: List[TarefaItem] = []
 
 
 class OrcamentoData(BaseModel):
     """Dados do orçamento"""
+    id_escola: Optional[int] = Field(None, description="ID da escola (modo escola)")
+    nome_unidade: Optional[str] = Field(None, description="Nome da unidade escolar (modo unidade)")
     id_cliente: Optional[int] = None
     id_vendedor: Optional[int] = 2285
     id_forma_pagamento: str = "11"
@@ -93,6 +105,8 @@ class FluxoOrcamentoRequest(BaseModel):
     datas_saida: List[date] = Field(..., min_length=1, description="Lista de datas de saída")
     divisoes_logistica: Optional[List[str]] = Field(None, description="Divisões logísticas (opcional)")
     dias_uteis_filtro: Optional[List[int]] = Field(None, description="Dias úteis (opcional)")
+    ids_unidades: Optional[List[int]] = Field(None, description="Lista de IDs de unidades escolares para filtrar (opcional)")
+    ids_arquivos: Optional[List[int]] = Field(None, description="Lista de IDs de arquivos PDF para filtrar (opcional)")
     aprovar_automaticamente: bool = Field(False, description="Se deve aprovar automaticamente")
     data_entrega: Optional[str] = Field(None, description="Data de entrega para aprovação (ISO format)")
     usar_data_saida_distribuicao: bool = Field(False, description="Se true, usa data_saida da distribuicao_materiais por item na aprovação")
@@ -111,6 +125,8 @@ class GerarOrcamentoCompleto(BaseModel):
     datas_saida: List[date] = Field(..., min_length=1, description="Lista de datas de saída")
     divisoes_logistica: Optional[List[str]] = Field(None, description="Lista de divisões logísticas (opcional)")
     dias_uteis_filtro: Optional[List[int]] = Field(None, description="Lista de dias úteis (opcional)")
+    ids_unidades: Optional[List[int]] = Field(None, description="Lista de IDs de unidades escolares para filtrar (opcional)")
+    ids_arquivos: Optional[List[int]] = Field(None, description="Lista de IDs de arquivos PDF para filtrar (opcional)")
     
     # Parâmetros para o fluxo completo
     executar_fluxo_completo: bool = Field(True, description="Se deve executar o fluxo completo (geração + aprovação)")

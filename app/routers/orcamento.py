@@ -87,6 +87,8 @@ async def gerar_orcamento(
             datas_saida=request.datas_saida,
             divisoes_logistica=request.divisoes_logistica,
             dias_uteis_filtro=request.dias_uteis_filtro,
+            ids_unidades=request.ids_unidades,
+            ids_arquivos=request.ids_arquivos,
             ids_formularios=request.ids_formularios,
             status_ids=request.status_ids,
             grupo_lote_id=request.grupo_lote_id,
@@ -467,9 +469,9 @@ async def consultar_status_orcamentos(
                 oa.id_orcamento,
                 aa.id_ops,
                 dm.status_distribuicao
-            FROM distribuicao_materiais dm
-            JOIN unidades_escolares ue ON ue.id = dm.unidade_escolar_id
-            JOIN especificacoes_form ef ON ef.id = dm.especificacao_form_id
+            FROM pedido_distribuicoes dm
+            JOIN escola_unidades ue ON ue.id = dm.unidade_escolar_id
+            JOIN pedido_especificacoes ef ON ef.id = dm.especificacao_form_id
             LEFT JOIN status_deskflow_pedido sdf ON sdf.id = dm.status_id
             LEFT JOIN orcamento_api oa ON oa.distribuicao_material_id = dm.id
             LEFT JOIN aprovacao_api aa ON aa.distribuicao_material_id = dm.id
