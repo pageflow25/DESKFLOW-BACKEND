@@ -735,6 +735,7 @@ class OrcamentoService:
                 DistribuicaoMaterial.status_id,
                 DistribuicaoMaterial.formulario_id,
                 DistribuicaoMaterial.unidade_escolar_id,
+                DistribuicaoMaterial.especificacao_form_id,
                 DistribuicaoMaterial.id_turma,
             ).filter(DistribuicaoMaterial.id.in_(distribuicoes_ids)).all()
 
@@ -742,8 +743,10 @@ class OrcamentoService:
                 logger.warning(f"Nenhuma distribuição encontrada para os IDs: {distribuicoes_ids}")
                 return 0
 
-            # Construir condições de cascata por (formulario_id, unidade_escolar_id, id_turma).
-            # Distribuições sem turma cascatam apenas entre si (id_turma IS NULL).
+            # Construir condições de cascata por (formulario_id, unidade_escolar_id, especificacao_form_id, id_turma).
+            # Inclui especificacao_form_id para restringir a cascata apenas a distribuições da mesma
+            # especificação (ex: capa + miolo do mesmo livro), evitando expansão indevida para
+            # outras especificações que compartilham (formulario, unidade, turma).
             from sqlalchemy import and_, or_
             condicoes_cascata = []
             for d in distribuicoes_base:
@@ -752,6 +755,7 @@ class OrcamentoService:
                 cond = and_(
                     DistribuicaoMaterial.formulario_id == d.formulario_id,
                     DistribuicaoMaterial.unidade_escolar_id == d.unidade_escolar_id,
+                    DistribuicaoMaterial.especificacao_form_id == d.especificacao_form_id,
                     (DistribuicaoMaterial.id_turma.is_(None)
                         if d.id_turma is None
                         else DistribuicaoMaterial.id_turma == d.id_turma),

@@ -79,7 +79,7 @@ especificacoes_unidade AS (
         ) 
         AND dm.status_id = ANY(p.status_ids)
         AND (p.ids_formularios IS NULL OR ap.formulario_id = ANY(p.ids_formularios))
-        AND (p.ids_arquivos IS NULL OR ap.id = ANY(p.ids_arquivos))
+        AND (p.ids_arquivos IS NULL OR dm.arquivo_pdf_id = ANY(p.ids_arquivos))
 ),
 
 itens_produto AS (
