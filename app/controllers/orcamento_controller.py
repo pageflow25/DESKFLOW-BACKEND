@@ -791,6 +791,7 @@ class OrcamentoController:
                     status_ids=request.status_ids,
                     ids_unidades=getattr(request, 'ids_unidades', None),
                     ids_arquivos=getattr(request, 'ids_arquivos', None),
+                    nome_arquivo_filtro=getattr(request, 'nome_arquivo_filtro', None),
                     modo_agrupamento=modo
                 )
             )

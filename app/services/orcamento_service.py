@@ -241,6 +241,7 @@ class OrcamentoService:
                 'status_ids': getattr(request, 'status_ids', None) or [1],
                 'ids_unidades': getattr(request, 'ids_unidades', None),
                 'ids_arquivos': getattr(request, 'ids_arquivos', None),
+                'nome_arquivo_filtro': getattr(request, 'nome_arquivo_filtro', None),
             }
 
             logger.info(f"Parâmetros da query ({sql_filename}): {params}")
