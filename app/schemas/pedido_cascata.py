@@ -4,6 +4,7 @@ from typing import Optional, Any
 
 class ArquivoInfo(BaseModel):
     """Informações de arquivo individual"""
+    id: Optional[int] = None
     arquivo: str
     copias: int
     paginas: Optional[int] = None
@@ -11,6 +12,7 @@ class ArquivoInfo(BaseModel):
 
 class UnidadeInfo(BaseModel):
     """Informações de unidade escolar"""
+    id: int
     unidade: str
     quantidade: int
     arquivos: list[ArquivoInfo]

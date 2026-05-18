@@ -10,6 +10,8 @@ class OrcamentoRequest(BaseModel):
     datas_saida: List[date] = Field(..., min_length=1, description="Lista de datas de saída")
     divisoes_logistica: Optional[List[str]] = Field(None, description="Lista de divisões logísticas (opcional)")
     dias_uteis_filtro: Optional[List[int]] = Field(None, description="Lista de dias úteis (opcional)")
+    ids_unidades: Optional[List[int]] = Field(None, description="Lista de IDs de unidades escolares para filtrar (opcional)")
+    ids_arquivos: Optional[List[int]] = Field(None, description="Lista de IDs de arquivos PDF para filtrar (opcional)")
     ids_formularios: Optional[List[int]] = Field(None, description="Lista de IDs de formulários para filtrar (opcional)")
     status_ids: Optional[List[int]] = Field(None, description="Lista de status_id para filtrar (padrão: [1])")
     modo_agrupamento: str = Field("unidade", description="Modo de agrupamento: 'unidade' (por unidade) ou 'escola' (agrupado por escola)")
@@ -103,6 +105,8 @@ class FluxoOrcamentoRequest(BaseModel):
     datas_saida: List[date] = Field(..., min_length=1, description="Lista de datas de saída")
     divisoes_logistica: Optional[List[str]] = Field(None, description="Divisões logísticas (opcional)")
     dias_uteis_filtro: Optional[List[int]] = Field(None, description="Dias úteis (opcional)")
+    ids_unidades: Optional[List[int]] = Field(None, description="Lista de IDs de unidades escolares para filtrar (opcional)")
+    ids_arquivos: Optional[List[int]] = Field(None, description="Lista de IDs de arquivos PDF para filtrar (opcional)")
     aprovar_automaticamente: bool = Field(False, description="Se deve aprovar automaticamente")
     data_entrega: Optional[str] = Field(None, description="Data de entrega para aprovação (ISO format)")
     usar_data_saida_distribuicao: bool = Field(False, description="Se true, usa data_saida da distribuicao_materiais por item na aprovação")
@@ -121,6 +125,8 @@ class GerarOrcamentoCompleto(BaseModel):
     datas_saida: List[date] = Field(..., min_length=1, description="Lista de datas de saída")
     divisoes_logistica: Optional[List[str]] = Field(None, description="Lista de divisões logísticas (opcional)")
     dias_uteis_filtro: Optional[List[int]] = Field(None, description="Lista de dias úteis (opcional)")
+    ids_unidades: Optional[List[int]] = Field(None, description="Lista de IDs de unidades escolares para filtrar (opcional)")
+    ids_arquivos: Optional[List[int]] = Field(None, description="Lista de IDs de arquivos PDF para filtrar (opcional)")
     
     # Parâmetros para o fluxo completo
     executar_fluxo_completo: bool = Field(True, description="Se deve executar o fluxo completo (geração + aprovação)")

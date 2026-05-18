@@ -87,6 +87,8 @@ async def gerar_orcamento(
             datas_saida=request.datas_saida,
             divisoes_logistica=request.divisoes_logistica,
             dias_uteis_filtro=request.dias_uteis_filtro,
+            ids_unidades=request.ids_unidades,
+            ids_arquivos=request.ids_arquivos,
             ids_formularios=request.ids_formularios,
             status_ids=request.status_ids,
             grupo_lote_id=request.grupo_lote_id,

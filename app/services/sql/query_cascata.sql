@@ -64,6 +64,7 @@ nivel_arquivos AS (
 
         JSONB_AGG(
             JSONB_BUILD_OBJECT(
+                'id', arquivo_id,
                 'arquivo', nome_arquivo,
                 'copias', quantidade,
                 'paginas', paginas
@@ -87,6 +88,7 @@ nivel_unidades AS (
 
         JSONB_AGG(
             JSONB_BUILD_OBJECT(
+                'id', unidade_id,
                 'unidade', nome_unidade,
                 'quantidade', qtd_arquivos,
                 'arquivos', lista_arquivos

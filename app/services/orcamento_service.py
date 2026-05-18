@@ -230,7 +230,9 @@ class OrcamentoService:
                 'divisoes_logistica': request.divisoes_logistica,
                 'dias_uteis_filtro': request.dias_uteis_filtro,
                 'ids_formularios': getattr(request, 'ids_formularios', None),
-                'status_ids': getattr(request, 'status_ids', None) or [1]
+                'status_ids': getattr(request, 'status_ids', None) or [1],
+                'ids_unidades': getattr(request, 'ids_unidades', None),
+                'ids_arquivos': getattr(request, 'ids_arquivos', None),
             }
 
             logger.info(f"Parâmetros da query ({sql_filename}): {params}")

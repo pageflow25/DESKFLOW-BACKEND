@@ -1,7 +1,7 @@
 ﻿-- Query para geração de orçamentos AGRUPADOS POR ESCOLA (soma quantidades de todas as unidades)
 -- Diferença do modo "por unidade": aqui agrupa tudo da escola em um único orçamento
 -- Usa ids_distribuicao (array) em vez de id_distribuicao (único) nos itens
--- Parâmetros: :escola_id, :ids_produtos, :datas_saida, :divisoes_logistica, :dias_uteis_filtro, :ids_formularios, :status_ids
+-- Parâmetros: :escola_id, :ids_produtos, :datas_saida, :divisoes_logistica, :dias_uteis_filtro, :ids_formularios, :status_ids, :ids_unidades
 
 WITH parametros AS (
     SELECT
@@ -11,7 +11,9 @@ WITH parametros AS (
         CAST(:divisoes_logistica AS text[]) AS divisoes_logistica, 
         CAST(:dias_uteis_filtro AS int[]) AS dias_uteis_filtro,
         CAST(:ids_formularios AS int[]) AS ids_formularios,
-        CAST(:status_ids AS int[]) AS status_ids
+        CAST(:status_ids AS int[]) AS status_ids,
+        CAST(:ids_unidades AS int[]) AS ids_unidades,
+        CAST(:ids_arquivos AS int[]) AS ids_arquivos
 ),
 
 unidades_filtradas AS (
@@ -28,6 +30,7 @@ unidades_filtradas AS (
     WHERE ue.escola_id = p.escola_id
     AND (p.divisoes_logistica IS NULL OR ue.divisao_logistica = ANY(p.divisoes_logistica))
     AND (p.dias_uteis_filtro IS NULL OR ue.dias_uteis = ANY(p.dias_uteis_filtro))
+    AND (p.ids_unidades IS NULL OR ue.id = ANY(p.ids_unidades))
 ),
 
 especificacoes_unidade AS (
@@ -74,6 +77,7 @@ especificacoes_unidade AS (
         )
         AND dm.status_id = ANY(p.status_ids)
         AND (p.ids_formularios IS NULL OR ap.formulario_id = ANY(p.ids_formularios))
+        AND (p.ids_arquivos IS NULL OR ap.id = ANY(p.ids_arquivos))
 ),
 
 distribuicao_ids AS (
@@ -100,6 +104,7 @@ distribuicao_ids AS (
         )
         AND dm.status_id = ANY(p.status_ids)
         AND (p.ids_formularios IS NULL OR ap.formulario_id = ANY(p.ids_formularios))
+        AND (p.ids_arquivos IS NULL OR ap.id = ANY(p.ids_arquivos))
 ),
 
 -- Primeiro, agrupa as quantidades únicas por cliente/unidade para evitar duplicação causada pelos JOINs

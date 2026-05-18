@@ -789,6 +789,8 @@ class OrcamentoController:
                     dias_uteis_filtro=request.dias_uteis_filtro,
                     ids_formularios=request.ids_formularios,
                     status_ids=request.status_ids,
+                    ids_unidades=getattr(request, 'ids_unidades', None),
+                    ids_arquivos=getattr(request, 'ids_arquivos', None),
                     modo_agrupamento=modo
                 )
             )
