@@ -1,12 +1,13 @@
 -- Query para buscar pedidos de uma escola em estrutura hierárquica (cascata)
--- Parâmetros: :escola_id, :tipo_formulario, :ids_formularios, :status_ids
+-- Parâmetros: :escola_id, :tipo_formulario, :ids_formularios, :status_ids, :nome_arquivo_filtro
 
 WITH parametros AS (
     SELECT
         :escola_id AS escola_id,
         NULLIF(TRIM(CAST(:tipo_formulario AS TEXT)), '') AS tipo_formulario,
         CAST(:ids_formularios AS int[]) AS ids_formularios,
-        CAST(:status_ids AS int[]) AS status_ids
+    CAST(:status_ids AS int[]) AS status_ids,
+    NULLIF(TRIM(CAST(:nome_arquivo_filtro AS TEXT)), '') AS nome_arquivo_filtro
 ),
 
 dados_normalizados AS (
@@ -54,6 +55,10 @@ dados_normalizados AS (
         AND uc.escola_id = p.escola_id
         AND (p.status_ids IS NULL OR distri.status_id = ANY(p.status_ids))
         AND (p.ids_formularios IS NULL OR f.id = ANY(p.ids_formularios))
+        AND (
+            p.nome_arquivo_filtro IS NULL
+            OR UPPER(COALESCE(ar.nome, '')) LIKE '%' || UPPER(p.nome_arquivo_filtro) || '%'
+        )
 ),
 
 -- NÍVEL 5: ARQUIVOS (agrupados por divisão + produto + data + unidade)

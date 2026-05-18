@@ -140,6 +140,7 @@ class GerarOrcamentoCompleto(BaseModel):
     gerar_op: bool = Field(True, description="Se deve gerar OP na aprovação. False envia gerar_op=false para a API Bremen.")
     ids_formularios: Optional[List[int]] = Field(None, description="Lista de IDs de formulários para filtrar (opcional)")
     status_ids: Optional[List[int]] = Field(None, description="Lista de status_id para filtrar (padrão: [1])")
+    nome_arquivo_filtro: Optional[str] = Field(None, description="Filtro por trecho do nome do arquivo PDF (case-insensitive, ex: 'MODELO1')")
     grupo_lote_id: Optional[int] = Field(None, description="ID do grupo selecionado para disparo do lote")
     modo_agrupamento: str = Field("unidade", description="Modo de agrupamento: 'unidade' (por unidade) ou 'escola' (agrupado por escola)")
 

@@ -12,7 +12,14 @@ class CascataController:
     """Controller para operações de pedidos em cascata"""
     
     @staticmethod
-    async def get_pedidos_escola(db: Session, escola_id: int, tipo_formulario: str = None, ids_formularios: list = None, status_ids: list = None) -> PedidoCascataResponse:
+    async def get_pedidos_escola(
+        db: Session,
+        escola_id: int,
+        tipo_formulario: str = None,
+        ids_formularios: list = None,
+        status_ids: list = None,
+        nome_arquivo_filtro: str = None,
+    ) -> PedidoCascataResponse:
         """
         Obtém pedidos da escola em estrutura hierárquica
         
@@ -22,11 +29,16 @@ class CascataController:
             tipo_formulario: Tipo de formulário a filtrar (opcional)
             ids_formularios: Lista de IDs de formulários para filtrar (opcional)
             status_ids: Lista de IDs de status para filtrar (padrão: [1])
+            nome_arquivo_filtro: Trecho do nome do arquivo PDF para filtrar (opcional)
             
         Returns:
             PedidoCascataResponse com dados em cascata
         """
-        logger.info(f"Requisição para obter pedidos em cascata da escola {escola_id}, tipo_formulario={tipo_formulario}, ids_formularios={ids_formularios}, status_ids={status_ids}")
+        logger.info(
+            f"Requisição para obter pedidos em cascata da escola {escola_id}, "
+            f"tipo_formulario={tipo_formulario}, ids_formularios={ids_formularios}, "
+            f"status_ids={status_ids}, nome_arquivo_filtro={nome_arquivo_filtro}"
+        )
         
         if escola_id <= 0:
             logger.warning(f"ID de escola inválido: {escola_id}")
@@ -36,7 +48,14 @@ class CascataController:
             )
         
         try:
-            dashboard_data = CascataService.get_pedidos_escola_cascata(db, escola_id, tipo_formulario, ids_formularios, status_ids)
+            dashboard_data = CascataService.get_pedidos_escola_cascata(
+                db,
+                escola_id,
+                tipo_formulario,
+                ids_formularios,
+                status_ids,
+                nome_arquivo_filtro,
+            )
             
             response = PedidoCascataResponse(
                 dashboard_completo=dashboard_data
