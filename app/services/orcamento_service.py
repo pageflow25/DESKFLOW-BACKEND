@@ -365,6 +365,8 @@ class OrcamentoService:
                     "distribuicao_material_id": id_distribuicao,
                     "id_orcamento": id_orcamento,
                     "id_item": id_item,
+                    "itens": item_resposta,
+                    "resposta_api": resposta_completa,
                     "envio_item_id": envio_item_id,
                 })
                 logger.debug(
@@ -456,12 +458,31 @@ class OrcamentoService:
             else:
                 ops = []
 
-            # Extrair pedido (um único objeto)
+            # Extrair pedido/PV. A API pode retornar um array em `pedidos`, um objeto,
+            # ou o identificador direto no próprio item de data.
             pedidos_lista = data_item.get('pedidos', [])
-            pedido = pedidos_lista[0] if pedidos_lista else {}
+            if isinstance(pedidos_lista, list):
+                pedido = pedidos_lista[0] if pedidos_lista else {}
+            elif isinstance(pedidos_lista, dict):
+                pedido = pedidos_lista
+            else:
+                pedido = {}
 
-            # Extrair id_pedido_venda do primeiro pedido
-            id_pedido_venda = pedido.get('id') if pedido else None
+            id_pedido_venda = (
+                data_item.get('id_pedido_venda')
+                or data_item.get('id_pedido')
+                or data_item.get('pedido_venda')
+                or data_item.get('id_pv')
+                or (pedido.get('id') if pedido else None)
+                or (pedido.get('id_pedido_venda') if pedido else None)
+                or (pedido.get('id_pedido') if pedido else None)
+            )
+            if isinstance(id_pedido_venda, dict):
+                id_pedido_venda = (
+                    id_pedido_venda.get('id')
+                    or id_pedido_venda.get('id_pedido_venda')
+                    or id_pedido_venda.get('id_pedido')
+                )
 
             logger.info(f"OPs extraídas: {ops}, Pedido: {pedido}, id_pedido_venda: {id_pedido_venda}")
             logger.info(f"Distribuições IDs para correspondência: {distribuicoes_ids}")
@@ -495,6 +516,7 @@ class OrcamentoService:
                         "id_ops": op_id,
                         "id_pedido_venda": id_pedido_venda,
                         "pedidos": pedido,
+                        "resposta_api": resposta_completa,
                         "envio_item_id": envio_item_id,
                     })
                     logger.debug(f"OP {i}: distribuicao_material_id={dist_id}, id_ops={op_id}")
@@ -516,6 +538,7 @@ class OrcamentoService:
                         "id_ops": None,
                         "id_pedido_venda": id_pedido_venda,
                         "pedidos": pedido,
+                        "resposta_api": resposta_completa,
                         "envio_item_id": envio_item_id,
                     })
 
