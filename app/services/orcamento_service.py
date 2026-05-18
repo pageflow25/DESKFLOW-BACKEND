@@ -20,6 +20,15 @@ from datetime import datetime
 
 logger = get_logger(__name__)
 
+# Diretório do SQL
+SQL_DIR = Path(__file__).parent / "sql"
+
+
+def _carregar_query(nome_arquivo: str) -> str:
+    """Carrega uma query SQL de um arquivo."""
+    caminho = SQL_DIR / nome_arquivo
+    return caminho.read_text(encoding="utf-8-sig")
+
 
 class OrcamentoService:
     """Service para operações de orçamento"""
@@ -218,9 +227,7 @@ class OrcamentoService:
                 logger.info(f"Modo UNIDADE: gerando orçamento por unidade para escola {request.escola_id}")
             
             # Carregar query SQL
-            sql_file = Path(__file__).parent / 'sql' / sql_filename
-            with open(sql_file, 'r', encoding='utf-8') as f:
-                query_sql = f.read()
+            query_sql = _carregar_query(sql_filename)
             
             # Preparar parâmetros
             params = {

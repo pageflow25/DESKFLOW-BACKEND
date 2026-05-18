@@ -19,7 +19,7 @@ SQL_DIR = Path(__file__).parent / "sql"
 def _carregar_query(nome_arquivo: str) -> str:
     """Carrega uma query SQL de um arquivo"""
     caminho = SQL_DIR / nome_arquivo
-    return caminho.read_text(encoding="utf-8")
+    return caminho.read_text(encoding="utf-8-sig")
 
 
 class CascataService:
