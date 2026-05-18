@@ -9,6 +9,7 @@ from ..models.status_deskflow_pedido import StatusDeskflowPedido
 from ..models.lote_envio import LoteEnvio
 from ..models.envio_item import EnvioItem
 from ..models.unidade_escolar import UnidadeEscolar
+from ..models.arquivo_pdf import ArquivoPdf
 from ..schemas.orcamento import (
     OrcamentoRequest, OrcamentoListResponse, OrcamentoData, 
     OrcamentoResponse, ItemOrcamento
@@ -728,8 +729,11 @@ class OrcamentoService:
             # Obter status via cache
             status = OrcamentoService._get_or_create_status(db, novo_status)
 
-            # -- 1. Buscar todas as distribuições informadas + suas relacionadas (cascata) --
-            # Busca em uma única query para não ter N+1
+            # -- 1. Buscar todas as distribuições informadas + pares do arquivo (capa/miolo) --
+            from sqlalchemy import and_, or_
+            from sqlalchemy.orm import aliased
+
+            ArquivoBase = aliased(ArquivoPdf)
             distribuicoes_base = db.query(
                 DistribuicaoMaterial.id,
                 DistribuicaoMaterial.status_id,
@@ -737,48 +741,88 @@ class OrcamentoService:
                 DistribuicaoMaterial.unidade_escolar_id,
                 DistribuicaoMaterial.especificacao_form_id,
                 DistribuicaoMaterial.id_turma,
+                ArquivoBase.pares.label('pares'),
+            ).outerjoin(
+                ArquivoBase,
+                ArquivoBase.id == DistribuicaoMaterial.arquivo_pdf_id,
             ).filter(DistribuicaoMaterial.id.in_(distribuicoes_ids)).all()
 
             if not distribuicoes_base:
                 logger.warning(f"Nenhuma distribuição encontrada para os IDs: {distribuicoes_ids}")
                 return 0
 
-            # Construir condições de cascata por (formulario_id, unidade_escolar_id, especificacao_form_id, id_turma).
-            # Inclui especificacao_form_id para restringir a cascata apenas a distribuições da mesma
-            # especificação (ex: capa + miolo do mesmo livro), evitando expansão indevida para
-            # outras especificações que compartilham (formulario, unidade, turma).
-            from sqlalchemy import and_, or_
-            condicoes_cascata = []
-            for d in distribuicoes_base:
-                if not (d.formulario_id and d.unidade_escolar_id):
-                    continue
-                cond = and_(
-                    DistribuicaoMaterial.formulario_id == d.formulario_id,
-                    DistribuicaoMaterial.unidade_escolar_id == d.unidade_escolar_id,
-                    DistribuicaoMaterial.especificacao_form_id == d.especificacao_form_id,
-                    (DistribuicaoMaterial.id_turma.is_(None)
-                        if d.id_turma is None
-                        else DistribuicaoMaterial.id_turma == d.id_turma),
-                )
-                condicoes_cascata.append(cond)
-
             # IDs já conhecidos (os passados + suas cascatas)
             todos_ids_set: set = set(distribuicoes_ids)
             status_map: Dict[int, Optional[int]] = {d.id: d.status_id for d in distribuicoes_base}
 
-            if condicoes_cascata:
-                relacionadas = db.query(
+            # Cascata: agrupar por pares (vincula capa↔miolo do mesmo livro).
+            # Distribuições sem pares usam especificacao_form_id como chave — evita
+            # expansão indevida para livros diferentes na mesma (form, unidade, turma).
+            grupos_pares: list = []    # (form_id, unit_id, turma, pares_val)
+            conds_sem_pares: list = [] # condições SQLAlchemy para distribuições sem pares
+
+            for d in distribuicoes_base:
+                if not (d.formulario_id and d.unidade_escolar_id):
+                    continue
+                turma_cond = (
+                    DistribuicaoMaterial.id_turma.is_(None)
+                    if d.id_turma is None
+                    else DistribuicaoMaterial.id_turma == d.id_turma
+                )
+                if d.pares is not None:
+                    grupos_pares.append((d.formulario_id, d.unidade_escolar_id, d.id_turma, d.pares))
+                else:
+                    conds_sem_pares.append(and_(
+                        DistribuicaoMaterial.formulario_id == d.formulario_id,
+                        DistribuicaoMaterial.unidade_escolar_id == d.unidade_escolar_id,
+                        DistribuicaoMaterial.especificacao_form_id == d.especificacao_form_id,
+                        turma_cond,
+                    ))
+
+            # Cascata 1 — por pares (capa ↔ miolo)
+            if grupos_pares:
+                ArquivoCascata = aliased(ArquivoPdf)
+                pares_conds = []
+                for form_id, unit_id, turma, pares_val in grupos_pares:
+                    turma_cond = (
+                        DistribuicaoMaterial.id_turma.is_(None)
+                        if turma is None
+                        else DistribuicaoMaterial.id_turma == turma
+                    )
+                    pares_conds.append(and_(
+                        DistribuicaoMaterial.formulario_id == form_id,
+                        DistribuicaoMaterial.unidade_escolar_id == unit_id,
+                        turma_cond,
+                        ArquivoCascata.pares == pares_val,
+                    ))
+                relacionadas_pares = db.query(
+                    DistribuicaoMaterial.id,
+                    DistribuicaoMaterial.status_id,
+                ).join(
+                    ArquivoCascata,
+                    ArquivoCascata.id == DistribuicaoMaterial.arquivo_pdf_id,
+                ).filter(
+                    or_(*pares_conds),
+                    DistribuicaoMaterial.id.notin_(distribuicoes_ids),
+                ).all()
+                for r in relacionadas_pares:
+                    todos_ids_set.add(r.id)
+                    status_map[r.id] = r.status_id
+                    logger.debug(f"Cascata (pares): incluindo distribuição {r.id}")
+
+            # Cascata 2 — por especificação (sem pares)
+            if conds_sem_pares:
+                relacionadas_spec = db.query(
                     DistribuicaoMaterial.id,
                     DistribuicaoMaterial.status_id,
                 ).filter(
-                    or_(*condicoes_cascata),
-                    DistribuicaoMaterial.id.notin_(distribuicoes_ids)
+                    or_(*conds_sem_pares),
+                    DistribuicaoMaterial.id.notin_(distribuicoes_ids),
                 ).all()
-
-                for r in relacionadas:
+                for r in relacionadas_spec:
                     todos_ids_set.add(r.id)
                     status_map[r.id] = r.status_id
-                    logger.debug(f"Cascata: incluindo distribuição {r.id}")
+                    logger.debug(f"Cascata (spec): incluindo distribuição {r.id}")
 
             # -- 2. Filtrar somente os que precisam mudar --
             ids_para_atualizar = [
