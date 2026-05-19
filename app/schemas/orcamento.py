@@ -119,6 +119,8 @@ class FluxoOrcamentoRequest(BaseModel):
     grupo_lote_id: Optional[int] = Field(None, description="ID do grupo selecionado para disparo do lote")
     modo_agrupamento: str = Field("unidade", description="Modo de agrupamento: 'unidade' ou 'escola'")
     persistir_resultado: bool = Field(True, description="Se false, executa o fluxo sem salvar resultados/status no banco")
+    organizar_arquivos_por_escola: bool = Field(False, description="Se true, organiza downloads em pasta da escola antes das OPs")
+    atualizar_status_fase01: bool = Field(True, description="Se false, salva orçamento sem alterar status/histórico na FASE 01")
 
 
 class GerarOrcamentoCompleto(BaseModel):
@@ -145,6 +147,8 @@ class GerarOrcamentoCompleto(BaseModel):
     grupo_lote_id: Optional[int] = Field(None, description="ID do grupo selecionado para disparo do lote")
     modo_agrupamento: str = Field("unidade", description="Modo de agrupamento: 'unidade' (por unidade) ou 'escola' (agrupado por escola)")
     persistir_resultado: bool = Field(True, description="Se false, executa o fluxo sem salvar resultados/status no banco")
+    organizar_arquivos_por_escola: bool = Field(False, description="Se true, organiza downloads em pasta da escola antes das OPs")
+    atualizar_status_fase01: bool = Field(True, description="Se false, salva orçamento sem alterar status/histórico na FASE 01")
 
 
 class LoteDisparoEvento(BaseModel):

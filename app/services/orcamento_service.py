@@ -40,6 +40,16 @@ class OrcamentoService:
     # ================================================================
     _status_cache: Dict[str, int] = {}
 
+    @staticmethod
+    def garantir_colunas_lote_envio(db: Session) -> None:
+        db.execute(
+            text(
+                "ALTER TABLE lote_envio "
+                "ADD COLUMN IF NOT EXISTS organizacao_arquivos VARCHAR(40) NOT NULL DEFAULT 'por_op'"
+            )
+        )
+        db.flush()
+
     @classmethod
     def _get_or_create_status(cls, db: Session, codigo: str) -> int:
         """
@@ -76,6 +86,8 @@ class OrcamentoService:
         """Garante existência do lote canônico para a execução atual."""
         if grupo_lote_id is None:
             raise ValueError("grupo_lote_id é obrigatório para criar/obter lote_envio")
+
+        OrcamentoService.garantir_colunas_lote_envio(db)
 
         lote = db.query(LoteEnvio).filter(
             LoteEnvio.legacy_grupo_lote_id == grupo_lote_id
@@ -491,19 +503,41 @@ class OrcamentoService:
             mappings: List[Dict[str, Any]] = []
 
             if ops:
-                # Caso normal: há OPs geradas — uma linha por OP
-                for i, op_id in enumerate(ops):
-                    if i < len(distribuicoes_ids):
-                        dist_id = distribuicoes_ids[i]
-                    else:
-                        logger.warning(
-                            f"OP índice {i} (id={op_id}) sem distribuição correspondente. "
-                            f"Total OPs: {len(ops)}, Total distribuições: {len(distribuicoes_ids)}"
-                        )
-                        dist_id = distribuicoes_ids[-1] if distribuicoes_ids else None
-                        if not dist_id:
-                            raise ValueError(f"Nenhuma distribuição disponível para OP {op_id}")
+                itens_payload = payload_orcamento.get('data', {}).get('itens', [])
+                distribuicoes_por_op: List[List[int]] = []
 
+                for item_payload in itens_payload:
+                    ids_dist = item_payload.get('ids_distribuicao')
+                    if ids_dist and isinstance(ids_dist, list):
+                        distribuicoes_por_op.append(ids_dist)
+                        continue
+
+                    componentes = item_payload.get('componentes', [])
+                    dist_id = componentes[0].get('id_distribuicao') if componentes else None
+                    if dist_id:
+                        distribuicoes_por_op.append([dist_id])
+
+                pares_op_distribuicao: List[tuple[int, int]] = []
+                if len(distribuicoes_por_op) == len(ops):
+                    for op_id, ids_item in zip(ops, distribuicoes_por_op):
+                        for dist_id in ids_item:
+                            pares_op_distribuicao.append((op_id, dist_id))
+                else:
+                    logger.warning(
+                        "Não foi possível mapear OPs por item; usando correspondência sequencial. "
+                        f"OPs={len(ops)}, itens_payload={len(distribuicoes_por_op)}, "
+                        f"distribuições={len(distribuicoes_ids)}"
+                    )
+                    for i, op_id in enumerate(ops):
+                        if i < len(distribuicoes_ids):
+                            dist_id = distribuicoes_ids[i]
+                        else:
+                            dist_id = distribuicoes_ids[-1] if distribuicoes_ids else None
+                            if not dist_id:
+                                raise ValueError(f"Nenhuma distribuição disponível para OP {op_id}")
+                        pares_op_distribuicao.append((op_id, dist_id))
+
+                for i, (op_id, dist_id) in enumerate(pares_op_distribuicao):
                     envio_item_id = envio_item_ids_por_distribuicao.get(dist_id)
                     if not envio_item_id:
                         raise ValueError(

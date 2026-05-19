@@ -59,6 +59,8 @@ class OrcamentoController:
             "gerar_op": request.gerar_op,
             "usar_data_saida_distribuicao": request.usar_data_saida_distribuicao,
             "persistir_resultado": request.persistir_resultado,
+            "organizar_arquivos_por_escola": request.organizar_arquivos_por_escola,
+            "atualizar_status_fase01": request.atualizar_status_fase01,
         }
         return json.dumps(payload_chave, ensure_ascii=False, sort_keys=True)
 
@@ -391,6 +393,7 @@ class OrcamentoController:
         grupo_lote_id: int = None,
         lote_envio_id: int = None,
         persistir_resultado: bool = True,
+        atualizar_status: bool = True,
     ) -> Dict[str, Any]:
         """
         FASE 01 — Envia um orçamento para a API Bremen e salva na tabela orcamento_api.
@@ -450,19 +453,23 @@ class OrcamentoController:
                 db=db,
                 envio_item_ids_por_distribuicao=envio_item_ids_por_distribuicao,
                 id_orcamento=id_orcamento,
-                status_envio="orcamento_gerado",
-                sucesso_ultimo_evento=True,
+                status_envio="orcamento_gerado" if atualizar_status else None,
+                sucesso_ultimo_evento=True if atualizar_status else None,
             )
 
-            # Atualizar status das distribuições
-            OrcamentoController._atualizar_status_distribuicoes(
-                db, distribuicoes_ids,
-                novo_status="orcamento_gerado",
-                mensagem=f"Orçamento gerado via API - ID: {id_orcamento}",
-                grupo_lote_id=grupo_lote_id,
-                lote_envio_id=lote_envio_id,
-                envio_item_ids_por_distribuicao=envio_item_ids_por_distribuicao,
-            )
+            if atualizar_status:
+                OrcamentoController._atualizar_status_distribuicoes(
+                    db, distribuicoes_ids,
+                    novo_status="orcamento_gerado",
+                    mensagem=f"Orçamento gerado via API - ID: {id_orcamento}",
+                    grupo_lote_id=grupo_lote_id,
+                    lote_envio_id=lote_envio_id,
+                    envio_item_ids_por_distribuicao=envio_item_ids_por_distribuicao,
+                )
+            else:
+                logger.info(
+                    f"Orçamento {id_orcamento} salvo sem alterar status/histórico da FASE 01."
+                )
         else:
             logger.info(
                 f"Orçamento {id_orcamento} executado sem persistência: "
@@ -481,6 +488,7 @@ class OrcamentoController:
                 "registros_criados": len(registros_orcamento),
                 "distribuicoes_ids": distribuicoes_ids,
                 "persistido": persistir_resultado,
+                "status_atualizado": atualizar_status,
                 "status": "sucesso"
             },
             "envio_item_ids_por_distribuicao": envio_item_ids_por_distribuicao,
@@ -670,6 +678,7 @@ class OrcamentoController:
         grupo_lote_id: int = None,
         lote_envio_id: int = None,
         envio_item_ids_por_distribuicao: Dict[int, int] = None,
+        organizar_arquivos_por_escola: bool = False,
     ) -> Dict[str, Any]:
         """
         FASE 03 — Baixa e organiza os arquivos PDF de um orçamento aprovado.
@@ -692,7 +701,8 @@ class OrcamentoController:
             download_service = DownloadBremenService()
             resultado_download = await download_service.processar_downloads_por_orcamento(
                 db=db,
-                id_orcamento=id_orcamento
+                id_orcamento=id_orcamento,
+                organizar_por_escola=organizar_arquivos_por_escola,
             )
 
             total_downloads = resultado_download.get("downloads", 0)
@@ -721,6 +731,7 @@ class OrcamentoController:
                 "arquivos_baixados": total_downloads,
                 "total_ops": resultado_download.get("total_ops", 0),
                 "detalhes_ops": resultado_download.get("detalhes", []),
+                "organizar_arquivos_por_escola": organizar_arquivos_por_escola,
                 "status": "sucesso"
             }
 
@@ -803,6 +814,8 @@ class OrcamentoController:
         api_service = OrcamentoAPIService()
         modo = getattr(request, 'modo_agrupamento', 'unidade')
         persistir_resultado = getattr(request, 'persistir_resultado', True)
+        organizar_arquivos_por_escola = getattr(request, 'organizar_arquivos_por_escola', False)
+        atualizar_status_fase01 = getattr(request, 'atualizar_status_fase01', True)
         if not persistir_resultado:
             logger.info("Processamento configurado para executar sem persistir resultados no banco")
 
@@ -828,9 +841,11 @@ class OrcamentoController:
             lote_envio_id = lote_envio.id
             agora_lote = OrcamentoController._agora_banco(db)
             lote_envio.status = "em_processamento"
+            lote_envio.organizacao_arquivos = "por_escola" if organizar_arquivos_por_escola else "por_op"
             lote_envio.data_envio = lote_envio.data_envio or agora_lote
             lote_envio.data_ultima_atualizacao = agora_lote
             db.flush()
+            organizar_arquivos_por_escola = lote_envio.organizacao_arquivos == "por_escola"
 
         try:
             # Gerar orçamentos locais (via SQL)
@@ -881,6 +896,7 @@ class OrcamentoController:
                         grupo_lote_id=grupo_lote_id,
                         lote_envio_id=lote_envio_id,
                         persistir_resultado=persistir_resultado,
+                        atualizar_status=atualizar_status_fase01,
                     )
                     resultado.enviados += 1
                     if persistir_resultado:
@@ -925,6 +941,7 @@ class OrcamentoController:
                             grupo_lote_id=grupo_lote_id,
                             lote_envio_id=lote_envio_id,
                             envio_item_ids_por_distribuicao=envio_item_ids_por_distribuicao,
+                            organizar_arquivos_por_escola=organizar_arquivos_por_escola,
                         )
                         resultado.downloads += fase03["downloads"]
                         resultado.erros.extend(fase03["erros"])

@@ -99,7 +99,9 @@ async def gerar_orcamento(
             baixar_arquivos=request.baixar_arquivos,
             gerar_op=request.gerar_op,
             modo_agrupamento=request.modo_agrupamento,
-            persistir_resultado=request.persistir_resultado
+            persistir_resultado=request.persistir_resultado,
+            organizar_arquivos_por_escola=request.organizar_arquivos_por_escola,
+            atualizar_status_fase01=request.atualizar_status_fase01
         )
         
         # Executar fluxo completo
