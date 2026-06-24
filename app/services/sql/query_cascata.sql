@@ -47,6 +47,7 @@ WITH dados_normalizados AS (
         AND (:status_ids IS NULL OR distri.status_id = ANY(CAST(:status_ids AS int[])))
         AND (CAST(:ids_formularios AS int[]) IS NULL OR f.id = ANY(CAST(:ids_formularios AS int[]))
         )
+        AND f.criado_em <= NOW() - INTERVAL '30 minutes'
 ),
 
 -- NÍVEL 5: ARQUIVOS (agrupados por divisão + produto + data + unidade)

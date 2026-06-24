@@ -37,6 +37,7 @@ class DashboardService:
                AND dm.status_id = 1
             LEFT JOIN pedido_formularios f
                 ON f.id = dm.formulario_id
+               AND f.criado_em <= NOW() - INTERVAL '30 minutes'
             GROUP BY
                 e.id,
                 e.nome,
