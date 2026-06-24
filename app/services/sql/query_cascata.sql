@@ -59,6 +59,7 @@ dados_normalizados AS (
             p.nome_arquivo_filtro IS NULL
             OR UPPER(COALESCE(ar.nome, '')) LIKE '%' || UPPER(p.nome_arquivo_filtro) || '%'
         )
+        AND f.criado_em <= NOW() - INTERVAL '30 minutes'
 ),
 
 -- NÍVEL 5: ARQUIVOS (agrupados por divisão + produto + data + unidade)

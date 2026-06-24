@@ -191,30 +191,39 @@ class OrcamentoService:
         if not envio_item_ids_por_distribuicao:
             return
 
-        for dist_id, envio_item_id in envio_item_ids_por_distribuicao.items():
-            valores: Dict[str, Any] = {}
+        try:
+            for dist_id, envio_item_id in envio_item_ids_por_distribuicao.items():
+                valores: Dict[str, Any] = {}
 
-            if id_orcamento is not None:
-                valores["id_orcamento_snapshot"] = id_orcamento
+                if id_orcamento is not None:
+                    valores["id_orcamento_snapshot"] = id_orcamento
 
-            if id_ops_por_distribuicao and dist_id in id_ops_por_distribuicao:
-                valores["id_ops_snapshot"] = id_ops_por_distribuicao[dist_id]
+                if id_ops_por_distribuicao and dist_id in id_ops_por_distribuicao:
+                    valores["id_ops_snapshot"] = id_ops_por_distribuicao[dist_id]
 
-            if status_envio is not None:
-                valores["status_envio"] = status_envio
+                if status_envio is not None:
+                    valores["status_envio"] = status_envio
 
-            if sucesso_ultimo_evento is not None:
-                valores["sucesso_ultimo_evento"] = sucesso_ultimo_evento
+                if sucesso_ultimo_evento is not None:
+                    valores["sucesso_ultimo_evento"] = sucesso_ultimo_evento
 
-            if not valores:
-                continue
+                if not valores:
+                    continue
 
-            db.execute(
-                update(EnvioItem)
-                .where(EnvioItem.id == envio_item_id)
-                .values(**valores)
-            )
-    
+                db.execute(
+                    update(EnvioItem)
+                    .where(EnvioItem.id == envio_item_id)
+                    .values(**valores)
+                )
+        except Exception as e:
+            logger.error(f"Erro ao atualizar snapshot de envio_item: {str(e)}")
+            try:
+                db.rollback()
+                logger.debug("Rollback realizado em atualizar_snapshot_envio_itens")
+            except Exception:
+                pass
+            raise
+
     @staticmethod
     def gerar_orcamento(db: Session, request: OrcamentoRequest) -> OrcamentoListResponse:
         """
