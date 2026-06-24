@@ -588,7 +588,17 @@ class OrcamentoController:
             error_msg = f"Erro na FASE 02 (aprovação) para orçamento {id_orcamento}: {str(e)}"
             logger.error(error_msg)
 
-            # Marcar distribuições com erro
+            # Garantir que a sessão esteja em estado válido antes de qualquer nova operação.
+            # Se a conexão caiu (psycopg2.OperationalError), a transação fica corrompida
+            # e qualquer chamada subsequente falha com "Can't reconnect until invalid
+            # transaction is rolled back". O rollback aqui limpa esse estado.
+            try:
+                db.rollback()
+                logger.debug("Rollback realizado após erro na FASE 02")
+            except Exception as rb_err:
+                logger.warning(f"Falha ao realizar rollback na FASE 02: {rb_err}")
+
+            # Marcar distribuições com erro (somente após sessão saneada)
             OrcamentoController._atualizar_status_distribuicoes(
                 db, distribuicoes_ids,
                 novo_status="erro_aprovacao",
