@@ -343,7 +343,19 @@ SELECT json_build_object(
                                     'Título: ' || COALESCE(ip.form_titulo, '-')
                                 )
                             )
+<<<<<<< Updated upstream
                         ELSE ip.obs_producao
+=======
+                        ELSE CONCAT_WS(
+                            CHR(10) || CHR(10),
+                            ip.obs_producao,
+                            CONCAT_WS(
+                                CHR(10),
+                                'Data de Entrega: ' || COALESCE(ip.data_entrega_pedido, '-'),
+                                'Título: ' || COALESCE(ip.form_titulo, '-')
+                            )
+                        )
+>>>>>>> Stashed changes
                     END,
                     'quantidade', ip.quantidade_total,
                     'usar_listapreco', 1,
