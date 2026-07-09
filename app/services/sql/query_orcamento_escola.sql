@@ -226,11 +226,8 @@ itens_produto AS (
         (SELECT MAX(eu_meta.gramatura_miolo) FROM especificacoes_unidade eu_meta WHERE eu_meta.especificacao_id = qe.especificacao_id) AS gramatura_miolo,
         qe.quantidade_total,
         (SELECT MAX(form.observacoes) FROM pedido_formularios form WHERE form.id = qe.formulario_id) AS obs_producao,
-<<<<<<< Updated upstream
-=======
-                (SELECT MAX(TO_CHAR(form.data_entrega, 'DD/MM/YYYY')) FROM pedido_formularios form WHERE form.id = qe.formulario_id) AS data_entrega_pedido,
+        (SELECT MAX(TO_CHAR(form.data_entrega, 'DD/MM/YYYY')) FROM pedido_formularios form WHERE form.id = qe.formulario_id) AS data_entrega_pedido,
         (SELECT MAX(form.titulo) FROM pedido_formularios form WHERE form.id = qe.formulario_id) AS form_titulo,
->>>>>>> Stashed changes
         CASE
             WHEN EXISTS (
                 SELECT 1 FROM especificacoes_unidade eu_tipo
@@ -414,9 +411,6 @@ SELECT json_build_object(
                 json_build_object(
                     'id_produto', ip.id_produto,
                     'titulo', ip.nome_arquivo,
-<<<<<<< Updated upstream
-                    'obs_producao', ip.obs_producao,
-=======
                     'obs_producao', CONCAT_WS(
                         CHR(10) || CHR(10),
                         ip.obs_producao,
@@ -426,7 +420,6 @@ SELECT json_build_object(
                             'Título: ' || COALESCE(ip.form_titulo, '-')
                         )
                     ),
->>>>>>> Stashed changes
                     'quantidade', ip.quantidade_total,
                     'usar_listapreco', 1,
                     'manter_estrutura_mod_produto', 1,

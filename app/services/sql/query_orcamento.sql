@@ -129,6 +129,7 @@ itens_produto AS (
         MAX(eu.gramatura_miolo) AS gramatura_miolo,
         MAX(eu.quantidade) AS quantidade_total,
         MAX(form.observacoes) AS obs_producao,
+        MAX(TO_CHAR(form.data_entrega, 'DD/MM/YYYY')) AS data_entrega_pedido,
         -- Campos extras para obs_producao condicional (cliente_id = 151)
         MAX(form.titulo) AS form_titulo,
         MAX(form.criado_em::text) AS data_pedido,
@@ -343,9 +344,6 @@ SELECT json_build_object(
                                     'Título: ' || COALESCE(ip.form_titulo, '-')
                                 )
                             )
-<<<<<<< Updated upstream
-                        ELSE ip.obs_producao
-=======
                         ELSE CONCAT_WS(
                             CHR(10) || CHR(10),
                             ip.obs_producao,
@@ -355,7 +353,6 @@ SELECT json_build_object(
                                 'Título: ' || COALESCE(ip.form_titulo, '-')
                             )
                         )
->>>>>>> Stashed changes
                     END,
                     'quantidade', ip.quantidade_total,
                     'usar_listapreco', 1,
