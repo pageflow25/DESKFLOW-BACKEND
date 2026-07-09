@@ -1,5 +1,5 @@
 -- Query para geração de orçamentos por unidade escolar
--- Parâmetros: :escola_id, :ids_produtos, :datas_saida, :divisoes_logistica, :dias_uteis_filtro, :ids_formularios, :status_ids, :ids_unidades, :ids_arquivos, :nome_arquivo_filtro
+-- Parâmetros: :escola_id, :ids_produtos, :datas_saida, :divisoes_logistica, :dias_uteis_filtro, :ids_formularios, :status_ids, :ids_unidades
 
 WITH parametros AS (
     SELECT
@@ -11,8 +11,7 @@ WITH parametros AS (
         CAST(:ids_formularios AS int[]) AS ids_formularios,
         CAST(:status_ids AS int[]) AS status_ids,
         CAST(:ids_unidades AS int[]) AS ids_unidades,
-        CAST(:ids_arquivos AS int[]) AS ids_arquivos,
-        NULLIF(TRIM(CAST(:nome_arquivo_filtro AS TEXT)), '') AS nome_arquivo_filtro
+        CAST(:ids_arquivos AS int[]) AS ids_arquivos
 ),
 
 unidades_filtradas AS (
@@ -80,14 +79,7 @@ especificacoes_unidade AS (
         ) 
         AND dm.status_id = ANY(p.status_ids)
         AND (p.ids_formularios IS NULL OR ap.formulario_id = ANY(p.ids_formularios))
-        AND (p.ids_arquivos IS NULL OR dm.arquivo_pdf_id = ANY(p.ids_arquivos))
-        AND (
-            p.nome_arquivo_filtro IS NULL
-            OR dm.arquivo_pdf_id IN (
-                SELECT id FROM pedido_arquivos_pdf
-                WHERE UPPER(nome) LIKE '%' || UPPER(p.nome_arquivo_filtro) || '%'
-            )
-        )
+        AND (p.ids_arquivos IS NULL OR ap.id = ANY(p.ids_arquivos))
 ),
 
 itens_produto AS (
@@ -343,7 +335,6 @@ SELECT json_build_object(
                                 ip.obs_producao,
                                 CONCAT_WS(
                                     CHR(10),
-                                    'Data de Entrega: ' || COALESCE(ip.data_entrega_pedido, '-'),
                                     'Turma: ' || COALESCE(ip.nome_turma, '-'),
                                     'Segmento: ' || COALESCE(ip.area_turma, '-'),
                                     'Solicitante: ' || COALESCE(ip.solicitante_nome, '-'),
@@ -353,16 +344,6 @@ SELECT json_build_object(
                                     'Título: ' || COALESCE(ip.form_titulo, '-')
                                 )
                             )
-<<<<<<< HEAD
-                        ELSE CONCAT_WS(
-                            CHR(10) || CHR(10),
-                            ip.obs_producao,
-                            'Data de Entrega: ' || COALESCE(ip.data_entrega_pedido, '-')
-                        )
-=======
-<<<<<<< Updated upstream
-                        ELSE ip.obs_producao
-=======
                         ELSE CONCAT_WS(
                             CHR(10) || CHR(10),
                             ip.obs_producao,
@@ -372,8 +353,6 @@ SELECT json_build_object(
                                 'Título: ' || COALESCE(ip.form_titulo, '-')
                             )
                         )
->>>>>>> Stashed changes
->>>>>>> developer
                     END,
                     'quantidade', ip.quantidade_total,
                     'usar_listapreco', 1,

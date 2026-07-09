@@ -1,7 +1,7 @@
 -- Query para geração de orçamentos AGRUPADOS POR ESCOLA (soma quantidades de todas as unidades)
 -- Diferença do modo "por unidade": aqui agrupa tudo da escola em um único orçamento
 -- Usa ids_distribuicao (array) em vez de id_distribuicao (único) nos itens
--- Parâmetros: :escola_id, :ids_produtos, :datas_saida, :divisoes_logistica, :dias_uteis_filtro, :ids_formularios, :status_ids, :ids_unidades, :ids_arquivos, :nome_arquivo_filtro
+-- Parâmetros: :escola_id, :ids_produtos, :datas_saida, :divisoes_logistica, :dias_uteis_filtro, :ids_formularios, :status_ids, :ids_unidades
 
 WITH parametros AS (
     SELECT
@@ -13,8 +13,7 @@ WITH parametros AS (
         CAST(:ids_formularios AS int[]) AS ids_formularios,
         CAST(:status_ids AS int[]) AS status_ids,
         CAST(:ids_unidades AS int[]) AS ids_unidades,
-        CAST(:ids_arquivos AS int[]) AS ids_arquivos,
-        NULLIF(TRIM(CAST(:nome_arquivo_filtro AS TEXT)), '') AS nome_arquivo_filtro
+        CAST(:ids_arquivos AS int[]) AS ids_arquivos
 ),
 
 unidades_filtradas AS (
@@ -78,14 +77,7 @@ especificacoes_unidade AS (
         )
         AND dm.status_id = ANY(p.status_ids)
         AND (p.ids_formularios IS NULL OR ap.formulario_id = ANY(p.ids_formularios))
-        AND (p.ids_arquivos IS NULL OR dm.arquivo_pdf_id = ANY(p.ids_arquivos))
-        AND (
-            p.nome_arquivo_filtro IS NULL
-            OR dm.arquivo_pdf_id IN (
-                SELECT id FROM pedido_arquivos_pdf
-                WHERE UPPER(nome) LIKE '%' || UPPER(p.nome_arquivo_filtro) || '%'
-            )
-        )
+        AND (p.ids_arquivos IS NULL OR ap.id = ANY(p.ids_arquivos))
 ),
 
 distribuicao_ids AS (
@@ -112,14 +104,7 @@ distribuicao_ids AS (
         )
         AND dm.status_id = ANY(p.status_ids)
         AND (p.ids_formularios IS NULL OR ap.formulario_id = ANY(p.ids_formularios))
-        AND (p.ids_arquivos IS NULL OR dm.arquivo_pdf_id = ANY(p.ids_arquivos))
-        AND (
-            p.nome_arquivo_filtro IS NULL
-            OR dm.arquivo_pdf_id IN (
-                SELECT id FROM pedido_arquivos_pdf
-                WHERE UPPER(nome) LIKE '%' || UPPER(p.nome_arquivo_filtro) || '%'
-            )
-        )
+        AND (p.ids_arquivos IS NULL OR ap.id = ANY(p.ids_arquivos))
 ),
 
 -- Primeiro, agrupa as quantidades únicas por cliente/unidade para evitar duplicação causada pelos JOINs
@@ -241,6 +226,8 @@ itens_produto AS (
         (SELECT MAX(eu_meta.gramatura_miolo) FROM especificacoes_unidade eu_meta WHERE eu_meta.especificacao_id = qe.especificacao_id) AS gramatura_miolo,
         qe.quantidade_total,
         (SELECT MAX(form.observacoes) FROM pedido_formularios form WHERE form.id = qe.formulario_id) AS obs_producao,
+        (SELECT MAX(TO_CHAR(form.data_entrega, 'DD/MM/YYYY')) FROM pedido_formularios form WHERE form.id = qe.formulario_id) AS data_entrega_pedido,
+        (SELECT MAX(form.titulo) FROM pedido_formularios form WHERE form.id = qe.formulario_id) AS form_titulo,
         CASE
             WHEN EXISTS (
                 SELECT 1 FROM especificacoes_unidade eu_tipo
@@ -424,7 +411,15 @@ SELECT json_build_object(
                 json_build_object(
                     'id_produto', ip.id_produto,
                     'titulo', ip.nome_arquivo,
-                    'obs_producao', ip.obs_producao,
+                    'obs_producao', CONCAT_WS(
+                        CHR(10) || CHR(10),
+                        ip.obs_producao,
+                        CONCAT_WS(
+                            CHR(10),
+                            'Data de Entrega: ' || COALESCE(ip.data_entrega_pedido, '-'),
+                            'Título: ' || COALESCE(ip.form_titulo, '-')
+                        )
+                    ),
                     'quantidade', ip.quantidade_total,
                     'usar_listapreco', 1,
                     'manter_estrutura_mod_produto', 1,
