@@ -1,4 +1,4 @@
-﻿-- Query para geração de orçamentos AGRUPADOS POR ESCOLA (soma quantidades de todas as unidades)
+-- Query para geração de orçamentos AGRUPADOS POR ESCOLA (soma quantidades de todas as unidades)
 -- Diferença do modo "por unidade": aqui agrupa tudo da escola em um único orçamento
 -- Usa ids_distribuicao (array) em vez de id_distribuicao (único) nos itens
 -- Parâmetros: :escola_id, :ids_produtos, :datas_saida, :divisoes_logistica, :dias_uteis_filtro, :ids_formularios, :status_ids, :ids_unidades

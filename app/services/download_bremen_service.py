@@ -1,4 +1,5 @@
 import os
+import re
 import httpx
 import asyncio
 from typing import List, Dict, Any, Optional
@@ -43,7 +44,8 @@ class DownloadBremenService:
     async def processar_downloads_por_orcamento(
         self,
         db: Session,
-        id_orcamento: int
+        id_orcamento: int,
+        organizar_por_escola: bool = False,
     ) -> Dict[str, Any]:
         """
         Processa downloads de todos os OPs de um orçamento aprovado.
@@ -81,7 +83,7 @@ class DownloadBremenService:
         
         for aprovacao in aprovacoes:
             try:
-                detalhes_op = await self._processar_op(db, aprovacao)
+                detalhes_op = await self._processar_op(db, aprovacao, organizar_por_escola)
                 resultado["downloads"] += detalhes_op.get("arquivos_baixados", 0)
                 resultado["detalhes"].append(detalhes_op)
             except Exception as e:
@@ -106,7 +108,8 @@ class DownloadBremenService:
     async def _processar_op(
         self,
         db: Session,
-        aprovacao: AprovacaoAPI
+        aprovacao: AprovacaoAPI,
+        organizar_por_escola: bool = False,
     ) -> Dict[str, Any]:
         """
         Processa download de arquivos para uma OP específica.
@@ -129,21 +132,6 @@ class DownloadBremenService:
         dist_id = aprovacao.distribuicao_material_id
         
         logger.info(f"Processando OP {op_id} (distribuição {dist_id})")
-        
-        # Verificar se já foi baixado
-        download_existente = db.query(DownloadBremen).filter(
-            DownloadBremen.id_ops == op_id,
-            DownloadBremen.distribuicao_material_id == dist_id
-        ).first()
-        
-        if download_existente:
-            logger.info(f"OP {op_id} já foi baixada anteriormente, pulando")
-            return {
-                "id_ops": op_id,
-                "distribuicao_material_id": dist_id,
-                "status": "ja_baixado",
-                "arquivos_baixados": 0
-            }
         
         # 1. Buscar a distribuição e seu arquivo_pdf
         distribuicao = db.query(DistribuicaoMaterial).filter(
@@ -169,7 +157,30 @@ class DownloadBremenService:
         )
         
         # 2. Criar a pasta da OP
-        pasta_op = os.path.join(self.download_base_path, str(op_id))
+        pasta_base = self.download_base_path
+        if organizar_por_escola:
+            escola_nome = self._obter_nome_escola(db, distribuicao)
+            pasta_base = os.path.join(pasta_base, self._sanitizar_nome_pasta(escola_nome or "Escola sem nome"))
+
+        pasta_op = os.path.join(pasta_base, str(op_id))
+
+        download_existente = db.query(DownloadBremen).filter(
+            DownloadBremen.id_ops == op_id,
+            DownloadBremen.distribuicao_material_id == dist_id
+        ).order_by(DownloadBremen.id.desc()).first()
+
+        if download_existente and download_existente.caminho_local:
+            pasta_existente = os.path.dirname(download_existente.caminho_local)
+            if os.path.normcase(os.path.normpath(pasta_existente)) == os.path.normcase(os.path.normpath(pasta_op)):
+                logger.info(f"OP {op_id} já foi baixada anteriormente na organização atual, pulando")
+                return {
+                    "id_ops": op_id,
+                    "distribuicao_material_id": dist_id,
+                    "pasta_op": pasta_op,
+                    "status": "ja_baixado",
+                    "arquivos_baixados": 0
+                }
+
         os.makedirs(pasta_op, exist_ok=True)
         logger.info(f"Pasta criada: {pasta_op}")
         
@@ -249,6 +260,32 @@ class DownloadBremenService:
             "registros_ids": [r.id for r in registros_salvos],
             "status": "sucesso"
         }
+
+    @staticmethod
+    def _sanitizar_nome_pasta(nome: str) -> str:
+        valor = (nome or "").strip()
+        valor = re.sub(r'[<>:"/\\|?*]+', '_', valor)
+        valor = re.sub(r'\s+', ' ', valor).strip().rstrip('.')
+        return valor or "Escola sem nome"
+
+    @staticmethod
+    def _obter_nome_escola(db: Session, distribuicao: DistribuicaoMaterial) -> Optional[str]:
+        if not distribuicao.unidade_escolar_id:
+            return None
+
+        row = db.execute(
+            text(
+                """
+                SELECT e.nome AS escola_nome
+                FROM escola_unidades ue
+                JOIN escola_escolas e ON e.id = ue.escola_id
+                WHERE ue.id = :unidade_id
+                """
+            ),
+            {"unidade_id": distribuicao.unidade_escolar_id},
+        ).mappings().first()
+
+        return row["escola_nome"] if row else None
     
     async def _baixar_arquivo(self, url: str, destino: str) -> int:
         """

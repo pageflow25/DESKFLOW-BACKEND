@@ -13,6 +13,7 @@ class LoteEnvio(Base):
     identificador_lote = Column(String(100), nullable=False, unique=True, index=True)
     legacy_grupo_lote_id = Column(Integer, nullable=True, unique=True, index=True)
     status = Column(String(40), nullable=False, default="pendente", index=True)
+    organizacao_arquivos = Column(String(40), nullable=False, default="por_op")
     data_envio = Column(DateTime, nullable=True, index=True)
     data_ultima_atualizacao = Column(DateTime, nullable=True)
     criado_em = Column(DateTime, nullable=False, server_default=func.now())

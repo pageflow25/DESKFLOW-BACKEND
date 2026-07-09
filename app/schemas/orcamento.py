@@ -14,6 +14,7 @@ class OrcamentoRequest(BaseModel):
     ids_arquivos: Optional[List[int]] = Field(None, description="Lista de IDs de arquivos PDF para filtrar (opcional)")
     ids_formularios: Optional[List[int]] = Field(None, description="Lista de IDs de formulários para filtrar (opcional)")
     status_ids: Optional[List[int]] = Field(None, description="Lista de status_id para filtrar (padrão: [1])")
+    nome_arquivo_filtro: Optional[str] = Field(None, description="Filtro por trecho do nome do arquivo PDF (case-insensitive, ex: 'MODELO1')")
     modo_agrupamento: str = Field("unidade", description="Modo de agrupamento: 'unidade' (por unidade) ou 'escola' (agrupado por escola)")
 
 
@@ -114,8 +115,12 @@ class FluxoOrcamentoRequest(BaseModel):
     gerar_op: bool = Field(True, description="Se deve gerar OP na aprovação (FASE 02). False envia gerar_op=false para a API Bremen.")
     ids_formularios: Optional[List[int]] = Field(None, description="Lista de IDs de formulários para filtrar (opcional)")
     status_ids: Optional[List[int]] = Field(None, description="Lista de status_id para filtrar (padrão: [1])")
+    nome_arquivo_filtro: Optional[str] = Field(None, description="Filtro por trecho do nome do arquivo PDF (case-insensitive, ex: 'MODELO1')")
     grupo_lote_id: Optional[int] = Field(None, description="ID do grupo selecionado para disparo do lote")
     modo_agrupamento: str = Field("unidade", description="Modo de agrupamento: 'unidade' ou 'escola'")
+    persistir_resultado: bool = Field(True, description="Se false, executa o fluxo sem salvar resultados/status no banco")
+    organizar_arquivos_por_escola: bool = Field(False, description="Se true, organiza downloads em pasta da escola antes das OPs")
+    atualizar_status_fase01: bool = Field(True, description="Se false, salva orçamento sem alterar status/histórico na FASE 01")
 
 
 class GerarOrcamentoCompleto(BaseModel):
@@ -138,8 +143,12 @@ class GerarOrcamentoCompleto(BaseModel):
     gerar_op: bool = Field(True, description="Se deve gerar OP na aprovação. False envia gerar_op=false para a API Bremen.")
     ids_formularios: Optional[List[int]] = Field(None, description="Lista de IDs de formulários para filtrar (opcional)")
     status_ids: Optional[List[int]] = Field(None, description="Lista de status_id para filtrar (padrão: [1])")
+    nome_arquivo_filtro: Optional[str] = Field(None, description="Filtro por trecho do nome do arquivo PDF (case-insensitive, ex: 'MODELO1')")
     grupo_lote_id: Optional[int] = Field(None, description="ID do grupo selecionado para disparo do lote")
     modo_agrupamento: str = Field("unidade", description="Modo de agrupamento: 'unidade' (por unidade) ou 'escola' (agrupado por escola)")
+    persistir_resultado: bool = Field(True, description="Se false, executa o fluxo sem salvar resultados/status no banco")
+    organizar_arquivos_por_escola: bool = Field(False, description="Se true, organiza downloads em pasta da escola antes das OPs")
+    atualizar_status_fase01: bool = Field(True, description="Se false, salva orçamento sem alterar status/histórico na FASE 01")
 
 
 class LoteDisparoEvento(BaseModel):

@@ -41,6 +41,7 @@ async def get_pedidos_escola_cascata(
     tipo_formulario: str = Query(default=None, description="Tipo de formulário a filtrar (opcional)"),
     ids_formularios: str = Query(default=None, description="IDs de formulários separados por vírgula (ex: 1,2,3)"),
     status_ids: str = Query(default=None, description="IDs de status separados por vírgula (ex: 1,2,3). Padrão: 1"),
+    nome_arquivo_filtro: str = Query(default=None, description="Trecho do nome do arquivo PDF para filtrar (opcional)"),
     db: Session = Depends(get_db),
     user_data: dict = Depends(verify_admin)
 ):
@@ -53,6 +54,7 @@ async def get_pedidos_escola_cascata(
         tipo_formulario: Tipo de formulário (opcional)
         ids_formularios: IDs de formulários separados por vírgula (opcional)
         status_ids: IDs de status separados por vírgula (padrão: 1)
+        nome_arquivo_filtro: Trecho do nome do arquivo PDF (opcional)
     """
     # Converter string de IDs para lista de inteiros
     parsed_ids = None
@@ -72,7 +74,14 @@ async def get_pedidos_escola_cascata(
             from fastapi import HTTPException as HTTPExc
             raise HTTPExc(status_code=400, detail="status_ids deve conter apenas números separados por vírgula")
     
-    return await CascataController.get_pedidos_escola(db, escola_id, tipo_formulario, parsed_ids, parsed_status_ids)
+    return await CascataController.get_pedidos_escola(
+        db,
+        escola_id,
+        tipo_formulario,
+        parsed_ids,
+        parsed_status_ids,
+        nome_arquivo_filtro,
+    )
 
 
 @router.get("/status-deskflow", response_model=StatusDeskflowListResponse)

@@ -19,7 +19,7 @@ SQL_DIR = Path(__file__).parent / "sql"
 def _carregar_query(nome_arquivo: str) -> str:
     """Carrega uma query SQL de um arquivo"""
     caminho = SQL_DIR / nome_arquivo
-    return caminho.read_text(encoding="utf-8")
+    return caminho.read_text(encoding="utf-8-sig")
 
 
 class CascataService:
@@ -31,7 +31,8 @@ class CascataService:
         escola_id: int, 
         tipo_formulario: str = None,
         ids_formularios: list = None,
-        status_ids: list = None
+        status_ids: list = None,
+        nome_arquivo_filtro: str = None,
     ) -> List[Dict[str, Any]]:
         """
         Busca detalhes dos pedidos de uma escola em estrutura hierárquica
@@ -42,16 +43,25 @@ class CascataService:
             tipo_formulario: Tipo de formulário a filtrar (opcional)
             ids_formularios: Lista de IDs de formulários para filtrar (opcional)
             status_ids: Lista de IDs de status para filtrar (padrão: [1])
+            nome_arquivo_filtro: Trecho do nome do arquivo PDF para filtrar (opcional)
             
         Returns:
             Lista de divisões logísticas com produtos, datas e arquivos
         """
         logger.info(
             f"Buscando pedidos em cascata para escola_id={escola_id}, "
-            f"tipo_formulario={tipo_formulario}, ids_formularios={ids_formularios}, status_ids={status_ids}"
+            f"tipo_formulario={tipo_formulario}, ids_formularios={ids_formularios}, "
+            f"status_ids={status_ids}, nome_arquivo_filtro={nome_arquivo_filtro}"
         )
         
-        return _executar_query_cascata(db, escola_id, tipo_formulario, ids_formularios, status_ids)
+        return _executar_query_cascata(
+            db,
+            escola_id,
+            tipo_formulario,
+            ids_formularios,
+            status_ids,
+            nome_arquivo_filtro,
+        )
 
     @staticmethod
     def listar_status_deskflow(db: Session) -> List[Dict[str, Any]]:
@@ -81,7 +91,8 @@ def _executar_query_cascata(
     escola_id: int, 
     tipo_formulario: str,
     ids_formularios: list = None,
-    status_ids: list = None
+    status_ids: list = None,
+    nome_arquivo_filtro: str = None,
 ) -> List[Dict[str, Any]]:
     """Executa a query de cascata e retorna os resultados"""
     try:
@@ -95,7 +106,8 @@ def _executar_query_cascata(
             "escola_id": escola_id, 
             "tipo_formulario": tipo_formulario,
             "ids_formularios": ids_formularios,
-            "status_ids": status_ids
+            "status_ids": status_ids,
+            "nome_arquivo_filtro": nome_arquivo_filtro,
         })
         row = result.fetchone()
         

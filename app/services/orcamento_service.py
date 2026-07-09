@@ -9,6 +9,7 @@ from ..models.status_deskflow_pedido import StatusDeskflowPedido
 from ..models.lote_envio import LoteEnvio
 from ..models.envio_item import EnvioItem
 from ..models.unidade_escolar import UnidadeEscolar
+from ..models.arquivo_pdf import ArquivoPdf
 from ..schemas.orcamento import (
     OrcamentoRequest, OrcamentoListResponse, OrcamentoData, 
     OrcamentoResponse, ItemOrcamento
@@ -20,6 +21,15 @@ from datetime import datetime
 
 logger = get_logger(__name__)
 
+# Diretório do SQL
+SQL_DIR = Path(__file__).parent / "sql"
+
+
+def _carregar_query(nome_arquivo: str) -> str:
+    """Carrega uma query SQL de um arquivo."""
+    caminho = SQL_DIR / nome_arquivo
+    return caminho.read_text(encoding="utf-8-sig")
+
 
 class OrcamentoService:
     """Service para operações de orçamento"""
@@ -29,6 +39,16 @@ class OrcamentoService:
     # ORM detached entre sessões diferentes
     # ================================================================
     _status_cache: Dict[str, int] = {}
+
+    @staticmethod
+    def garantir_colunas_lote_envio(db: Session) -> None:
+        db.execute(
+            text(
+                "ALTER TABLE lote_envio "
+                "ADD COLUMN IF NOT EXISTS organizacao_arquivos VARCHAR(40) NOT NULL DEFAULT 'por_op'"
+            )
+        )
+        db.flush()
 
     @classmethod
     def _get_or_create_status(cls, db: Session, codigo: str) -> int:
@@ -66,6 +86,8 @@ class OrcamentoService:
         """Garante existência do lote canônico para a execução atual."""
         if grupo_lote_id is None:
             raise ValueError("grupo_lote_id é obrigatório para criar/obter lote_envio")
+
+        OrcamentoService.garantir_colunas_lote_envio(db)
 
         lote = db.query(LoteEnvio).filter(
             LoteEnvio.legacy_grupo_lote_id == grupo_lote_id
@@ -227,9 +249,7 @@ class OrcamentoService:
                 logger.info(f"Modo UNIDADE: gerando orçamento por unidade para escola {request.escola_id}")
             
             # Carregar query SQL
-            sql_file = Path(__file__).parent / 'sql' / sql_filename
-            with open(sql_file, 'r', encoding='utf-8') as f:
-                query_sql = f.read()
+            query_sql = _carregar_query(sql_filename)
             
             # Preparar parâmetros
             params = {
@@ -242,6 +262,7 @@ class OrcamentoService:
                 'status_ids': getattr(request, 'status_ids', None) or [1],
                 'ids_unidades': getattr(request, 'ids_unidades', None),
                 'ids_arquivos': getattr(request, 'ids_arquivos', None),
+                'nome_arquivo_filtro': getattr(request, 'nome_arquivo_filtro', None),
             }
 
             logger.info(f"Parâmetros da query ({sql_filename}): {params}")
@@ -365,6 +386,8 @@ class OrcamentoService:
                     "distribuicao_material_id": id_distribuicao,
                     "id_orcamento": id_orcamento,
                     "id_item": id_item,
+                    "itens": item_resposta,
+                    "resposta_api": resposta_completa,
                     "envio_item_id": envio_item_id,
                 })
                 logger.debug(
@@ -456,12 +479,31 @@ class OrcamentoService:
             else:
                 ops = []
 
-            # Extrair pedido (um único objeto)
+            # Extrair pedido/PV. A API pode retornar um array em `pedidos`, um objeto,
+            # ou o identificador direto no próprio item de data.
             pedidos_lista = data_item.get('pedidos', [])
-            pedido = pedidos_lista[0] if pedidos_lista else {}
+            if isinstance(pedidos_lista, list):
+                pedido = pedidos_lista[0] if pedidos_lista else {}
+            elif isinstance(pedidos_lista, dict):
+                pedido = pedidos_lista
+            else:
+                pedido = {}
 
-            # Extrair id_pedido_venda do primeiro pedido
-            id_pedido_venda = pedido.get('id') if pedido else None
+            id_pedido_venda = (
+                data_item.get('id_pedido_venda')
+                or data_item.get('id_pedido')
+                or data_item.get('pedido_venda')
+                or data_item.get('id_pv')
+                or (pedido.get('id') if pedido else None)
+                or (pedido.get('id_pedido_venda') if pedido else None)
+                or (pedido.get('id_pedido') if pedido else None)
+            )
+            if isinstance(id_pedido_venda, dict):
+                id_pedido_venda = (
+                    id_pedido_venda.get('id')
+                    or id_pedido_venda.get('id_pedido_venda')
+                    or id_pedido_venda.get('id_pedido')
+                )
 
             logger.info(f"OPs extraídas: {ops}, Pedido: {pedido}, id_pedido_venda: {id_pedido_venda}")
             logger.info(f"Distribuições IDs para correspondência: {distribuicoes_ids}")
@@ -470,19 +512,41 @@ class OrcamentoService:
             mappings: List[Dict[str, Any]] = []
 
             if ops:
-                # Caso normal: há OPs geradas — uma linha por OP
-                for i, op_id in enumerate(ops):
-                    if i < len(distribuicoes_ids):
-                        dist_id = distribuicoes_ids[i]
-                    else:
-                        logger.warning(
-                            f"OP índice {i} (id={op_id}) sem distribuição correspondente. "
-                            f"Total OPs: {len(ops)}, Total distribuições: {len(distribuicoes_ids)}"
-                        )
-                        dist_id = distribuicoes_ids[-1] if distribuicoes_ids else None
-                        if not dist_id:
-                            raise ValueError(f"Nenhuma distribuição disponível para OP {op_id}")
+                itens_payload = payload_orcamento.get('data', {}).get('itens', [])
+                distribuicoes_por_op: List[List[int]] = []
 
+                for item_payload in itens_payload:
+                    ids_dist = item_payload.get('ids_distribuicao')
+                    if ids_dist and isinstance(ids_dist, list):
+                        distribuicoes_por_op.append(ids_dist)
+                        continue
+
+                    componentes = item_payload.get('componentes', [])
+                    dist_id = componentes[0].get('id_distribuicao') if componentes else None
+                    if dist_id:
+                        distribuicoes_por_op.append([dist_id])
+
+                pares_op_distribuicao: List[tuple[int, int]] = []
+                if len(distribuicoes_por_op) == len(ops):
+                    for op_id, ids_item in zip(ops, distribuicoes_por_op):
+                        for dist_id in ids_item:
+                            pares_op_distribuicao.append((op_id, dist_id))
+                else:
+                    logger.warning(
+                        "Não foi possível mapear OPs por item; usando correspondência sequencial. "
+                        f"OPs={len(ops)}, itens_payload={len(distribuicoes_por_op)}, "
+                        f"distribuições={len(distribuicoes_ids)}"
+                    )
+                    for i, op_id in enumerate(ops):
+                        if i < len(distribuicoes_ids):
+                            dist_id = distribuicoes_ids[i]
+                        else:
+                            dist_id = distribuicoes_ids[-1] if distribuicoes_ids else None
+                            if not dist_id:
+                                raise ValueError(f"Nenhuma distribuição disponível para OP {op_id}")
+                        pares_op_distribuicao.append((op_id, dist_id))
+
+                for i, (op_id, dist_id) in enumerate(pares_op_distribuicao):
                     envio_item_id = envio_item_ids_por_distribuicao.get(dist_id)
                     if not envio_item_id:
                         raise ValueError(
@@ -495,6 +559,7 @@ class OrcamentoService:
                         "id_ops": op_id,
                         "id_pedido_venda": id_pedido_venda,
                         "pedidos": pedido,
+                        "resposta_api": resposta_completa,
                         "envio_item_id": envio_item_id,
                     })
                     logger.debug(f"OP {i}: distribuicao_material_id={dist_id}, id_ops={op_id}")
@@ -516,6 +581,7 @@ class OrcamentoService:
                         "id_ops": None,
                         "id_pedido_venda": id_pedido_venda,
                         "pedidos": pedido,
+                        "resposta_api": resposta_completa,
                         "envio_item_id": envio_item_id,
                     })
 
@@ -730,53 +796,100 @@ class OrcamentoService:
             # Obter status via cache
             status = OrcamentoService._get_or_create_status(db, novo_status)
 
-            # -- 1. Buscar todas as distribuições informadas + suas relacionadas (cascata) --
-            # Busca em uma única query para não ter N+1
+            # -- 1. Buscar todas as distribuições informadas + pares do arquivo (capa/miolo) --
+            from sqlalchemy import and_, or_
+            from sqlalchemy.orm import aliased
+
+            ArquivoBase = aliased(ArquivoPdf)
             distribuicoes_base = db.query(
                 DistribuicaoMaterial.id,
                 DistribuicaoMaterial.status_id,
                 DistribuicaoMaterial.formulario_id,
                 DistribuicaoMaterial.unidade_escolar_id,
+                DistribuicaoMaterial.especificacao_form_id,
                 DistribuicaoMaterial.id_turma,
+                ArquivoBase.pares.label('pares'),
+            ).outerjoin(
+                ArquivoBase,
+                ArquivoBase.id == DistribuicaoMaterial.arquivo_pdf_id,
             ).filter(DistribuicaoMaterial.id.in_(distribuicoes_ids)).all()
 
             if not distribuicoes_base:
                 logger.warning(f"Nenhuma distribuição encontrada para os IDs: {distribuicoes_ids}")
                 return 0
 
-            # Construir condições de cascata por (formulario_id, unidade_escolar_id, id_turma).
-            # Distribuições sem turma cascatam apenas entre si (id_turma IS NULL).
-            from sqlalchemy import and_, or_
-            condicoes_cascata = []
-            for d in distribuicoes_base:
-                if not (d.formulario_id and d.unidade_escolar_id):
-                    continue
-                cond = and_(
-                    DistribuicaoMaterial.formulario_id == d.formulario_id,
-                    DistribuicaoMaterial.unidade_escolar_id == d.unidade_escolar_id,
-                    (DistribuicaoMaterial.id_turma.is_(None)
-                        if d.id_turma is None
-                        else DistribuicaoMaterial.id_turma == d.id_turma),
-                )
-                condicoes_cascata.append(cond)
-
             # IDs já conhecidos (os passados + suas cascatas)
             todos_ids_set: set = set(distribuicoes_ids)
             status_map: Dict[int, Optional[int]] = {d.id: d.status_id for d in distribuicoes_base}
 
-            if condicoes_cascata:
-                relacionadas = db.query(
+            # Cascata: agrupar por pares (vincula capa↔miolo do mesmo livro).
+            # Distribuições sem pares usam especificacao_form_id como chave — evita
+            # expansão indevida para livros diferentes na mesma (form, unidade, turma).
+            grupos_pares: list = []    # (form_id, unit_id, turma, pares_val)
+            conds_sem_pares: list = [] # condições SQLAlchemy para distribuições sem pares
+
+            for d in distribuicoes_base:
+                if not (d.formulario_id and d.unidade_escolar_id):
+                    continue
+                turma_cond = (
+                    DistribuicaoMaterial.id_turma.is_(None)
+                    if d.id_turma is None
+                    else DistribuicaoMaterial.id_turma == d.id_turma
+                )
+                if d.pares is not None:
+                    grupos_pares.append((d.formulario_id, d.unidade_escolar_id, d.id_turma, d.pares))
+                else:
+                    conds_sem_pares.append(and_(
+                        DistribuicaoMaterial.formulario_id == d.formulario_id,
+                        DistribuicaoMaterial.unidade_escolar_id == d.unidade_escolar_id,
+                        DistribuicaoMaterial.especificacao_form_id == d.especificacao_form_id,
+                        turma_cond,
+                    ))
+
+            # Cascata 1 — por pares (capa ↔ miolo)
+            if grupos_pares:
+                ArquivoCascata = aliased(ArquivoPdf)
+                pares_conds = []
+                for form_id, unit_id, turma, pares_val in grupos_pares:
+                    turma_cond = (
+                        DistribuicaoMaterial.id_turma.is_(None)
+                        if turma is None
+                        else DistribuicaoMaterial.id_turma == turma
+                    )
+                    pares_conds.append(and_(
+                        DistribuicaoMaterial.formulario_id == form_id,
+                        DistribuicaoMaterial.unidade_escolar_id == unit_id,
+                        turma_cond,
+                        ArquivoCascata.pares == pares_val,
+                    ))
+                relacionadas_pares = db.query(
+                    DistribuicaoMaterial.id,
+                    DistribuicaoMaterial.status_id,
+                ).join(
+                    ArquivoCascata,
+                    ArquivoCascata.id == DistribuicaoMaterial.arquivo_pdf_id,
+                ).filter(
+                    or_(*pares_conds),
+                    DistribuicaoMaterial.id.notin_(distribuicoes_ids),
+                ).all()
+                for r in relacionadas_pares:
+                    todos_ids_set.add(r.id)
+                    status_map[r.id] = r.status_id
+                    logger.debug(f"Cascata (pares): incluindo distribuição {r.id}")
+
+            # Cascata 2 — por especificação (sem pares)
+            if conds_sem_pares:
+                relacionadas_spec = db.query(
                     DistribuicaoMaterial.id,
                     DistribuicaoMaterial.status_id,
                 ).filter(
-                    or_(*condicoes_cascata),
-                    DistribuicaoMaterial.id.notin_(distribuicoes_ids)
+                    or_(*conds_sem_pares),
+                    DistribuicaoMaterial.id.notin_(distribuicoes_ids),
                 ).all()
-
-                for r in relacionadas:
+                for r in relacionadas_spec:
                     todos_ids_set.add(r.id)
                     status_map[r.id] = r.status_id
-                    logger.debug(f"Cascata: incluindo distribuição {r.id}")
+                    logger.debug(f"Cascata (spec): incluindo distribuição {r.id}")
 
             # -- 2. Filtrar somente os que precisam mudar --
             ids_para_atualizar = [

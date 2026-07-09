@@ -58,6 +58,9 @@ class OrcamentoController:
             "baixar_arquivos": request.baixar_arquivos,
             "gerar_op": request.gerar_op,
             "usar_data_saida_distribuicao": request.usar_data_saida_distribuicao,
+            "persistir_resultado": request.persistir_resultado,
+            "organizar_arquivos_por_escola": request.organizar_arquivos_por_escola,
+            "atualizar_status_fase01": request.atualizar_status_fase01,
         }
         return json.dumps(payload_chave, ensure_ascii=False, sort_keys=True)
 
@@ -389,6 +392,8 @@ class OrcamentoController:
         modo: str,
         grupo_lote_id: int = None,
         lote_envio_id: int = None,
+        persistir_resultado: bool = True,
+        atualizar_status: bool = True,
     ) -> Dict[str, Any]:
         """
         FASE 01 — Envia um orçamento para a API Bremen e salva na tabela orcamento_api.
@@ -424,50 +429,66 @@ class OrcamentoController:
             f"{len(distribuicoes_ids)} distribuições mapeadas"
         )
 
-        envio_item_ids_por_distribuicao = OrcamentoService.obter_ou_criar_envio_itens(
-            db=db,
-            lote_envio_id=lote_envio_id,
-            distribuicoes_ids=distribuicoes_ids,
-        )
+        envio_item_ids_por_distribuicao: Dict[int, int] = {}
+        registros_orcamento = []
 
-        # Salvar na tabela orcamento_api (1 registro por item)
-        registros_orcamento = OrcamentoService.salvar_orcamento_api(
-            db=db,
-            id_orcamento=id_orcamento,
-            itens_resposta=itens_resposta,
-            resposta_completa=resposta_api,
-            payload_enviado=payload_enviado,
-            envio_item_ids_por_distribuicao=envio_item_ids_por_distribuicao,
-        )
+        if persistir_resultado:
+            envio_item_ids_por_distribuicao = OrcamentoService.obter_ou_criar_envio_itens(
+                db=db,
+                lote_envio_id=lote_envio_id,
+                distribuicoes_ids=distribuicoes_ids,
+            )
 
-        OrcamentoService.atualizar_snapshot_envio_itens(
-            db=db,
-            envio_item_ids_por_distribuicao=envio_item_ids_por_distribuicao,
-            id_orcamento=id_orcamento,
-            status_envio="orcamento_gerado",
-            sucesso_ultimo_evento=True,
-        )
+            # Salvar na tabela orcamento_api (1 registro por item)
+            registros_orcamento = OrcamentoService.salvar_orcamento_api(
+                db=db,
+                id_orcamento=id_orcamento,
+                itens_resposta=itens_resposta,
+                resposta_completa=resposta_api,
+                payload_enviado=payload_enviado,
+                envio_item_ids_por_distribuicao=envio_item_ids_por_distribuicao,
+            )
 
-        # Atualizar status das distribuições
-        OrcamentoController._atualizar_status_distribuicoes(
-            db, distribuicoes_ids,
-            novo_status="orcamento_gerado",
-            mensagem=f"Orçamento gerado via API - ID: {id_orcamento}",
-            grupo_lote_id=grupo_lote_id,
-            lote_envio_id=lote_envio_id,
-            envio_item_ids_por_distribuicao=envio_item_ids_por_distribuicao,
-        )
+            OrcamentoService.atualizar_snapshot_envio_itens(
+                db=db,
+                envio_item_ids_por_distribuicao=envio_item_ids_por_distribuicao,
+                id_orcamento=id_orcamento,
+                status_envio="orcamento_gerado" if atualizar_status else None,
+                sucesso_ultimo_evento=True if atualizar_status else None,
+            )
+
+            if atualizar_status:
+                OrcamentoController._atualizar_status_distribuicoes(
+                    db, distribuicoes_ids,
+                    novo_status="orcamento_gerado",
+                    mensagem=f"Orçamento gerado via API - ID: {id_orcamento}",
+                    grupo_lote_id=grupo_lote_id,
+                    lote_envio_id=lote_envio_id,
+                    envio_item_ids_por_distribuicao=envio_item_ids_por_distribuicao,
+                )
+            else:
+                logger.info(
+                    f"Orçamento {id_orcamento} salvo sem alterar status/histórico da FASE 01."
+                )
+        else:
+            logger.info(
+                f"Orçamento {id_orcamento} executado sem persistência: "
+                "registros, snapshots e status não serão gravados."
+            )
 
         return {
             "id_orcamento": id_orcamento,
             "distribuicoes_ids": distribuicoes_ids,
             "payload_enviado": payload_enviado,
+            "itens_resposta": itens_resposta,
             "detalhe": {
                 "fase": "01_orcamento",
                 "id_orcamento": id_orcamento,
                 "itens_count": len(itens_resposta),
                 "registros_criados": len(registros_orcamento),
                 "distribuicoes_ids": distribuicoes_ids,
+                "persistido": persistir_resultado,
+                "status_atualizado": atualizar_status,
                 "status": "sucesso"
             },
             "envio_item_ids_por_distribuicao": envio_item_ids_por_distribuicao,
@@ -490,6 +511,8 @@ class OrcamentoController:
         grupo_lote_id: int = None,
         lote_envio_id: int = None,
         envio_item_ids_por_distribuicao: Dict[int, int] = None,
+        persistir_resultado: bool = True,
+        itens_resposta: List[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         FASE 02 — Aprova um orçamento na API Bremen e salva na tabela aprovacao_api.
@@ -512,64 +535,95 @@ class OrcamentoController:
         await asyncio.sleep(DELAY_ENTRE_FASES)
 
         try:
-            resposta_aprovacao = await api_service.aprovar_orcamento(
-                db=db,
-                id_orcamento=id_orcamento,
-                data_entrega=data_entrega,
-                gerar_op=gerar_op,
-                usar_data_saida_distribuicao=usar_data_saida_distribuicao,
-            )
+            if persistir_resultado:
+                resposta_aprovacao = await api_service.aprovar_orcamento(
+                    db=db,
+                    id_orcamento=id_orcamento,
+                    data_entrega=data_entrega,
+                    gerar_op=gerar_op,
+                    usar_data_saida_distribuicao=usar_data_saida_distribuicao,
+                )
+            else:
+                resposta_aprovacao = await api_service.aprovar_orcamento_com_itens(
+                    id_orcamento=id_orcamento,
+                    itens_resposta=itens_resposta or [],
+                    data_entrega=data_entrega,
+                    gerar_op=gerar_op,
+                )
 
             # Normalizar resposta (pode vir como lista)
             if isinstance(resposta_aprovacao, list):
                 logger.warning("Resposta da aprovação veio como lista. Normalizando.")
                 resposta_aprovacao = {"data": resposta_aprovacao}
 
-            # Salvar na tabela aprovacao_api (1 linha por OP, ou 1 por distribuição se sem OP)
-            registros_aprovacao = OrcamentoService.salvar_aprovacao_api(
-                db=db,
-                id_orcamento=id_orcamento,
-                resposta_completa=resposta_aprovacao,
-                distribuicoes_ids=distribuicoes_ids,
-                payload_orcamento=payload_enviado,
-                envio_item_ids_por_distribuicao=envio_item_ids_por_distribuicao,
-            )
+            data_aprovacao = resposta_aprovacao.get('data', [])
+            if isinstance(data_aprovacao, list) and len(data_aprovacao) > 0:
+                data_item = data_aprovacao[0]
+            elif isinstance(data_aprovacao, dict):
+                data_item = data_aprovacao
+            else:
+                data_item = {}
 
-            id_ops_por_distribuicao = {
-                r.distribuicao_material_id: r.id_ops
-                for r in registros_aprovacao
-                if r.id_ops is not None
-            }
+            id_ops_str = data_item.get('id_ops', '')
+            if isinstance(id_ops_str, str):
+                ops = [int(op.strip()) for op in id_ops_str.split(',') if op.strip()]
+            elif isinstance(id_ops_str, int):
+                ops = [id_ops_str]
+            else:
+                ops = []
 
-            OrcamentoService.atualizar_snapshot_envio_itens(
-                db=db,
-                envio_item_ids_por_distribuicao=envio_item_ids_por_distribuicao,
-                id_orcamento=id_orcamento,
-                id_ops_por_distribuicao=id_ops_por_distribuicao,
-                status_envio="orcamento_aprovado" if any(r.id_ops is not None for r in registros_aprovacao) else "pedido_venda_gerado",
-                sucesso_ultimo_evento=True,
-            )
+            registros_aprovacao = []
+            tem_op = len(ops) > 0
 
-            # Verificar se OPs foram geradas (id_ops=None significa apenas pedido de venda)
-            tem_op = any(r.id_ops is not None for r in registros_aprovacao)
+            if persistir_resultado:
+                # Salvar na tabela aprovacao_api (1 linha por OP, ou 1 por distribuição se sem OP)
+                registros_aprovacao = OrcamentoService.salvar_aprovacao_api(
+                    db=db,
+                    id_orcamento=id_orcamento,
+                    resposta_completa=resposta_aprovacao,
+                    distribuicoes_ids=distribuicoes_ids,
+                    payload_orcamento=payload_enviado,
+                    envio_item_ids_por_distribuicao=envio_item_ids_por_distribuicao,
+                )
+
+                id_ops_por_distribuicao = {
+                    r.distribuicao_material_id: r.id_ops
+                    for r in registros_aprovacao
+                    if r.id_ops is not None
+                }
+
+                OrcamentoService.atualizar_snapshot_envio_itens(
+                    db=db,
+                    envio_item_ids_por_distribuicao=envio_item_ids_por_distribuicao,
+                    id_orcamento=id_orcamento,
+                    id_ops_por_distribuicao=id_ops_por_distribuicao,
+                    status_envio="orcamento_aprovado" if any(r.id_ops is not None for r in registros_aprovacao) else "pedido_venda_gerado",
+                    sucesso_ultimo_evento=True,
+                )
+            else:
+                logger.info(
+                    f"Aprovação do orçamento {id_orcamento} executada sem persistência: "
+                    "aprovacao_api, snapshots e status não serão gravados."
+                )
 
             if tem_op:
                 status_aprovacao = "orcamento_aprovado"
-                msg_status = f"Orçamento {id_orcamento} aprovado - {len(registros_aprovacao)} OPs geradas"
+                msg_status = f"Orçamento {id_orcamento} aprovado - {len(ops)} OPs geradas"
             else:
                 status_aprovacao = "pedido_venda_gerado"
                 msg_status = f"Orçamento {id_orcamento} aprovado como pedido de venda (sem OP)"
                 logger.info(f"Orçamento {id_orcamento}: sem OP gerada, FASE 03 será ignorada.")
 
-            # Atualizar status das distribuições
-            OrcamentoController._atualizar_status_distribuicoes(
-                db, distribuicoes_ids,
-                novo_status=status_aprovacao,
-                mensagem=msg_status,
-                grupo_lote_id=grupo_lote_id,
-                lote_envio_id=lote_envio_id,
-                envio_item_ids_por_distribuicao=envio_item_ids_por_distribuicao,
-            )
+            if persistir_resultado:
+                # Atualizar status das distribuições
+                OrcamentoController._atualizar_status_distribuicoes(
+                    db, distribuicoes_ids,
+                    novo_status=status_aprovacao,
+                    mensagem=msg_status,
+                    grupo_lote_id=grupo_lote_id,
+                    lote_envio_id=lote_envio_id,
+                    envio_item_ids_por_distribuicao=envio_item_ids_por_distribuicao,
+                )
 
             return {
                 "aprovado": True,
@@ -577,9 +631,10 @@ class OrcamentoController:
                 "detalhe": {
                     "fase": "02_aprovacao",
                     "id_orcamento": id_orcamento,
-                    "ops_count": len([r for r in registros_aprovacao if r.id_ops is not None]),
+                    "ops_count": len(ops),
                     "distribuicoes_ids": distribuicoes_ids,
                     "gerar_op": gerar_op,
+                    "persistido": persistir_resultado,
                     "status": "sucesso"
                 }
             }
@@ -598,16 +653,17 @@ class OrcamentoController:
             except Exception as rb_err:
                 logger.warning(f"Falha ao realizar rollback na FASE 02: {rb_err}")
 
-            # Marcar distribuições com erro (somente após sessão saneada)
-            OrcamentoController._atualizar_status_distribuicoes(
-                db, distribuicoes_ids,
-                novo_status="erro_aprovacao",
-                mensagem=error_msg,
-                sucesso=False,
-                grupo_lote_id=grupo_lote_id,
-                lote_envio_id=lote_envio_id,
-                envio_item_ids_por_distribuicao=envio_item_ids_por_distribuicao,
-            )
+            if persistir_resultado:
+                # Marcar distribuições com erro (somente após sessão saneada)
+                OrcamentoController._atualizar_status_distribuicoes(
+                    db, distribuicoes_ids,
+                    novo_status="erro_aprovacao",
+                    mensagem=error_msg,
+                    sucesso=False,
+                    grupo_lote_id=grupo_lote_id,
+                    lote_envio_id=lote_envio_id,
+                    envio_item_ids_por_distribuicao=envio_item_ids_por_distribuicao,
+                )
 
             return {
                 "aprovado": False,
@@ -632,6 +688,7 @@ class OrcamentoController:
         grupo_lote_id: int = None,
         lote_envio_id: int = None,
         envio_item_ids_por_distribuicao: Dict[int, int] = None,
+        organizar_arquivos_por_escola: bool = False,
     ) -> Dict[str, Any]:
         """
         FASE 03 — Baixa e organiza os arquivos PDF de um orçamento aprovado.
@@ -654,7 +711,8 @@ class OrcamentoController:
             download_service = DownloadBremenService()
             resultado_download = await download_service.processar_downloads_por_orcamento(
                 db=db,
-                id_orcamento=id_orcamento
+                id_orcamento=id_orcamento,
+                organizar_por_escola=organizar_arquivos_por_escola,
             )
 
             total_downloads = resultado_download.get("downloads", 0)
@@ -683,6 +741,7 @@ class OrcamentoController:
                 "arquivos_baixados": total_downloads,
                 "total_ops": resultado_download.get("total_ops", 0),
                 "detalhes_ops": resultado_download.get("detalhes", []),
+                "organizar_arquivos_por_escola": organizar_arquivos_por_escola,
                 "status": "sucesso"
             }
 
@@ -764,10 +823,15 @@ class OrcamentoController:
 
         api_service = OrcamentoAPIService()
         modo = getattr(request, 'modo_agrupamento', 'unidade')
+        persistir_resultado = getattr(request, 'persistir_resultado', True)
+        organizar_arquivos_por_escola = getattr(request, 'organizar_arquivos_por_escola', False)
+        atualizar_status_fase01 = getattr(request, 'atualizar_status_fase01', True)
+        if not persistir_resultado:
+            logger.info("Processamento configurado para executar sem persistir resultados no banco")
 
         # Gerar grupo_lote_id sequencial a partir do banco de dados
         grupo_lote_id = getattr(request, 'grupo_lote_id', None)
-        if not grupo_lote_id:
+        if persistir_resultado and not grupo_lote_id:
             try:
                 db.execute(text("CREATE SEQUENCE IF NOT EXISTS lote_id_seq START WITH 1 INCREMENT BY 1"))
                 row = db.execute(text("SELECT nextval('lote_id_seq')")).fetchone()
@@ -778,14 +842,20 @@ class OrcamentoController:
                 import random
                 grupo_lote_id = random.randint(100000, 999999)
 
-        resultado.grupo_lote_id = grupo_lote_id
-        lote_envio = OrcamentoService.obter_ou_criar_lote_envio(db, grupo_lote_id)
-        lote_envio_id = lote_envio.id
-        agora_lote = OrcamentoController._agora_banco(db)
-        lote_envio.status = "em_processamento"
-        lote_envio.data_envio = lote_envio.data_envio or agora_lote
-        lote_envio.data_ultima_atualizacao = agora_lote
-        db.flush()
+        resultado.grupo_lote_id = grupo_lote_id if persistir_resultado else None
+        lote_envio = None
+        lote_envio_id = None
+
+        if persistir_resultado:
+            lote_envio = OrcamentoService.obter_ou_criar_lote_envio(db, grupo_lote_id)
+            lote_envio_id = lote_envio.id
+            agora_lote = OrcamentoController._agora_banco(db)
+            lote_envio.status = "em_processamento"
+            lote_envio.organizacao_arquivos = "por_escola" if organizar_arquivos_por_escola else "por_op"
+            lote_envio.data_envio = lote_envio.data_envio or agora_lote
+            lote_envio.data_ultima_atualizacao = agora_lote
+            db.flush()
+            organizar_arquivos_por_escola = lote_envio.organizacao_arquivos == "por_escola"
 
         try:
             # Gerar orçamentos locais (via SQL)
@@ -801,6 +871,7 @@ class OrcamentoController:
                     status_ids=request.status_ids,
                     ids_unidades=getattr(request, 'ids_unidades', None),
                     ids_arquivos=getattr(request, 'ids_arquivos', None),
+                    nome_arquivo_filtro=getattr(request, 'nome_arquivo_filtro', None),
                     modo_agrupamento=modo
                 )
             )
@@ -834,14 +905,18 @@ class OrcamentoController:
                         modo,
                         grupo_lote_id=grupo_lote_id,
                         lote_envio_id=lote_envio_id,
+                        persistir_resultado=persistir_resultado,
+                        atualizar_status=atualizar_status_fase01,
                     )
                     resultado.enviados += 1
-                    resultado.salvos += 1
+                    if persistir_resultado:
+                        resultado.salvos += 1
                     resultado.detalhes.append(fase01["detalhe"])
 
                     id_orcamento = fase01["id_orcamento"]
                     distribuicoes_ids = fase01["distribuicoes_ids"]
                     payload_enviado = fase01["payload_enviado"]
+                    itens_resposta = fase01["itens_resposta"]
                     envio_item_ids_por_distribuicao = fase01["envio_item_ids_por_distribuicao"]
 
                     # FASE 02 — Aprovar orçamento (se configurado)
@@ -857,6 +932,8 @@ class OrcamentoController:
                             grupo_lote_id=grupo_lote_id,
                             lote_envio_id=lote_envio_id,
                             envio_item_ids_por_distribuicao=envio_item_ids_por_distribuicao,
+                            persistir_resultado=persistir_resultado,
+                            itens_resposta=itens_resposta,
                         )
                         resultado.detalhes.append(fase02["detalhe"])
 
@@ -866,7 +943,7 @@ class OrcamentoController:
                             resultado.erros.append(fase02["erro"])
 
                     # FASE 03 — Baixar arquivos (somente se aprovado E com OP gerada)
-                    if request.baixar_arquivos and fase02.get("tem_op", False):
+                    if persistir_resultado and request.baixar_arquivos and fase02.get("tem_op", False):
                         fase03 = await OrcamentoController._fase03_baixar_arquivos(
                             db,
                             id_orcamento,
@@ -874,6 +951,7 @@ class OrcamentoController:
                             grupo_lote_id=grupo_lote_id,
                             lote_envio_id=lote_envio_id,
                             envio_item_ids_por_distribuicao=envio_item_ids_por_distribuicao,
+                            organizar_arquivos_por_escola=organizar_arquivos_por_escola,
                         )
                         resultado.downloads += fase03["downloads"]
                         resultado.erros.extend(fase03["erros"])
@@ -899,9 +977,10 @@ class OrcamentoController:
                 f"Processamento concluído: {resultado.enviados}/{resultado.total} enviados, "
                 f"{resultado.aprovados} aprovados, {len(resultado.erros)} erros"
             )
-            lote_envio.status = "concluido" if not resultado.erros else "concluido_com_erros"
-            lote_envio.data_ultima_atualizacao = OrcamentoController._agora_banco(db)
-            db.commit()
+            if persistir_resultado and lote_envio:
+                lote_envio.status = "concluido" if not resultado.erros else "concluido_com_erros"
+                lote_envio.data_ultima_atualizacao = OrcamentoController._agora_banco(db)
+                db.commit()
             logger.info("=" * 60)
 
             return resultado
@@ -911,9 +990,10 @@ class OrcamentoController:
             resultado.erros.append(f"Erro geral: {str(e)}")
             try:
                 db.rollback()
-                lote_envio.status = "erro"
-                lote_envio.data_ultima_atualizacao = OrcamentoController._agora_banco(db)
-                db.commit()
+                if persistir_resultado and lote_envio:
+                    lote_envio.status = "erro"
+                    lote_envio.data_ultima_atualizacao = OrcamentoController._agora_banco(db)
+                    db.commit()
             except Exception as status_error:
                 logger.warning(f"Falha ao persistir status de erro do lote: {status_error}")
             return resultado
