@@ -316,7 +316,7 @@ tarefas_gerais AS (
     WHERE bt.id_geral IS TRUE
 )
 
-SELECT json_build_object(
+SELECT json_strip_nulls(json_build_object(
     'identifier', 'PageFlow',
     'data', json_build_object(
         'id_cliente', ip.cliente_id,
@@ -592,7 +592,7 @@ SELECT json_build_object(
             ), '[]'::json
         )
     )
-)
+))
 FROM itens_produto ip
 GROUP BY ip.unidade_id, ip.cliente_id, ip.tipo_agrupamento, ip.client_id_venda, ip.vendedor_id, ip.forma_pagamento_venda, ip.nome_unidade
 ORDER BY ip.unidade_id, ip.tipo_agrupamento DESC;

@@ -284,8 +284,8 @@ class OrcamentoService:
                     nome_unidade=orcamento_data['data'].get('nome_unidade'),
                     id_cliente=orcamento_data['data'].get('id_cliente'),
                     id_vendedor=orcamento_data['data'].get('id_vendedor') or 2285,
-                    id_forma_pagamento=str(orcamento_data['data']['id_forma_pagamento']),  # Converter para string
-                    itens=[ItemOrcamento(**item) for item in orcamento_data['data']['itens']]
+                    id_forma_pagamento=str(orcamento_data['data'].get('id_forma_pagamento') or '11'),  # Converter para string
+                    itens=[ItemOrcamento(**item) for item in orcamento_data['data'].get('itens', [])]
                 )
                 
                 orcamento = OrcamentoResponse(

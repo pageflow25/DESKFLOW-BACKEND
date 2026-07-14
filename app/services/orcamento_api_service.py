@@ -194,6 +194,15 @@ class OrcamentoAPIService:
         # Se chegou aqui, todas as tentativas falharam
         raise last_error if last_error else Exception("Todas as tentativas falharam")
     
+    @classmethod
+    def _remover_campos_null(cls, valor):
+        """Remove recursivamente chaves com valor None de dicts (em qualquer nível)."""
+        if isinstance(valor, dict):
+            return {k: cls._remover_campos_null(v) for k, v in valor.items() if v is not None}
+        if isinstance(valor, list):
+            return [cls._remover_campos_null(v) for v in valor]
+        return valor
+
     async def enviar_orcamento(self, orcamento: OrcamentoResponse) -> Dict[str, Any]:
         """
         Envia orçamento para a API Bremen (FASE 01)
@@ -291,6 +300,10 @@ class OrcamentoAPIService:
                 for comp in item.get("componentes", [])
             ]
         
+        # Remover campos null: o conversor JSON da Bremen transforma null em 0
+        # nos inteiros; omitindo a chave, o padrão do Modelo de Produto é mantido
+        payload_api = self._remover_campos_null(payload_api)
+
         url = f"{self.api_base_url}/api/v1/orcamento"
         logger.info(f"Conectando à API Bremen: {url}")
         logger.debug(f"Payload com {len(payload_api['data']['itens'])} itens")
