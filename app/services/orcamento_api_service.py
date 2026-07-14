@@ -413,6 +413,49 @@ class OrcamentoAPIService:
         
         logger.info(f"Orçamento {id_orcamento} aprovado com sucesso")
         return result
+
+    async def aprovar_orcamento_com_itens(
+        self,
+        id_orcamento: int,
+        itens_resposta: List[Dict[str, Any]],
+        data_entrega: Optional[str],
+        gerar_op: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Aprova orçamento usando os itens retornados pela API, sem depender da tabela orcamento_api.
+        Usado em execuções sem persistência.
+        """
+        logger.info(f"Aprovando orçamento {id_orcamento} na API Bremen sem persistência local")
+
+        itens_aprovacao = []
+        for item in itens_resposta:
+            id_item = item.get('id')
+            if id_item:
+                itens_aprovacao.append({
+                    "id": id_item,
+                    "data_entrega": data_entrega
+                })
+
+        if not itens_aprovacao:
+            raise ValueError(f"Nenhum item válido (id_item) encontrado para aprovação do orçamento {id_orcamento}")
+
+        payload = {
+            "identifier": "PageFlow",
+            "data": {
+                "id_orcamento": id_orcamento,
+                "gerar_op": gerar_op,
+                "itens": itens_aprovacao
+            }
+        }
+
+        logger.info(f"Payload de aprovação sem persistência montado com {len(itens_aprovacao)} itens")
+        logger.debug(f"Payload de aprovação sem persistência: {json.dumps(payload, indent=2)}")
+
+        url = f"{self.api_base_url}/api/v1/proposta/aprovar"
+        result = await self._fazer_requisicao_com_retry(url, payload, f"aprovar orçamento {id_orcamento} sem persistência")
+
+        logger.info(f"Orçamento {id_orcamento} aprovado com sucesso sem persistência local")
+        return result
     
     def extrair_itens_orcamento(self, resposta_api: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
