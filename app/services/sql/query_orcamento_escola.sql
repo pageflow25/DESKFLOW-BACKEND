@@ -635,17 +635,32 @@ SELECT json_strip_nulls(json_build_object(
                                 comp.especificacao_id
                         ) comp_sel
                     ), '[]'::json),
-                    'perguntas_gerais', COALESCE((
-                        SELECT json_agg(
-                            json_build_object(
-                              'tipo', bp.tipo,
-                              'pergunta', bp.nome,
-                              'resposta', rg.resposta,
-                              'id_pergunta', bp.id_pergunta
+                    'perguntas_gerais', (
+                        SELECT
+                            COALESCE(
+                                json_agg(
+                                    json_build_object(
+                                        'tipo', bp.tipo,
+                                        'pergunta', bp.nome,
+                                        'resposta', rg.resposta,
+                                        'id_pergunta', bp.id_pergunta
+                                    )
+                                ),
+                                '[]'::json
                             )
-                        )
+                            ||
+                            json_build_array(
+                                json_build_object(
+                                    'id_pergunta', 40,
+                                    'pergunta', 'TIPO DE ENTREGA/DISTRIBUIÇÃO',
+                                    'tipo', 'Opções',
+                                    'resposta', 'Com distribuição'
+                                )
+                            )
                         FROM bremen_perguntas bp
-                        INNER JOIN respostas_gerais rg ON rg.pergunta_id = bp.id AND rg.especificacao_id = ip.especificacao_id
+                        INNER JOIN respostas_gerais rg
+                            ON rg.pergunta_id = bp.id
+                           AND rg.especificacao_id = ip.especificacao_id
                         WHERE bp.id_geral = ip.id_produto
                     ), '[]'::json),
                     'tarefas_gerais', COALESCE((
