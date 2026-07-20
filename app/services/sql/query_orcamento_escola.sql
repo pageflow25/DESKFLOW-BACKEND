@@ -652,7 +652,7 @@ SELECT json_strip_nulls(json_build_object(
                             json_build_array(
                                 json_build_object(
                                     'id_pergunta', 40,
-                                    'pergunta', 'TIPO DE ENTREGA/DISTRIBUIÇÃO',
+                                    'pergunta', 'TIPO DE ENTREGA/DISTRIBUIÇÃO?',
                                     'tipo', 'Opções',
                                     'resposta', 'Com distribuição'
                                 )
