@@ -563,7 +563,7 @@ SELECT json_strip_nulls(json_build_object(
                                 comp.especificacao_id
                         ) comp_sel
                     ), '[]'::json),
-                    'perguntas_gerais', (
+                    'perguntas_gerais', COALESCE((
                         SELECT
                             COALESCE(
                                 json_agg(
@@ -590,9 +590,7 @@ SELECT json_strip_nulls(json_build_object(
                             ON rg.pergunta_id = bp.id
                            AND rg.especificacao_id = ip.especificacao_id
                         WHERE bp.id_geral = ip.id_produto
-                    )
-                    '[]'::json
-                    ),
+                    ), '[]'::json),
                     'tarefas_gerais', COALESCE((
                         SELECT json_agg(
                             json_build_object(

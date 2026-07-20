@@ -635,7 +635,7 @@ SELECT json_strip_nulls(json_build_object(
                                 comp.especificacao_id
                         ) comp_sel
                     ), '[]'::json),
-                    'perguntas_gerais', (
+                    'perguntas_gerais', COALESCE((
                         SELECT
                             COALESCE(
                                 json_agg(
