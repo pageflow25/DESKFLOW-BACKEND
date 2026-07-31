@@ -565,28 +565,14 @@ SELECT json_strip_nulls(json_build_object(
                     ), '[]'::json),
                     'perguntas_gerais', COALESCE((
                         SELECT
-                            (
-                                COALESCE(
-                                    jsonb_agg(
-                                        jsonb_build_object(
-                                            'tipo', bp.tipo,
-                                            'pergunta', bp.nome,
-                                            'resposta', rg.resposta,
-                                            'id_pergunta', bp.id_pergunta
-                                        )
-                                    ),
-                                    '[]'::jsonb
+                            jsonb_agg(
+                                jsonb_build_object(
+                                    'tipo', bp.tipo,
+                                    'pergunta', bp.nome,
+                                    'resposta', rg.resposta,
+                                    'id_pergunta', bp.id_pergunta
                                 )
-                                ||
-                                jsonb_build_array(
-                                    jsonb_build_object(
-                                        'id_pergunta', 40,
-                                        'pergunta', 'TIPO DE ENTREGA/DISTRIBUIÇÃO?',
-                                        'tipo', 'Opções',
-                                        'resposta', 'Com distribuição'
-                                    )
-                                )
-                            )::json
+                            )
                         FROM bremen_perguntas bp
                         INNER JOIN respostas_gerais rg
                             ON rg.pergunta_id = bp.id
