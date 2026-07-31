@@ -637,8 +637,8 @@ SELECT json_strip_nulls(json_build_object(
                     ), '[]'::json),
                     'perguntas_gerais', COALESCE((
                         SELECT
-                            jsonb_agg(
-                                jsonb_build_object(
+                            json_agg(
+                                json_build_object(
                                     'tipo', bp.tipo,
                                     'pergunta', bp.nome,
                                     'resposta', rg.resposta,
