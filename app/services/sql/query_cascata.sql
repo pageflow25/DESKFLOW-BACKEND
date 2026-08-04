@@ -42,8 +42,10 @@ dados_normalizados AS (
         ON f.id = e.formulario_id
     INNER JOIN pedido_distribuicoes distri 
         ON distri.especificacao_form_id = e.id
-    INNER JOIN escola_unidades uc 
+    INNER JOIN escola_unidades uc
         ON distri.unidade_escolar_id = uc.id
+    INNER JOIN escola_escolas esc
+        ON esc.id = uc.escola_id
     LEFT JOIN pedido_arquivos_pdf ar
         ON ar.id = distri.arquivo_pdf_id
     LEFT JOIN bremen_itens b 
@@ -59,7 +61,15 @@ dados_normalizados AS (
             p.nome_arquivo_filtro IS NULL
             OR UPPER(COALESCE(ar.nome, '')) LIKE '%' || UPPER(p.nome_arquivo_filtro) || '%'
         )
-        AND f.criado_em <= NOW() - INTERVAL '30 minutes'
+        AND NOW() >= LEAST(
+                f.criado_em + INTERVAL '30 minutes',
+                CASE
+                    WHEN CAST(esc.tipo_escola AS TEXT) = 'conveniado'
+                         AND f.criado_em < date_trunc('day', f.criado_em) + INTERVAL '16 hours'
+                    THEN date_trunc('day', f.criado_em) + INTERVAL '16 hours'
+                    ELSE f.criado_em + INTERVAL '30 minutes'
+                END
+            )
 ),
 
 -- NÍVEL 5: ARQUIVOS (agrupados por divisão + produto + data + unidade)

@@ -37,7 +37,15 @@ class DashboardService:
                AND dm.status_id = 1
             LEFT JOIN pedido_formularios f
                 ON f.id = dm.formulario_id
-               AND f.criado_em <= NOW() - INTERVAL '30 minutes'
+               AND NOW() >= LEAST(
+                       f.criado_em + INTERVAL '30 minutes',
+                       CASE
+                           WHEN CAST(e.tipo_escola AS TEXT) = 'conveniado'
+                                AND f.criado_em < date_trunc('day', f.criado_em) + INTERVAL '16 hours'
+                           THEN date_trunc('day', f.criado_em) + INTERVAL '16 hours'
+                           ELSE f.criado_em + INTERVAL '30 minutes'
+                       END
+                   )
             GROUP BY
                 e.id,
                 e.nome,
