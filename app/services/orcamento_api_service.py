@@ -50,6 +50,26 @@ class OrcamentoAPIService:
     def _calcular_delay_retry(self, tentativa: int) -> int:
         """Calcula delay progressivo entre tentativas, limitado por configuração."""
         return min(self.retry_base_seconds * max(tentativa, 1), self.retry_max_interval_seconds)
+
+    @staticmethod
+    def _extrair_mensagem_erro_api(response: httpx.Response) -> str:
+        """Extrai a mensagem de erro mais descritiva do corpo da resposta da API Bremen."""
+        try:
+            corpo = response.json()
+        except Exception:
+            return response.text or f"HTTP {response.status_code}"
+
+        mensagem = corpo.get("message") if isinstance(corpo, dict) else None
+        detalhe = None
+        if isinstance(corpo, dict):
+            data = corpo.get("data")
+            if isinstance(data, dict):
+                detalhe = data.get("error")
+
+        partes = [str(p).strip() for p in (mensagem, detalhe) if p]
+        if partes:
+            return " - ".join(partes)
+        return response.text or f"HTTP {response.status_code}"
     
     async def _fazer_requisicao_com_retry(
         self, 
@@ -100,7 +120,11 @@ class OrcamentoAPIService:
                             "API Bremen permaneceu em 503 até o limite de retry "
                             f"({self.retry_max_wait_seconds}s)."
                         )
-                        response.raise_for_status()
+                        mensagem_api = self._extrair_mensagem_erro_api(response)
+                        raise Exception(
+                            f"Erro da API Bremen (503): {mensagem_api} "
+                            "(tempo limite de retry excedido)"
+                        )
 
                     delay = min(self._calcular_delay_retry(tentativa), max(1, tempo_restante))
                     logger.warning(
@@ -165,7 +189,10 @@ class OrcamentoAPIService:
                 # Para outros erros HTTP que não sejam 503, não fazer retry
                 if e.response.status_code != 503:
                     logger.error(f"Erro HTTP: {e.response.status_code} - {e.response.text}")
-                    raise
+                    mensagem_api = self._extrair_mensagem_erro_api(e.response)
+                    raise Exception(
+                        f"Erro da API Bremen ({e.response.status_code}): {mensagem_api}"
+                    ) from e
 
                 agora = loop.time()
                 if agora >= prazo_final:
