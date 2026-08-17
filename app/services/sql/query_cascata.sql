@@ -22,7 +22,7 @@ dados_normalizados AS (
 
         -- DATA DE SAÍDA
         COALESCE(
-            TO_CHAR(NULLIF(distri.data_saida, '')::DATE, 'YYYY-MM-DD'),
+            TO_CHAR(distri.data_saida::DATE, 'YYYY-MM-DD'),
             'Sem data saida'
         ) AS data_saida_formatada,
 

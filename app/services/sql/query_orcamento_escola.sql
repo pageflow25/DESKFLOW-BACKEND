@@ -72,8 +72,8 @@ especificacoes_unidade AS (
         AND (p.ids_produtos IS NULL OR ef.id_produto = ANY(p.ids_produtos))
         AND (
             p.datas_saida IS NULL
-            OR NULLIF(dm.data_saida, '')::date = ANY(p.datas_saida)
-            OR NULLIF(dm.data_saida, '') IS NULL
+            OR dm.data_saida::date = ANY(p.datas_saida)
+            OR dm.data_saida IS NULL
         )
         AND dm.status_id = ANY(p.status_ids)
         AND (p.ids_formularios IS NULL OR ap.formulario_id = ANY(p.ids_formularios))
@@ -99,8 +99,8 @@ distribuicao_ids AS (
         AND (p.ids_produtos IS NULL OR ef.id_produto = ANY(p.ids_produtos))
         AND (
             p.datas_saida IS NULL
-            OR NULLIF(dm.data_saida, '')::date = ANY(p.datas_saida)
-            OR NULLIF(dm.data_saida, '') IS NULL
+            OR dm.data_saida::date = ANY(p.datas_saida)
+            OR dm.data_saida IS NULL
         )
         AND dm.status_id = ANY(p.status_ids)
         AND (p.ids_formularios IS NULL OR ap.formulario_id = ANY(p.ids_formularios))
