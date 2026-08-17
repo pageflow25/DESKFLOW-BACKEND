@@ -32,7 +32,7 @@ class DistribuicaoMaterial(Base):
         default="pendente",
         comment="Status da distribuição para esta unidade"
     )
-    data_saida = Column(String(255), nullable=True, comment="Data real da saída do material da unidade")
+    data_saida = Column(DateTime, nullable=True, comment="Data real da saída do material da unidade")
     arquivo_pdf_id = Column(
         Integer,
         ForeignKey('pedido_arquivos_pdf.id', ondelete='SET NULL', onupdate='CASCADE'),
