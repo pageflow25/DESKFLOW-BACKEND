@@ -2,6 +2,7 @@ import os
 import re
 import shutil
 import tempfile
+import asyncio
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -336,6 +337,26 @@ class OrcamentoIntegraService:
         extensao = os.path.splitext(urlparse(url).path)[1].lower()
         return extensao if re.fullmatch(r"\.[a-z0-9]{1,8}", extensao or "") else padrao
 
+    @staticmethod
+    async def _remover_diretorio(caminho: str, tentativas: int = 3) -> bool:
+        """Remove uma pasta sem permitir que a limpeza masque o erro do fluxo."""
+        for tentativa in range(1, tentativas + 1):
+            try:
+                shutil.rmtree(caminho)
+                return True
+            except FileNotFoundError:
+                return True
+            except OSError as exc:
+                if tentativa < tentativas:
+                    await asyncio.sleep(0.25 * tentativa)
+                    continue
+                logger.warning(
+                    "Não foi possível remover o diretório temporário %s: %s",
+                    caminho,
+                    exc,
+                )
+        return False
+
     async def _organizar_arquivos(
         self,
         db: Session,
@@ -428,11 +449,11 @@ class OrcamentoIntegraService:
         except Exception:
             for pasta in reversed(publicadas):
                 if os.path.commonpath([base, pasta]) == base and os.path.isdir(pasta):
-                    shutil.rmtree(pasta)
+                    await self._remover_diretorio(pasta)
             raise
         finally:
             if os.path.isdir(temporaria):
-                shutil.rmtree(temporaria)
+                await self._remover_diretorio(temporaria)
 
     @staticmethod
     def _resultado_estado(estado: Dict[str, Any], mensagem: Optional[str] = None) -> FluxoOrcamentoIntegraItem:

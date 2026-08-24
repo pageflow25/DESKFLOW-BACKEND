@@ -3,6 +3,7 @@ import re
 import httpx
 import asyncio
 from typing import List, Dict, Any, Optional
+from urllib.parse import urlparse
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
@@ -287,6 +288,25 @@ class DownloadBremenService:
 
         return row["escola_nome"] if row else None
     
+    @staticmethod
+    def _preparar_download(url: str) -> tuple[str, Dict[str, str]]:
+        """Valida a URL e aplica autenticação somente ao Vercel Blob."""
+        url_normalizada = str(url or "").strip()
+        parsed = urlparse(url_normalizada)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("URL de download inválida")
+
+        headers: Dict[str, str] = {}
+        hostname = parsed.hostname.lower()
+        blob_token = getattr(settings, "BLOB_READ_WRITE_TOKEN", "")
+        if blob_token and (
+            hostname == "public.blob.vercel-storage.com"
+            or hostname.endswith(".public.blob.vercel-storage.com")
+        ):
+            headers["Authorization"] = f"Bearer {blob_token}"
+
+        return url_normalizada, headers
+
     async def baixar_arquivo(self, url: str, destino: str) -> int:
         """
         Baixa arquivo do Vercel Blob Storage e salva localmente com retry.
@@ -302,38 +322,45 @@ class DownloadBremenService:
         Returns:
             Tamanho do arquivo em bytes
         """
+        url_normalizada, headers = self._preparar_download(url)
         last_error = None
-        
-        # Montar headers — incluir token se configurado
-        headers = {}
-        blob_token = getattr(settings, 'BLOB_READ_WRITE_TOKEN', '')
-        if blob_token:
-            headers["Authorization"] = f"Bearer {blob_token}"
         
         for tentativa in range(1, MAX_DOWNLOAD_RETRIES + 1):
             try:
-                logger.debug(f"Download tentativa {tentativa}/{MAX_DOWNLOAD_RETRIES}: {url}")
+                logger.debug(
+                    "Download tentativa %s/%s: %s",
+                    tentativa,
+                    MAX_DOWNLOAD_RETRIES,
+                    url_normalizada,
+                )
                 
                 async with httpx.AsyncClient(timeout=DOWNLOAD_TIMEOUT, follow_redirects=True) as client:
-                    response = await client.get(url, headers=headers)
-                    response.raise_for_status()
-                    
-                    # Salvar arquivo
-                    with open(destino, 'wb') as f:
-                        f.write(response.content)
+                    async with client.stream("GET", url_normalizada, headers=headers) as response:
+                        response.raise_for_status()
+                        with open(destino, "wb") as arquivo:
+                            async for chunk in response.aiter_bytes():
+                                arquivo.write(chunk)
                     
                     tamanho = os.path.getsize(destino)
                     return tamanho
                     
             except Exception as e:
                 last_error = e
+                if os.path.isfile(destino):
+                    try:
+                        os.remove(destino)
+                    except OSError:
+                        logger.warning("Não foi possível remover download parcial: %s", destino)
                 logger.warning(
-                    f"Erro no download (tentativa {tentativa}/{MAX_DOWNLOAD_RETRIES}): {str(e)}"
+                    "Erro no download (tentativa %s/%s): %s",
+                    tentativa,
+                    MAX_DOWNLOAD_RETRIES,
+                    str(e),
                 )
                 if tentativa < MAX_DOWNLOAD_RETRIES:
                     await asyncio.sleep(RETRY_DELAY_SECONDS * tentativa)
         
-        raise last_error if last_error else Exception(f"Falha ao baixar {url}")
+        raise last_error if last_error else Exception(f"Falha ao baixar {url_normalizada}")
 
     async def _baixar_arquivo(self, url: str, destino: str) -> int:
         """Compatibilidade com chamadas antigas; prefira ``baixar_arquivo``."""

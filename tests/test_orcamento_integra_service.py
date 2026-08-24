@@ -3,7 +3,7 @@ import os
 import tempfile
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from pydantic import ValidationError
 
@@ -11,7 +11,9 @@ from app.schemas.orcamento import FluxoOrcamentoIntegraRequest, OrcamentoRespons
 from app.models.orcamento_processamento import OrcamentoProcessamento
 from app.services.orcamento_api_service import OrcamentoAPIService
 from app.services.orcamento_integra_service import OrcamentoIntegraService
+from app.services.download_bremen_service import DownloadBremenService
 import app.services.orcamento_integra_service as integra_module
+import app.services.download_bremen_service as download_module
 
 
 class _ResultadoProdutos:
@@ -64,6 +66,11 @@ class _Downloader:
         with open(destino, "wb") as arquivo:
             arquivo.write(conteudo)
         return len(conteudo)
+
+
+class _DownloaderComFalha:
+    async def baixar_arquivo(self, _url, _destino):
+        raise RuntimeError("download falhou")
 
 
 class OrcamentoIntegraServiceTest(unittest.IsolatedAsyncioTestCase):
@@ -169,6 +176,30 @@ class OrcamentoIntegraServiceTest(unittest.IsolatedAsyncioTestCase):
             ".pdf",
         )
 
+    def test_token_blob_nao_e_enviado_para_s3(self):
+        token_anterior = download_module.settings.BLOB_READ_WRITE_TOKEN
+        download_module.settings.BLOB_READ_WRITE_TOKEN = "token-teste"
+        try:
+            url_s3, headers_s3 = DownloadBremenService._preparar_download(
+                "  https://umapenca.s3.amazonaws.com/products/miolo.pdf  "
+            )
+            _, headers_vercel = DownloadBremenService._preparar_download(
+                "https://arquivos.public.blob.vercel-storage.com/miolo.pdf"
+            )
+        finally:
+            download_module.settings.BLOB_READ_WRITE_TOKEN = token_anterior
+
+        self.assertEqual(
+            url_s3,
+            "https://umapenca.s3.amazonaws.com/products/miolo.pdf",
+        )
+        self.assertEqual(headers_s3, {})
+        self.assertEqual(headers_vercel, {"Authorization": "Bearer token-teste"})
+
+    def test_rejeita_url_de_download_invalida(self):
+        with self.assertRaisesRegex(ValueError, "URL de download inválida"):
+            DownloadBremenService._preparar_download("file:///segredo.pdf")
+
     async def test_payload_remove_ids_internos_e_preserva_quantidade_paginas(self):
         orcamento = OrcamentoResponse.model_validate(
             {
@@ -238,6 +269,37 @@ class OrcamentoIntegraServiceTest(unittest.IsolatedAsyncioTestCase):
                 sorted(os.listdir(os.path.join(pasta, "109390"))),
                 ["arquivo_pdf.pdf", "design_capa_frente.png", "design_capa_verso.png"],
             )
+
+    async def test_falha_na_limpeza_nao_mascara_erro_do_download(self):
+        produtos = [
+            {
+                "id": 2467,
+                "arquivo_pdf": "https://cdn.exemplo/miolo.pdf",
+                "design_capa_frente": "https://cdn.exemplo/frente.png",
+                "design_capa_verso": "https://cdn.exemplo/verso.png",
+            }
+        ]
+        with tempfile.TemporaryDirectory() as pasta:
+            anterior = integra_module.settings.DOWNLOAD_BASE_PATH
+            integra_module.settings.DOWNLOAD_BASE_PATH = pasta
+            service = OrcamentoIntegraService(
+                api_service=AsyncMock(),
+                download_service=_DownloaderComFalha(),
+            )
+            try:
+                with patch.object(
+                    integra_module.shutil,
+                    "rmtree",
+                    side_effect=PermissionError("pasta em uso"),
+                ):
+                    with self.assertRaisesRegex(RuntimeError, "download falhou"):
+                        await service._organizar_arquivos(
+                            _DbProdutos(produtos),
+                            pedido_id=3584,
+                            ops=[109404],
+                        )
+            finally:
+                integra_module.settings.DOWNLOAD_BASE_PATH = anterior
 
 
 if __name__ == "__main__":
