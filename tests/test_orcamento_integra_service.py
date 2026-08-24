@@ -49,6 +49,26 @@ class _ResultadoScalar:
         return self.valor
 
 
+class _ResultadoFirst:
+    def __init__(self, valor):
+        self.valor = valor
+
+    def first(self):
+        return self.valor
+
+
+class _DbCapturaSql:
+    def __init__(self, resultado):
+        self.resultado = resultado
+        self.sql = None
+        self.parametros = None
+
+    def execute(self, instrucao, parametros):
+        self.sql = str(instrucao)
+        self.parametros = parametros
+        return _ResultadoFirst(self.resultado)
+
+
 class _DbScalar:
     def __init__(self, valor):
         self.valor = valor
@@ -158,6 +178,37 @@ class OrcamentoIntegraServiceTest(unittest.IsolatedAsyncioTestCase):
         resumo = OrcamentoIntegraService.obter_resumo_dashboard(_DbScalar(12))
 
         self.assertEqual(resumo.recebidos, 12)
+
+    def test_atualiza_status_e_historico_na_mesma_instrucao(self):
+        db = _DbCapturaSql(resultado=(901,))
+
+        atualizado = OrcamentoIntegraService._atualizar_status_com_historico(
+            db,
+            pedido_id=3584,
+            id_orcamento=21598,
+        )
+
+        self.assertTrue(atualizado)
+        self.assertIn("UPDATE integra_pedidos", db.sql)
+        self.assertIn("INSERT INTO integra_historico_pedidos", db.sql)
+        self.assertIn("status_anterior_id", db.sql)
+        self.assertIn("status_novo_id", db.sql)
+        self.assertIn("'sistema'", db.sql)
+        self.assertEqual(
+            db.parametros,
+            {"pedido_id": 3584, "id_orcamento": 21598},
+        )
+
+    def test_nao_registra_historico_quando_status_nao_foi_trocado(self):
+        db = _DbCapturaSql(resultado=None)
+
+        atualizado = OrcamentoIntegraService._atualizar_status_com_historico(
+            db,
+            pedido_id=3584,
+            id_orcamento=21598,
+        )
+
+        self.assertFalse(atualizado)
 
     def test_extrai_ops_de_resposta_bremen(self):
         resposta = {"data": [{"id_ops": "109389,109390"}]}
