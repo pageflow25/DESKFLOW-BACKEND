@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field
-from typing import List, Optional
+from pydantic import BaseModel, Field, field_validator
+from typing import Annotated, List, Optional
 from datetime import date
 
 
@@ -51,11 +51,14 @@ class PerguntaGeral(BaseModel):
 class ItemOrcamento(BaseModel):
     """Item do orçamento"""
     id_produto: int
+    pedido_id: Optional[int] = Field(None, description="ID interno do pedido de integração; não é enviado à Bremen")
+    pedido_produto_id: Optional[int] = Field(None, description="ID interno do produto do pedido; não é enviado à Bremen")
     titulo: Optional[str] = "Sem descrição"
     obs_producao: Optional[str] = Field(None, description="Observações de produção (formulário.observacoes)")
     quantidade: int
     usar_listapreco: int = 1
     manter_estrutura_mod_produto: int = 1
+    arquivo_pdf_quantidade_paginas: Optional[int] = Field(None, ge=1)
     ids_distribuicao: Optional[List[int]] = Field(None, description="IDs de distribuição agrupados (modo escola)")
     componentes: List[ComponenteInfo] = []
     perguntas_gerais: List[PerguntaGeral] = []
@@ -69,7 +72,81 @@ class OrcamentoData(BaseModel):
     id_cliente: Optional[int] = None
     id_vendedor: Optional[int] = 2285
     id_forma_pagamento: str = "11"
+    pedido_ids: Optional[List[int]] = Field(None, description="IDs internos dos pedidos de integração")
     itens: List[ItemOrcamento] = []
+
+
+class FluxoOrcamentoIntegraRequest(BaseModel):
+    """Executa o fluxo de orçamento/produção para pedidos integrados."""
+    pedido_ids: List[Annotated[int, Field(gt=0)]] = Field(
+        default_factory=lambda: [3578],
+        min_length=1,
+        max_length=100,
+        description="Pedidos a processar; o filtro inicial é o pedido 3578",
+    )
+    data_entrega: Optional[str] = Field(None, description="Data de entrega ISO enviada na aprovação")
+
+    @field_validator("data_entrega")
+    @classmethod
+    def validar_data_entrega(cls, valor: Optional[str]) -> Optional[str]:
+        if valor is None:
+            return None
+        from datetime import datetime
+
+        normalizado = valor.strip()
+        if not normalizado:
+            raise ValueError("data_entrega não pode ser vazia")
+        try:
+            datetime.fromisoformat(normalizado.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("data_entrega deve estar no formato ISO 8601") from exc
+        return normalizado
+
+
+class FluxoOrcamentoIntegraItem(BaseModel):
+    pedido_id: int
+    status: str
+    id_orcamento: Optional[int] = None
+    ops: List[int] = []
+    arquivos: List[dict] = []
+    mensagem: Optional[str] = None
+
+
+class FluxoOrcamentoIntegraResponse(BaseModel):
+    total: int
+    concluidos: int
+    ignorados: int
+    erros: int
+    resultados: List[FluxoOrcamentoIntegraItem]
+
+
+class PedidoIntegraResumo(BaseModel):
+    pedido_id: int
+    numero_pedido: Optional[str] = None
+    nome_cliente: Optional[str] = None
+    criado_em: Optional[str] = None
+    status_pedido: str
+    processamento_status: Optional[str] = None
+    id_orcamento: Optional[int] = None
+    ops: List[int] = []
+    total_produtos: int
+    produtos: List[str] = []
+    modelos_pendentes: int = 0
+    arquivos_pendentes: int = 0
+    elegivel: bool
+    motivo_bloqueio: Optional[str] = None
+
+
+class PedidoIntegraListResponse(BaseModel):
+    pedidos: List[PedidoIntegraResumo]
+    total: int
+    recebidos: int = 0
+    limit: int
+    offset: int
+
+
+class PedidoIntegraDashboardResumo(BaseModel):
+    recebidos: int
 
 
 class OrcamentoResponse(BaseModel):

@@ -255,12 +255,15 @@ class OrcamentoAPIService:
                 "id_forma_pagamento": orcamento.data.id_forma_pagamento,
                 "itens": [
                     {
+                        "pedido_id": item.pedido_id,
+                        "pedido_produto_id": item.pedido_produto_id,
                         "id_produto": item.id_produto,
                         "titulo": item.titulo or f"Produto {item.id_produto}",
                         "obs_producao": item.obs_producao,
                         "quantidade": item.quantidade,
                         "usar_listapreco": item.usar_listapreco,
                         "manter_estrutura_mod_produto": item.manter_estrutura_mod_produto,
+                        "arquivo_pdf_quantidade_paginas": item.arquivo_pdf_quantidade_paginas,
                         # ids_distribuicao é mantido no payload para rastreio interno,
                         # mas NÃO será enviado para a API Bremen
                         "ids_distribuicao": item.ids_distribuicao,
@@ -313,7 +316,12 @@ class OrcamentoAPIService:
                 "itens": [
                     {
                         k: v for k, v in item.items()
-                        if k not in ("ids_distribuicao", "id_distribuicao")  # Remover campos internos
+                        if k not in (
+                            "ids_distribuicao",
+                            "id_distribuicao",
+                            "pedido_id",
+                            "pedido_produto_id",
+                        )  # Remover campos internos
                     }
                     for item in payload["data"]["itens"]
                 ]
