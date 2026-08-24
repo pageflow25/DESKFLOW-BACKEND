@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import JSONResponse, FileResponse
 from sqlalchemy.orm import Session
@@ -10,6 +10,10 @@ from ..schemas.orcamento import (
     OrcamentoListResponse,
     GerarOrcamentoCompleto,
     LoteDisparoListResponse,
+    FluxoOrcamentoIntegraRequest,
+    FluxoOrcamentoIntegraResponse,
+    PedidoIntegraListResponse,
+    PedidoIntegraDashboardResumo,
 )
 from ..controllers.orcamento_controller import OrcamentoController
 from ..services.auth_service import verify_token
@@ -44,6 +48,41 @@ def verify_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
         )
     
     return token_data
+
+
+@router.post("/integra/processar", response_model=FluxoOrcamentoIntegraResponse)
+async def processar_orcamento_integra(
+    request: FluxoOrcamentoIntegraRequest,
+    db: Session = Depends(get_db),
+    user_data: dict = Depends(verify_admin),
+):
+    """Gera orçamento e OP dos pedidos integrados e organiza seus arquivos por OP."""
+    logger.info(
+        "Usuário %s iniciou fluxo integra para %s pedido(s)",
+        user_data.get("username"),
+        len(set(request.pedido_ids)),
+    )
+    return await OrcamentoController.processar_orcamento_integra(db, request)
+
+
+@router.get("/integra/pedidos", response_model=PedidoIntegraListResponse)
+async def listar_pedidos_integra(
+    limit: int = Query(100, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    _user_data: dict = Depends(verify_admin),
+):
+    """Lista pedidos integrados recebidos e seu histórico de processamento."""
+    return OrcamentoController.listar_pedidos_integra(db, limit, offset)
+
+
+@router.get("/integra/resumo", response_model=PedidoIntegraDashboardResumo)
+async def obter_resumo_pedidos_integra(
+    db: Session = Depends(get_db),
+    _user_data: dict = Depends(verify_admin),
+):
+    """Retorna a quantidade de pedidos integrados aguardando processamento."""
+    return OrcamentoController.obter_resumo_pedidos_integra(db)
 
 
 @router.post("/gerar", response_model=ProcessamentoResultado)

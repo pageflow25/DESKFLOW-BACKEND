@@ -17,10 +17,15 @@ from ..schemas.orcamento import (
     LoteDisparoOP,
     LoteDisparoDistribuicao,
     LoteDisparoOrcamento,
+    FluxoOrcamentoIntegraRequest,
+    FluxoOrcamentoIntegraResponse,
+    PedidoIntegraListResponse,
+    PedidoIntegraDashboardResumo,
 )
 from ..services.orcamento_service import OrcamentoService
 from ..services.orcamento_api_service import OrcamentoAPIService
 from ..services.download_bremen_service import DownloadBremenService
+from ..services.orcamento_integra_service import OrcamentoIntegraService
 from datetime import datetime
 
 
@@ -35,6 +40,25 @@ class OrcamentoController:
     """Controller para operações de orçamento"""
     _execucao_lock = asyncio.Lock()
     _execucoes_em_andamento: set[str] = set()
+
+    @staticmethod
+    def listar_pedidos_integra(
+        db: Session,
+        limit: int,
+        offset: int,
+    ) -> PedidoIntegraListResponse:
+        return OrcamentoIntegraService.listar_pedidos(db, limit, offset)
+
+    @staticmethod
+    def obter_resumo_pedidos_integra(db: Session) -> PedidoIntegraDashboardResumo:
+        return OrcamentoIntegraService.obter_resumo_dashboard(db)
+
+    @staticmethod
+    async def processar_orcamento_integra(
+        db: Session,
+        request: FluxoOrcamentoIntegraRequest,
+    ) -> FluxoOrcamentoIntegraResponse:
+        return await OrcamentoIntegraService().processar(db, request)
 
     @staticmethod
     def _agora_banco(db: Session) -> datetime:

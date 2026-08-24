@@ -27,6 +27,7 @@ from .lote_envio import LoteEnvio
 from .envio_item import EnvioItem
 from .bremen_tarefa import BremenTarefa
 from .bremen_especificacao_tarefa import BremenEspecificacaoTarefa
+from .orcamento_processamento import OrcamentoProcessamento
 
 __all__ = [
     "Usuario", 
@@ -57,4 +58,5 @@ __all__ = [
     "EnvioItem",
     "BremenTarefa",
     "BremenEspecificacaoTarefa",
+    "OrcamentoProcessamento",
 ]

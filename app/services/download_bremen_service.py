@@ -191,7 +191,7 @@ class DownloadBremenService:
         url_principal = arquivo_principal.caminho_remoto or arquivo_principal.arquivo
         if url_principal:
             destino_principal = os.path.join(pasta_op, arquivo_principal.nome)
-            tamanho = await self._baixar_arquivo(url_principal, destino_principal)
+            tamanho = await self.baixar_arquivo(url_principal, destino_principal)
             
             # Registrar no banco
             registro = self._salvar_download(
@@ -221,7 +221,7 @@ class DownloadBremenService:
                 url_complementar = arquivo_complementar.caminho_remoto or arquivo_complementar.arquivo
                 if url_complementar:
                     destino_complementar = os.path.join(pasta_op, arquivo_complementar.nome)
-                    tamanho_comp = await self._baixar_arquivo(url_complementar, destino_complementar)
+                    tamanho_comp = await self.baixar_arquivo(url_complementar, destino_complementar)
                     
                     # Registrar no banco
                     registro_comp = self._salvar_download(
@@ -287,7 +287,7 @@ class DownloadBremenService:
 
         return row["escola_nome"] if row else None
     
-    async def _baixar_arquivo(self, url: str, destino: str) -> int:
+    async def baixar_arquivo(self, url: str, destino: str) -> int:
         """
         Baixa arquivo do Vercel Blob Storage e salva localmente com retry.
         
@@ -334,6 +334,10 @@ class DownloadBremenService:
                     await asyncio.sleep(RETRY_DELAY_SECONDS * tentativa)
         
         raise last_error if last_error else Exception(f"Falha ao baixar {url}")
+
+    async def _baixar_arquivo(self, url: str, destino: str) -> int:
+        """Compatibilidade com chamadas antigas; prefira ``baixar_arquivo``."""
+        return await self.baixar_arquivo(url, destino)
     
     def _salvar_download(
         self,
