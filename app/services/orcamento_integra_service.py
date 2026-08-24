@@ -320,6 +320,82 @@ class OrcamentoIntegraService:
         return row is not None
 
     @staticmethod
+    def _atualizar_status_com_historico(
+        db: Session,
+        pedido_id: int,
+        id_orcamento: int,
+    ) -> bool:
+        """Atualiza o pedido e registra a transição na mesma instrução SQL."""
+        historico = db.execute(
+            text(
+                """
+                WITH status_ids AS (
+                    SELECT
+                        (
+                            SELECT id
+                            FROM integra_status_pedidos
+                            WHERE LOWER(nome) = LOWER('Pedido recebido')
+                              AND ativo = TRUE
+                            ORDER BY id
+                            LIMIT 1
+                        ) AS anterior_id,
+                        (
+                            SELECT id
+                            FROM integra_status_pedidos
+                            WHERE LOWER(nome) = LOWER('Em produção')
+                              AND ativo = TRUE
+                            ORDER BY id
+                            LIMIT 1
+                        ) AS novo_id
+                ),
+                pedido_atualizado AS (
+                    UPDATE integra_pedidos AS ip
+                    SET status_id = status_ids.novo_id,
+                        atualizado_em = CURRENT_TIMESTAMP
+                    FROM status_ids
+                    WHERE ip.id = :pedido_id
+                      AND status_ids.anterior_id IS NOT NULL
+                      AND status_ids.novo_id IS NOT NULL
+                      AND ip.status_id = status_ids.anterior_id
+                    RETURNING ip.id
+                )
+                INSERT INTO integra_historico_pedidos (
+                    pedido_id,
+                    status_anterior_id,
+                    status_novo_id,
+                    observacoes,
+                    tipo_acao,
+                    dados_adicionais,
+                    criado_em,
+                    usuario_id,
+                    imagem_url
+                )
+                SELECT
+                    pedido_atualizado.id,
+                    status_ids.anterior_id,
+                    status_ids.novo_id,
+                    'Status atualizado automaticamente após aprovação do orçamento e geração da OP',
+                    'sistema',
+                    jsonb_build_object(
+                        'origem', 'deskflow_orcamento_integra',
+                        'id_orcamento', CAST(:id_orcamento AS BIGINT)
+                    ),
+                    CURRENT_TIMESTAMP,
+                    NULL,
+                    NULL
+                FROM pedido_atualizado
+                CROSS JOIN status_ids
+                RETURNING id
+                """
+            ),
+            {
+                "pedido_id": pedido_id,
+                "id_orcamento": id_orcamento,
+            },
+        ).first()
+        return historico is not None
+
+    @staticmethod
     def _extrair_ops(resposta: Dict[str, Any]) -> List[int]:
         data = resposta.get("data", [])
         registros = data if isinstance(data, list) else [data]
@@ -545,27 +621,11 @@ class OrcamentoIntegraService:
                 if len(ops) != len(estado["itens_orcamento"] or []):
                     raise ValueError("A aprovação não retornou exatamente uma OP para cada produto")
 
-                atualizacao = db.execute(
-                    text(
-                        """
-                        UPDATE integra_pedidos
-                        SET status_id = (
-                                SELECT id FROM integra_status_pedidos
-                                WHERE LOWER(nome) = LOWER('Em produção') AND ativo = TRUE
-                                ORDER BY id LIMIT 1
-                            ),
-                            atualizado_em = CURRENT_TIMESTAMP
-                        WHERE id = :pedido_id
-                          AND status_id = (
-                                SELECT id FROM integra_status_pedidos
-                                WHERE LOWER(nome) = LOWER('Pedido recebido') AND ativo = TRUE
-                                ORDER BY id LIMIT 1
-                            )
-                        """
-                    ),
-                    {"pedido_id": pedido_id},
-                )
-                if atualizacao.rowcount != 1:
+                if not self._atualizar_status_com_historico(
+                    db,
+                    pedido_id,
+                    estado["id_orcamento"],
+                ):
                     db.rollback()
                     raise ValueError("O pedido deixou de estar como 'Pedido recebido' durante o processamento")
                 processamento_atualizado = db.execute(
