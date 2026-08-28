@@ -433,6 +433,58 @@ class OrcamentoIntegraService:
                 )
         return False
 
+    async def _publicar_pasta(self, origem: str, destino: str, tentativas: int = 3) -> None:
+        """Move a pasta preparada para o destino final.
+
+        ``os.rename`` é atômico e é sempre a primeira tentativa. Em
+        compartilhamentos de rede a renomeação do diretório pode ser negada
+        (WinError 5) mesmo quando criar e escrever arquivos é permitido, além de
+        falhar temporariamente enquanto o servidor mantém handles dos arquivos
+        recém-gravados. Por isso a renomeação é repetida e, se ainda assim
+        falhar, a pasta é publicada arquivo a arquivo.
+        """
+        ultimo_erro: Optional[OSError] = None
+        for tentativa in range(1, tentativas + 1):
+            try:
+                os.rename(origem, destino)
+                return
+            except FileExistsError:
+                raise
+            except OSError as exc:
+                ultimo_erro = exc
+                if tentativa < tentativas:
+                    await asyncio.sleep(0.5 * tentativa)
+
+        if os.path.exists(destino):
+            raise FileExistsError(
+                f"A pasta {destino} passou a existir durante a publicação"
+            )
+
+        logger.warning(
+            "Não foi possível renomear %s para %s (%s); publicando arquivo a arquivo",
+            origem,
+            destino,
+            ultimo_erro,
+        )
+        publicados: List[str] = []
+        try:
+            os.makedirs(destino)
+            for nome in sorted(os.listdir(origem)):
+                alvo = os.path.join(destino, nome)
+                shutil.copy2(os.path.join(origem, nome), alvo)
+                publicados.append(alvo)
+        except OSError as exc:
+            for arquivo in reversed(publicados):
+                try:
+                    os.remove(arquivo)
+                except OSError:
+                    logger.warning("Não foi possível remover o arquivo parcial %s", arquivo)
+            try:
+                os.rmdir(destino)
+            except OSError:
+                logger.warning("Não foi possível remover a pasta parcial %s", destino)
+            raise RuntimeError(f"Falha ao publicar a pasta {destino}: {exc}") from exc
+
     async def _organizar_arquivos(
         self,
         db: Session,
@@ -512,7 +564,7 @@ class OrcamentoIntegraService:
                         raise ValueError(f"Arquivo {tipo} do produto {produto['id']} está vazio")
                     arquivos_stage.append(destino)
 
-                os.replace(pasta_stage, pasta_final)
+                await self._publicar_pasta(pasta_stage, pasta_final)
                 publicadas.append(pasta_final)
                 resultado.append(
                     {
