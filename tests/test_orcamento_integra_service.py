@@ -321,6 +321,89 @@ class OrcamentoIntegraServiceTest(unittest.IsolatedAsyncioTestCase):
                 ["arquivo_pdf.pdf", "design_capa_frente.png", "design_capa_verso.png"],
             )
 
+    async def test_publica_arquivo_a_arquivo_quando_a_rede_nega_renomear(self):
+        produtos = [
+            {
+                "id": 2467,
+                "arquivo_pdf": "https://cdn.exemplo/miolo.pdf",
+                "design_capa_frente": "https://cdn.exemplo/frente.png",
+                "design_capa_verso": "https://cdn.exemplo/verso.png",
+            }
+        ]
+        with tempfile.TemporaryDirectory() as pasta:
+            anterior = integra_module.settings.DOWNLOAD_BASE_PATH
+            integra_module.settings.DOWNLOAD_BASE_PATH = pasta
+            try:
+                service = OrcamentoIntegraService(
+                    api_service=AsyncMock(),
+                    download_service=_Downloader(),
+                )
+                with patch.object(
+                    integra_module.os,
+                    "rename",
+                    side_effect=PermissionError(13, "Acesso negado"),
+                ) as rename, patch.object(
+                    integra_module.asyncio, "sleep", AsyncMock()
+                ):
+                    resultado = await service._organizar_arquivos(
+                        _DbProdutos(produtos),
+                        pedido_id=4073,
+                        ops=[111724],
+                    )
+            finally:
+                integra_module.settings.DOWNLOAD_BASE_PATH = anterior
+
+            pasta_op = os.path.join(pasta, "111724")
+            self.assertEqual(rename.call_count, 3)
+            self.assertEqual(
+                sorted(os.listdir(pasta_op)),
+                ["arquivo_pdf.pdf", "design_capa_frente.png", "design_capa_verso.png"],
+            )
+            self.assertEqual(
+                sorted(resultado[0]["arquivos"]),
+                [os.path.join(pasta_op, nome) for nome in sorted(os.listdir(pasta_op))],
+            )
+            self.assertEqual(os.listdir(pasta), ["111724"])
+
+    async def test_nao_deixa_pasta_parcial_quando_a_publicacao_falha(self):
+        produtos = [
+            {
+                "id": 2467,
+                "arquivo_pdf": "https://cdn.exemplo/miolo.pdf",
+                "design_capa_frente": "https://cdn.exemplo/frente.png",
+                "design_capa_verso": "https://cdn.exemplo/verso.png",
+            }
+        ]
+        with tempfile.TemporaryDirectory() as pasta:
+            anterior = integra_module.settings.DOWNLOAD_BASE_PATH
+            integra_module.settings.DOWNLOAD_BASE_PATH = pasta
+            try:
+                service = OrcamentoIntegraService(
+                    api_service=AsyncMock(),
+                    download_service=_Downloader(),
+                )
+                with patch.object(
+                    integra_module.os,
+                    "rename",
+                    side_effect=PermissionError(13, "Acesso negado"),
+                ), patch.object(
+                    integra_module.shutil,
+                    "copy2",
+                    side_effect=PermissionError(13, "Acesso negado"),
+                ), patch.object(
+                    integra_module.asyncio, "sleep", AsyncMock()
+                ):
+                    with self.assertRaisesRegex(RuntimeError, "Falha ao publicar a pasta"):
+                        await service._organizar_arquivos(
+                            _DbProdutos(produtos),
+                            pedido_id=4073,
+                            ops=[111724],
+                        )
+            finally:
+                integra_module.settings.DOWNLOAD_BASE_PATH = anterior
+
+            self.assertEqual(os.listdir(pasta), [])
+
     async def test_falha_na_limpeza_nao_mascara_erro_do_download(self):
         produtos = [
             {
