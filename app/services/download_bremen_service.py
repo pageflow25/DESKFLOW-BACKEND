@@ -13,6 +13,7 @@ from ..models.download_bremen import DownloadBremen
 from ..models.aprovacao_api import AprovacaoAPI
 from ..models.distribuicao_material import DistribuicaoMaterial
 from ..models.arquivo_pdf import ArquivoPdf
+from ..models.pedido_distribuicao_arquivo import PedidoDistribuicaoArquivo
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -114,47 +115,52 @@ class DownloadBremenService:
     ) -> Dict[str, Any]:
         """
         Processa download de arquivos para uma OP específica.
-        
+
         Fluxo:
-        1. Busca a distribuição de material e seu arquivo_pdf
+        1. Busca a distribuição e TODOS os materiais que ela entrega
+           (pedido_distribuicao_arquivos — normalmente 1, ou 2 quando tem
+           capa + miolo; o vínculo já vem pronto do banco, sem precisar
+           pareamento por nome/coluna `pares`)
         2. Cria a pasta da OP
-        3. Baixa o arquivo principal (miolo ou capa)
-        4. Verifica se existe arquivo complementar (capa ↔ miolo)
-        5. Registra no banco (downloads_bremen)
-        
+        3. Baixa cada arquivo vinculado
+        4. Registra no banco (downloads_bremen)
+
         Args:
             db: Sessão do banco de dados
             aprovacao: Registro de aprovação com id_ops e distribuicao_material_id
-            
+
         Returns:
             Dict com detalhes do processamento da OP
         """
         op_id = aprovacao.id_ops
         dist_id = aprovacao.distribuicao_material_id
-        
+
         logger.info(f"Processando OP {op_id} (distribuição {dist_id})")
-        
-        # 1. Buscar a distribuição e seu arquivo_pdf
+
+        # 1. Buscar a distribuição e todos os arquivos que ela entrega
         distribuicao = db.query(DistribuicaoMaterial).filter(
             DistribuicaoMaterial.id == dist_id
         ).first()
-        
+
         if not distribuicao:
             raise ValueError(f"Distribuição {dist_id} não encontrada")
-        
-        if not distribuicao.arquivo_pdf_id:
-            raise ValueError(f"Distribuição {dist_id} não tem arquivo_pdf_id vinculado")
-        
-        arquivo_principal = db.query(ArquivoPdf).filter(
-            ArquivoPdf.id == distribuicao.arquivo_pdf_id
-        ).first()
-        
-        if not arquivo_principal:
-            raise ValueError(f"Arquivo PDF {distribuicao.arquivo_pdf_id} não encontrado")
-        
+
+        materiais = (
+            db.query(ArquivoPdf)
+            .join(PedidoDistribuicaoArquivo, PedidoDistribuicaoArquivo.arquivo_pdf_id == ArquivoPdf.id)
+            .filter(PedidoDistribuicaoArquivo.distribuicao_material_id == dist_id)
+            .order_by(ArquivoPdf.tipo_arquivo)
+            .all()
+        )
+
+        if not materiais:
+            raise ValueError(f"Distribuição {dist_id} não tem arquivo vinculado")
+
+        arquivo_principal = materiais[0]
+
         logger.info(
-            f"OP {op_id}: arquivo principal id={arquivo_principal.id}, "
-            f"tipo={arquivo_principal.tipo_arquivo}, nome={arquivo_principal.nome}"
+            f"OP {op_id}: {len(materiais)} arquivo(s) vinculado(s) "
+            f"({', '.join(f'{m.tipo_arquivo}:{m.nome}' for m in materiais)})"
         )
         
         # 2. Criar a pasta da OP
@@ -187,70 +193,31 @@ class DownloadBremenService:
         
         arquivos_baixados = 0
         registros_salvos = []
-        
-        # 3. Baixar o arquivo principal
-        url_principal = arquivo_principal.caminho_remoto or arquivo_principal.arquivo
-        if url_principal:
-            destino_principal = os.path.join(pasta_op, arquivo_principal.nome)
-            tamanho = await self.baixar_arquivo(url_principal, destino_principal)
-            
-            # Registrar no banco
+
+        # 3. Baixar cada arquivo vinculado à distribuição
+        for arquivo in materiais:
+            url = arquivo.caminho_remoto or arquivo.arquivo
+            if not url:
+                logger.warning(f"Arquivo {arquivo.id} ({arquivo.nome}) sem URL de download")
+                continue
+
+            destino = os.path.join(pasta_op, arquivo.nome)
+            tamanho = await self.baixar_arquivo(url, destino)
+
             registro = self._salvar_download(
                 db=db,
                 distribuicao_material_id=dist_id,
                 id_ops=op_id,
-                arquivo_pdf_id=arquivo_principal.id,
-                tipo_arquivo=arquivo_principal.tipo_arquivo,
-                caminho_local=destino_principal,
+                arquivo_pdf_id=arquivo.id,
+                tipo_arquivo=arquivo.tipo_arquivo,
+                caminho_local=destino,
                 tamanho=tamanho
             )
             registros_salvos.append(registro)
             arquivos_baixados += 1
-            
-            logger.info(f"✅ Baixado: {arquivo_principal.nome} ({tamanho} bytes)")
-        else:
-            logger.warning(f"Arquivo principal {arquivo_principal.id} sem URL de download")
-        
-        # 4. Verificar se existe arquivo complementar (capa ↔ miolo)
-        #    CORREÇÃO: usa coluna `pares` para encontrar o par correto
-        #    (antes filtrava apenas por formulario_id, misturando pares diferentes)
-        if arquivo_principal.formulario_id:
-            from .pareamento_pdf_service import buscar_par_complementar
-            arquivo_complementar = buscar_par_complementar(db, arquivo_principal)
-            
-            if arquivo_complementar:
-                url_complementar = arquivo_complementar.caminho_remoto or arquivo_complementar.arquivo
-                if url_complementar:
-                    destino_complementar = os.path.join(pasta_op, arquivo_complementar.nome)
-                    tamanho_comp = await self.baixar_arquivo(url_complementar, destino_complementar)
-                    
-                    # Registrar no banco
-                    registro_comp = self._salvar_download(
-                        db=db,
-                        distribuicao_material_id=dist_id,
-                        id_ops=op_id,
-                        arquivo_pdf_id=arquivo_complementar.id,
-                        tipo_arquivo=arquivo_complementar.tipo_arquivo,
-                        caminho_local=destino_complementar,
-                        tamanho=tamanho_comp
-                    )
-                    registros_salvos.append(registro_comp)
-                    arquivos_baixados += 1
-                    
-                    logger.info(
-                        f"✅ Baixado complementar ({arquivo_complementar.tipo_arquivo}): "
-                        f"{arquivo_complementar.nome} ({tamanho_comp} bytes)"
-                    )
-                else:
-                    logger.warning(
-                        f"Arquivo complementar {arquivo_complementar.id} sem URL de download"
-                    )
-            else:
-                logger.debug(
-                    f"OP {op_id}: sem arquivo complementar "
-                    f"no formulário {arquivo_principal.formulario_id}"
-                )
-        
+
+            logger.info(f"✅ Baixado ({arquivo.tipo_arquivo}): {arquivo.nome} ({tamanho} bytes)")
+
         db.commit()
         
         return {

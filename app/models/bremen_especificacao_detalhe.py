@@ -8,7 +8,9 @@ class BremenEspecificacaoDetalhe(Base):
     Representa os detalhes de uma especificação através de perguntas e respostas.
     Relaciona especificacoes_form com bremen_perguntas e bremen_respostas.
     """
-    __tablename__ = "bremen_especificacao_detalhes"
+    # Tabela renomeada de bremen_especificacao_detalhes para pedido_pergunta_resposta
+    # (migração 20260831130000 do PAGEFLOW) — mesmas colunas, só o nome mudou.
+    __tablename__ = "pedido_pergunta_resposta"
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     especificacao_id = Column(
@@ -52,7 +54,7 @@ class BremenEspecificacaoDetalhe(Base):
     # Índice único para garantir uma resposta por pergunta por especificação
     __table_args__ = (
         Index(
-            'idx_bremen_especificacao_detalhes_unique',
+            'idx_pedido_pergunta_resposta_unique',
             'especificacao_id',
             'pergunta_id',
             unique=True

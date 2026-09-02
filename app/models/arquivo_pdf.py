@@ -34,3 +34,8 @@ class ArquivoPdf(Base):
         back_populates="arquivos",
         foreign_keys=[id_componente]
     )
+
+    # Entregas (pedido_distribuicao_arquivos) que carregam este arquivo —
+    # normalmente 1, mas o mesmo arquivo pode ser reaproveitado em mais de
+    # uma distribuição (ex.: mesmo PDF do backup usado por unidades diferentes).
+    entregas = relationship("PedidoDistribuicaoArquivo", back_populates="arquivo_pdf")
