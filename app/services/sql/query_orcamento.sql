@@ -1,12 +1,24 @@
 -- Query para geração de orçamentos por unidade escolar
--- Parâmetros: :escola_id, :ids_produtos, :datas_saida, :divisoes_logistica, :dias_uteis_filtro, :ids_formularios, :status_ids, :ids_unidades
+-- Parâmetros: :escola_id, :ids_produtos, :datas_saida, :divisoes_logistica, :dias_uteis_filtro, :ids_formularios, :status_ids, :ids_unidades, :ids_arquivos
+--
+-- Reescrita para a nova arquitetura de distribuição (migrations 20260831120000 e
+-- 20260831130000 do PAGEFLOW):
+--   - pedido_distribuicoes agora é 1 linha por item comercial entregue a um
+--     destino (unidade/turma) — não existe mais 1 linha por arquivo/componente,
+--     então quantidade nunca vem duplicada e não precisa mais ser filtrada por
+--     "miolo" pra evitar contagem dupla.
+--   - pedido_distribuicao_arquivos vincula 1+ arquivos (pedido_arquivos_pdf) a
+--     cada distribuição, já carregando o id_componente correto — não precisa
+--     mais adivinhar qual PDF é capa/miolo por `pares`/`item_pedido_id` com
+--     DISTINCT ON e prioridade de ORDER BY.
+--   - bremen_especificacao_detalhes foi renomeada para pedido_pergunta_resposta.
 
 WITH parametros AS (
     SELECT
-        :escola_id AS escola_id,                 
-        CAST(:ids_produtos AS int[]) AS ids_produtos, 
+        :escola_id AS escola_id,
+        CAST(:ids_produtos AS int[]) AS ids_produtos,
         CAST(:datas_saida AS date[]) AS datas_saida,
-        CAST(:divisoes_logistica AS text[]) AS divisoes_logistica, 
+        CAST(:divisoes_logistica AS text[]) AS divisoes_logistica,
         CAST(:dias_uteis_filtro AS int[]) AS dias_uteis_filtro,
         CAST(:ids_formularios AS int[]) AS ids_formularios,
         CAST(:status_ids AS int[]) AS status_ids,
@@ -22,7 +34,7 @@ unidades_filtradas AS (
         ue.forma_pagamento,
         ue.escola_id,
         ue.client_id_venda,
-        ue.vendedor_id  -- switched from vendedor_id_venda to vendedor_id
+        ue.vendedor_id
     FROM escola_unidades ue
     CROSS JOIN parametros p
     WHERE ue.escola_id = p.escola_id
@@ -31,103 +43,129 @@ unidades_filtradas AS (
     AND (p.ids_unidades IS NULL OR ue.id = ANY(p.ids_unidades))
 ),
 
-especificacoes_unidade AS (
-    SELECT DISTINCT
+-- Cabeçalho: já é 1 linha por item comercial entregue a uma unidade/turma.
+distribuicoes AS (
+    SELECT
+        dm.id AS distribuicao_id,
         uf.id AS unidade_id,
         uf.cliente_id,
-        ef.id AS especificacao_id,
-        ef.id_produto,
-        ef.corfrente,
-        ef.corverso,
-        bt.idgruposubstratoimpressao,
-        COALESCE(bt.altura, NULLIF(ef.altura, '')::numeric) AS altura_mm,
-        COALESCE(bt.largura, NULLIF(ef.largura, '')::numeric) AS largura_mm,
-        NULLIF(ef.gramatura_miolo, '') AS gramatura_miolo,
-        bg.gramatura AS gramatura_catalogo,
-        bg.unidade_medida AS unidade_gramatura,
+        uf.client_id_venda,
+        uf.vendedor_id,
+        uf.forma_pagamento,
+        uf.nome AS nome_unidade,
+        dm.formulario_id,
+        dm.pedido_item_carrinho_id,
         dm.quantidade,
-        dm.data_saida,
-        
-        dm.id AS id_distribuicao, 
         dm.id_turma,
         t.nome AS nome_turma,
-        t.area AS area_turma,
-        
-        ap.pares,
-        ap.formulario_id,
-        ap.nome AS arquivo_nome,
-        ap.tipo_arquivo,
-        ap.id_componente,
-        ap.paginas,
-        bi.frente_verso,
-        bi."categoria_Prod"
+        t.area AS area_turma
     FROM unidades_filtradas uf
     CROSS JOIN parametros p
     JOIN pedido_distribuicoes dm ON dm.unidade_escolar_id = uf.id
-    JOIN pedido_especificacoes ef ON ef.id = dm.especificacao_form_id
     LEFT JOIN escola_turmas t ON t.id = dm.id_turma
-    LEFT JOIN bremen_gramatura bg ON bg.id = ef.id_gramatura
-    LEFT JOIN bremen_tamanho_papel bt ON bt.id = ef.id_papel
-    LEFT JOIN pedido_arquivos_pdf ap ON ap.item_pedido_id = ef.id
-    LEFT JOIN bremen_itens bi ON bi.id_produto = ef.id_produto
     WHERE dm.quantidade > 0
-        AND (p.ids_produtos IS NULL OR ef.id_produto = ANY(p.ids_produtos))
+        AND dm.status_id = ANY(p.status_ids)
         AND (
             p.datas_saida IS NULL
             OR dm.data_saida::date = ANY(p.datas_saida)
             OR dm.data_saida IS NULL
-        ) 
-        AND dm.status_id = ANY(p.status_ids)
-        AND (p.ids_formularios IS NULL OR ap.formulario_id = ANY(p.ids_formularios))
-        AND (p.ids_arquivos IS NULL OR ap.id = ANY(p.ids_arquivos))
+        )
+        AND (p.ids_formularios IS NULL OR dm.formulario_id = ANY(p.ids_formularios))
+        AND (p.ids_produtos IS NULL OR EXISTS (
+            SELECT 1
+            FROM pedido_distribuicao_arquivos pda
+            JOIN pedido_especificacoes ef ON ef.id = pda.especificacao_form_id
+            WHERE pda.distribuicao_material_id = dm.id
+              AND ef.id_produto = ANY(p.ids_produtos)
+        ))
+        AND (p.ids_arquivos IS NULL OR EXISTS (
+            SELECT 1
+            FROM pedido_distribuicao_arquivos pda
+            WHERE pda.distribuicao_material_id = dm.id
+              AND pda.arquivo_pdf_id = ANY(p.ids_arquivos)
+        ))
 ),
 
+-- Materiais (arquivos) de cada distribuição — 1 linha por pedido_distribuicao_arquivos,
+-- já com o componente Bremen resolvido de forma determinística.
+materiais AS (
+    SELECT
+        pda.distribuicao_material_id AS distribuicao_id,
+        pda.arquivo_pdf_id,
+        pda.especificacao_form_id,
+        pda.id_componente,
+        ef.id_produto,
+        ef.corfrente,
+        ef.corverso,
+        ef.gramatura_miolo,
+        ap.nome AS arquivo_nome,
+        ap.paginas,
+        bg.gramatura AS gramatura_catalogo,
+        bt.idgruposubstratoimpressao,
+        COALESCE(bt.altura, NULLIF(ef.altura, '')::numeric) AS altura_mm,
+        COALESCE(bt.largura, NULLIF(ef.largura, '')::numeric) AS largura_mm,
+        bi.descricao AS produto_descricao,
+        bi.sub_grupo,
+        bi.frente_verso,
+        bi."categoria_Prod",
+        bc.descricao AS componente_descricao,
+        COALESCE(bc.is_capa, FALSE) AS is_capa,
+        COALESCE(bc.is_miolo, FALSE) AS is_miolo
+    FROM pedido_distribuicao_arquivos pda
+    JOIN pedido_especificacoes ef ON ef.id = pda.especificacao_form_id
+    JOIN pedido_arquivos_pdf ap ON ap.id = pda.arquivo_pdf_id
+    JOIN bremen_itens bi ON bi.id_produto = ef.id_produto
+    LEFT JOIN bremen_componentes bc ON bc.id_componente = pda.id_componente
+    LEFT JOIN bremen_gramatura bg ON bg.id = ef.id_gramatura
+    LEFT JOIN bremen_tamanho_papel bt ON bt.id = ef.id_papel
+),
+
+-- Agrega os metadados do item comercial a partir dos seus materiais.
+-- Uma distribuição = um item no orçamento; nunca precisa de GROUP BY por
+-- chave heurística porque dm.id já é a chave certa.
 itens_produto AS (
     SELECT
-        eu.unidade_id,
-        eu.cliente_id,
-        eu.id_turma,
-        eu.nome_turma,
-        -- Inclui id_turma na chave de agrupamento para gerar um item por turma
-        COALESCE(eu.pares::text, eu.especificacao_id::text)
-            || '|t:' || COALESCE(eu.id_turma::text, 'null') AS chave_agrupamento,
-        eu.pares,
-        eu.formulario_id,
-        MAX(eu.especificacao_id) AS especificacao_id,
-        MAX(eu.id_produto) AS id_produto,
-        (SELECT uf.client_id_venda FROM unidades_filtradas uf WHERE uf.id = eu.unidade_id LIMIT 1) AS client_id_venda,
-        (SELECT uf.vendedor_id FROM unidades_filtradas uf WHERE uf.id = eu.unidade_id LIMIT 1) AS vendedor_id,
-        (SELECT uf.forma_pagamento FROM unidades_filtradas uf WHERE uf.id = eu.unidade_id LIMIT 1) AS forma_pagamento_venda,
-        (SELECT uf.nome FROM unidades_filtradas uf WHERE uf.id = eu.unidade_id LIMIT 1) AS nome_unidade,
-        
-        -- PEGA O ID DA DISTRIBUIÇÃO POR TIPO DE COMPONENTE
-        MAX(CASE WHEN LOWER(eu.tipo_arquivo) = 'miolo' THEN eu.id_distribuicao END) AS id_distribuicao_miolo,
-        MAX(CASE WHEN LOWER(eu.tipo_arquivo) = 'capa'  THEN eu.id_distribuicao END) AS id_distribuicao_capa,
-        MAX(eu.id_distribuicao) AS id_distribuicao,
-        
+        d.distribuicao_id,
+        d.unidade_id,
+        d.cliente_id,
+        d.client_id_venda,
+        d.vendedor_id,
+        d.forma_pagamento,
+        d.nome_unidade,
+        d.formulario_id,
+        d.pedido_item_carrinho_id,
+        d.quantidade AS quantidade_total,
+        d.id_turma,
+        d.nome_turma,
+        d.area_turma,
+        MAX(mat.id_produto) AS id_produto,
+        -- Prefere a especificação do miolo pra perguntas/tarefas de escopo geral do item.
+        COALESCE(
+            MAX(CASE WHEN mat.is_miolo THEN mat.especificacao_form_id END),
+            MAX(mat.especificacao_form_id)
+        ) AS especificacao_id_geral,
         (
             CASE
-                WHEN eu.id_turma IS NOT NULL AND NULLIF(TRIM(eu.nome_turma), '') IS NOT NULL THEN
-                    '(*' || TRIM(eu.nome_turma) || ') - '
+                WHEN d.id_turma IS NOT NULL AND NULLIF(TRIM(d.nome_turma), '') IS NOT NULL THEN
+                    '(*' || TRIM(d.nome_turma) || ') - '
                     || UPPER(TRIM(REGEXP_REPLACE(REGEXP_REPLACE(
                         COALESCE(
-                            MAX(CASE WHEN LOWER(eu.tipo_arquivo) = 'miolo' THEN eu.arquivo_nome END),
-                            MAX(eu.arquivo_nome)
+                            MAX(CASE WHEN mat.is_miolo THEN mat.arquivo_nome END),
+                            MAX(mat.arquivo_nome)
                         ), '\.pdf$', '', 'i'), '[_-]+', ' ', 'g')))
                     || ' - (#' || MAX(form.id) || ')'
                 ELSE
                     UPPER(TRIM(REGEXP_REPLACE(REGEXP_REPLACE(
                         COALESCE(
-                            MAX(CASE WHEN LOWER(eu.tipo_arquivo) = 'miolo' THEN eu.arquivo_nome END),
-                            MAX(eu.arquivo_nome)
+                            MAX(CASE WHEN mat.is_miolo THEN mat.arquivo_nome END),
+                            MAX(mat.arquivo_nome)
                         ), '\.pdf$', '', 'i'), '[_-]+', ' ', 'g')))
                     || ' (#' || MAX(form.id) || ')'
             END
         ) AS nome_arquivo,
-        MAX(eu.altura_mm) AS altura,
-        MAX(eu.largura_mm) AS largura,
-        MAX(eu.gramatura_miolo) AS gramatura_miolo,
-        MAX(eu.quantidade) AS quantidade_total,
+        MAX(mat.altura_mm) AS altura,
+        MAX(mat.largura_mm) AS largura,
+        MAX(mat.gramatura_miolo) AS gramatura_miolo,
         MAX(form.observacoes) AS obs_producao,
         MAX(TO_CHAR(form.data_entrega, 'DD/MM/YYYY')) AS data_entrega_pedido,
         -- Campos extras para obs_producao condicional (cliente_id = 151)
@@ -135,161 +173,56 @@ itens_produto AS (
         MAX(form.criado_em::text) AS data_pedido,
         MAX(u.nome) AS solicitante_nome,
         MAX(u.email) AS solicitante_email,
-        MAX(eu.area_turma) AS area_turma,
         COALESCE(
-            MAX(CASE WHEN LOWER(eu.tipo_arquivo) = 'miolo' THEN eu.arquivo_nome END),
-            MAX(eu.arquivo_nome)
+            MAX(CASE WHEN mat.is_miolo THEN mat.arquivo_nome END),
+            MAX(mat.arquivo_nome)
         ) AS arquivo_nome_raw,
         CASE
-            WHEN (MAX(eu.paginas) > 2 AND UPPER(MAX(eu.frente_verso)) = 'FV' AND UPPER(MAX(eu."categoria_Prod")) = 'PROVA')
-              OR (MAX(eu.paginas) > 1 AND UPPER(MAX(eu.frente_verso)) = 'SF' AND UPPER(MAX(eu."categoria_Prod")) = 'PROVA')
+            WHEN (MAX(mat.paginas) > 2 AND UPPER(MAX(mat.frente_verso)) = 'FV' AND UPPER(MAX(mat."categoria_Prod")) = 'PROVA')
+              OR (MAX(mat.paginas) > 1 AND UPPER(MAX(mat.frente_verso)) = 'SF' AND UPPER(MAX(mat."categoria_Prod")) = 'PROVA')
             THEN 'normal'
             ELSE 'separado'
         END AS tipo_agrupamento
-    FROM especificacoes_unidade eu
-    JOIN pedido_formularios form ON form.id = eu.formulario_id
+    FROM distribuicoes d
+    JOIN materiais mat ON mat.distribuicao_id = d.distribuicao_id
+    JOIN pedido_formularios form ON form.id = d.formulario_id
     LEFT JOIN usuarios u ON u.id = form.usuario_id
     GROUP BY
-        eu.unidade_id,
-        eu.cliente_id,
-        eu.id_turma,
-        eu.nome_turma,
-        COALESCE(eu.pares::text, eu.especificacao_id::text)
-            || '|t:' || COALESCE(eu.id_turma::text, 'null'),
-        eu.pares,
-        eu.formulario_id
-),
-
-itens AS (
-    SELECT DISTINCT
-        eu.pares,
-        eu.formulario_id,
-        eu.especificacao_id,
-        eu.id_produto,
-        eu.corfrente,
-        eu.corverso,
-        eu.idgruposubstratoimpressao,
-        bi.descricao,
-        bi.sub_grupo,
-        bi."categoria_Prod",
-        eu.altura_mm,
-        eu.largura_mm,
-        eu.gramatura_miolo,
-        eu.gramatura_catalogo,
-        eu.unidade_gramatura
-    FROM especificacoes_unidade eu
-    JOIN bremen_itens bi ON bi.id_produto = eu.id_produto
-),
-
-componentes AS (
-    SELECT DISTINCT
-        i.pares,
-        i.formulario_id,
-        i.especificacao_id,
-        i.id_produto,
-        i.corfrente,
-        i.corverso,
-        i.idgruposubstratoimpressao,
-        i.sub_grupo,
-        i."categoria_Prod",
-        bc.id AS componente_id,
-        bc.id_componente,
-        bc.descricao,
-        bc.is_capa,
-        bc.is_miolo,
-        ROUND(i.altura_mm::numeric / 10, 2) AS altura,
-        ROUND(i.largura_mm::numeric / 10, 2) AS largura,
-        i.gramatura_miolo,
-        i.gramatura_catalogo,
-        CASE
-            WHEN (bc.is_capa IS TRUE OR LOWER(COALESCE(bc.descricao, '')) LIKE '%%capa%%')
-             AND (bc.is_miolo IS TRUE OR LOWER(COALESCE(bc.descricao, '')) LIKE '%%miolo%%') THEN (
-                SELECT COALESCE(ap_pag.paginas, 0)
-                FROM pedido_arquivos_pdf ap_pag
-                WHERE ap_pag.id_componente = bc.id_componente
-                  AND (
-                      (i.pares IS NOT NULL AND ap_pag.pares = i.pares AND ap_pag.formulario_id = i.formulario_id)
-                      OR (i.pares IS NULL AND ap_pag.item_pedido_id = i.especificacao_id)
-                  )
-                ORDER BY
-                    CASE WHEN LOWER(COALESCE(ap_pag.tipo_arquivo, '')) = 'miolo' THEN 0 ELSE 1 END,
-                    ap_pag.criado_em DESC
-                LIMIT 1
-            )
-            WHEN (bc.is_capa IS TRUE OR LOWER(COALESCE(bc.descricao, '')) LIKE '%%capa%%')
-             AND NOT (bc.is_miolo IS TRUE OR LOWER(COALESCE(bc.descricao, '')) LIKE '%%miolo%%') THEN 1
-            WHEN (bc.is_miolo IS TRUE OR LOWER(COALESCE(bc.descricao, '')) LIKE '%%miolo%%')
-             AND NOT (bc.is_capa IS TRUE OR LOWER(COALESCE(bc.descricao, '')) LIKE '%%capa%%') THEN (
-                SELECT COALESCE(ap_pag.paginas, 0)
-                FROM pedido_arquivos_pdf ap_pag
-                WHERE ap_pag.id_componente = bc.id_componente
-                  AND (
-                      (i.pares IS NOT NULL AND ap_pag.pares = i.pares AND ap_pag.formulario_id = i.formulario_id)
-                      OR (i.pares IS NULL AND ap_pag.item_pedido_id = i.especificacao_id)
-                  )
-                ORDER BY
-                    CASE WHEN LOWER(COALESCE(ap_pag.tipo_arquivo, '')) = 'miolo' THEN 0 ELSE 1 END,
-                    ap_pag.criado_em DESC
-                LIMIT 1
-            )
-            ELSE (
-                SELECT ap_pag.paginas
-                FROM pedido_arquivos_pdf ap_pag
-                WHERE ap_pag.id_componente = bc.id_componente
-                  AND (
-                      (i.pares IS NOT NULL AND ap_pag.pares = i.pares AND ap_pag.formulario_id = i.formulario_id)
-                      OR (i.pares IS NULL AND ap_pag.item_pedido_id = i.especificacao_id)
-                  )
-                ORDER BY ap_pag.criado_em DESC
-                LIMIT 1
-            )
-        END AS quantidade_paginas
-    FROM itens i
-    JOIN bremen_componentes bc ON bc.id_produto = i.id_produto
-    LEFT JOIN pedido_arquivos_pdf ap_sel
-        ON ap_sel.item_pedido_id = i.especificacao_id
-       AND ap_sel.id_componente = bc.id_componente
-       AND (
-            (i.pares IS NOT NULL AND ap_sel.pares = i.pares AND ap_sel.formulario_id = i.formulario_id)
-            OR (i.pares IS NULL AND ap_sel.pares IS NULL AND (ap_sel.formulario_id = i.formulario_id OR ap_sel.formulario_id IS NULL))
-       )
+        d.distribuicao_id, d.unidade_id, d.cliente_id, d.client_id_venda, d.vendedor_id,
+        d.forma_pagamento, d.nome_unidade, d.formulario_id, d.pedido_item_carrinho_id,
+        d.quantidade, d.id_turma, d.nome_turma, d.area_turma
 ),
 
 respostas_componentes AS (
-    SELECT DISTINCT ON (c.especificacao_id, c.id_componente, bp.id)
-        c.pares,
-        c.formulario_id,
-        c.especificacao_id,
-        c.id_produto,
-        c.id_componente,
+    SELECT DISTINCT ON (mat.distribuicao_id, mat.id_componente, bp.id)
+        mat.distribuicao_id,
+        mat.especificacao_form_id,
+        mat.id_componente,
         bp.id AS pergunta_id,
-        br.descricao_opcao  AS resposta
-    FROM componentes c
-    JOIN bremen_perguntas bp ON bp.id_componente = c.id_componente
-    LEFT JOIN bremen_especificacao_detalhes bed
-        ON bed.pergunta_id = bp.id
-        AND bed.especificacao_id = c.especificacao_id
-    LEFT JOIN bremen_respostas br ON br.id = bed.resposta_id
+        br.descricao_opcao AS resposta
+    FROM materiais mat
+    JOIN bremen_perguntas bp ON bp.id_componente = mat.id_componente
+    LEFT JOIN pedido_pergunta_resposta pr
+        ON pr.pergunta_id = bp.id
+        AND pr.especificacao_id = mat.especificacao_form_id
+    LEFT JOIN bremen_respostas br ON br.id = pr.resposta_id
     WHERE br.valor IS NOT NULL
-    ORDER BY c.especificacao_id, c.id_componente, bp.id
+    ORDER BY mat.distribuicao_id, mat.id_componente, bp.id
 ),
 
 respostas_gerais AS (
-    SELECT DISTINCT ON (i.especificacao_id, bp.id)
-        i.pares,
-        i.formulario_id,
-        i.especificacao_id,
-        i.id_produto,
+    SELECT DISTINCT ON (ip.distribuicao_id, bp.id)
+        ip.distribuicao_id,
         bp.id AS pergunta_id,
-        br.descricao_opcao  AS resposta
-    FROM itens i
-    JOIN bremen_perguntas bp ON bp.id_geral = i.id_produto
-    LEFT JOIN bremen_especificacao_detalhes bed
-        ON bed.pergunta_id = bp.id
-        AND bed.especificacao_id = i.especificacao_id
-    LEFT JOIN bremen_respostas br ON br.id = bed.resposta_id
+        br.descricao_opcao AS resposta
+    FROM itens_produto ip
+    JOIN bremen_perguntas bp ON bp.id_geral = ip.id_produto
+    LEFT JOIN pedido_pergunta_resposta pr
+        ON pr.pergunta_id = bp.id
+        AND pr.especificacao_id = ip.especificacao_id_geral
+    LEFT JOIN bremen_respostas br ON br.id = pr.resposta_id
     WHERE br.valor IS NOT NULL
-    ORDER BY i.especificacao_id, bp.id
+    ORDER BY ip.distribuicao_id, bp.id
 ),
 
 -- Tarefas de escopo componente vinculadas à especificação via tabela pivot
@@ -321,7 +254,7 @@ SELECT json_strip_nulls(json_build_object(
     'data', json_build_object(
         'id_cliente', ip.cliente_id,
         'id_vendedor', ip.vendedor_id,
-        'id_forma_pagamento', ip.forma_pagamento_venda,
+        'id_forma_pagamento', ip.forma_pagamento,
         'nome_unidade', ip.nome_unidade,
         'itens', COALESCE(
             json_agg(
@@ -364,21 +297,21 @@ SELECT json_strip_nulls(json_build_object(
                                 -- ==========================================================
                                 -- CENÁRIO 1: MIOLO
                                 -- ==========================================================
-                                WHEN (comp_sel.is_miolo IS TRUE OR LOWER(COALESCE(comp_sel.descricao, '')) LIKE '%%miolo%%') THEN
-                                    json_build_object(
-                                        'id', comp_sel.id_componente,
-                                        'id_distribuicao', COALESCE(ip.id_distribuicao_miolo, ip.id_distribuicao),
-                                        'descricao', comp_sel.descricao,
-                                        'altura', comp_sel.altura,
-                                        'largura', comp_sel.largura,
-                                        'quantidade_paginas', COALESCE(comp_sel.quantidade_paginas, 0),
-                                        'idgruposubstratoimpressao',  comp_sel.idgruposubstratoimpressao,
+                                WHEN mat.is_miolo THEN
+                                    json_strip_nulls(json_build_object(
+                                        'id', mat.id_componente,
+                                        'id_distribuicao', ip.distribuicao_id,
+                                        'descricao', mat.componente_descricao,
+                                        'altura', ROUND(mat.altura_mm::numeric / 10, 2),
+                                        'largura', ROUND(mat.largura_mm::numeric / 10, 2),
+                                        'quantidade_paginas', COALESCE(mat.paginas, 0),
+                                        'idgruposubstratoimpressao', mat.idgruposubstratoimpressao,
                                         'gramaturasubstratoimpressao', COALESCE(
-                                            comp_sel.gramatura_catalogo,
-                                            NULLIF(replace(regexp_replace(comp_sel.gramatura_miolo::text, '[^0-9.,]', '', 'g'), ',', '.'), '')::numeric
+                                            mat.gramatura_catalogo,
+                                            NULLIF(replace(regexp_replace(mat.gramatura_miolo::text, '[^0-9.,]', '', 'g'), ',', '.'), '')::numeric
                                         ),
-                                        'corfrente', comp_sel.corfrente,
-                                        'corverso', comp_sel.corverso,
+                                        'corfrente', mat.corfrente,
+                                        'corverso', mat.corverso,
                                         'perguntas_componente', COALESCE((
                                             SELECT json_agg(
                                                 json_build_object(
@@ -392,9 +325,9 @@ SELECT json_strip_nulls(json_build_object(
                                             FROM bremen_perguntas bp
                                             INNER JOIN respostas_componentes rc
                                                 ON rc.pergunta_id = bp.id
-                                                AND rc.id_componente = comp_sel.id_componente
-                                                AND rc.especificacao_id = comp_sel.especificacao_id
-                                            WHERE bp.id_componente = comp_sel.id_componente
+                                                AND rc.distribuicao_id = mat.distribuicao_id
+                                                AND rc.id_componente = mat.id_componente
+                                            WHERE bp.id_componente = mat.id_componente
                                         ), '[]'::json),
                                         'tarefas_componente', COALESCE((
                                             SELECT json_agg(
@@ -405,55 +338,45 @@ SELECT json_strip_nulls(json_build_object(
                                                 ORDER BY tc.id_tarefa
                                             )
                                             FROM tarefas_componentes tc
-                                            WHERE tc.especificacao_id = comp_sel.especificacao_id
+                                            WHERE tc.especificacao_id = mat.especificacao_form_id
                                         ), '[]'::json)
-                                    )
+                                    ))
 
                                 -- ==========================================================
                                 -- CENÁRIO 2: CAPA
                                 -- ==========================================================
-                                WHEN (comp_sel.is_capa IS TRUE OR LOWER(COALESCE(comp_sel.descricao, '')) LIKE '%%capa%%') THEN
+                                WHEN mat.is_capa THEN
                                     json_strip_nulls(
                                         json_build_object(
-                                            'id', comp_sel.id_componente,
-                                            'id_distribuicao', COALESCE(ip.id_distribuicao_capa, ip.id_distribuicao),
-                                            'descricao', comp_sel.descricao,
-                                            'altura', comp_sel.altura,
-                                            'largura', comp_sel.largura,
-                                            'quantidade_paginas', comp_sel.quantidade_paginas,
-                                                'idgruposubstratoimpressao',
-                                                    CASE
-                                                        WHEN UPPER(comp_sel."categoria_Prod") = 'LIVRETO'
-                                                             AND comp_sel.is_capa IS TRUE
-                                                             AND EXISTS (
-                                                                 SELECT 1 FROM componentes c_miolo
-                                                                 WHERE c_miolo.id_produto = comp_sel.id_produto
-                                                                   AND c_miolo.is_miolo IS TRUE
-                                                                   AND (
-                                                                       (ip.pares IS NOT NULL AND c_miolo.pares = ip.pares AND c_miolo.formulario_id = ip.formulario_id)
-                                                                       OR (ip.pares IS NULL AND c_miolo.especificacao_id = ip.especificacao_id)
-                                                                   )
-                                                             )
-                                                        THEN comp_sel.idgruposubstratoimpressao
-                                                        ELSE NULL
-                                                    END,
+                                            'id', mat.id_componente,
+                                            'id_distribuicao', ip.distribuicao_id,
+                                            'descricao', mat.componente_descricao,
+                                            'altura', ROUND(mat.altura_mm::numeric / 10, 2),
+                                            'largura', ROUND(mat.largura_mm::numeric / 10, 2),
+                                            'quantidade_paginas', mat.paginas,
+                                            'idgruposubstratoimpressao',
+                                                CASE
+                                                    WHEN UPPER(mat."categoria_Prod") = 'LIVRETO'
+                                                         AND EXISTS (
+                                                             SELECT 1 FROM materiais c_miolo
+                                                             WHERE c_miolo.distribuicao_id = mat.distribuicao_id
+                                                               AND c_miolo.is_miolo
+                                                         )
+                                                    THEN mat.idgruposubstratoimpressao
+                                                    ELSE NULL
+                                                END,
                                             'gramaturasubstratoimpressao',
                                                 CASE
-                                                    WHEN UPPER(comp_sel."categoria_Prod") = 'LIVRETO'
-                                                         AND comp_sel.is_capa IS TRUE
+                                                    WHEN UPPER(mat."categoria_Prod") = 'LIVRETO'
                                                          AND EXISTS (
-                                                             SELECT 1 FROM componentes c_miolo
-                                                             WHERE c_miolo.id_produto = comp_sel.id_produto
-                                                               AND c_miolo.is_miolo IS TRUE
-                                                               AND (
-                                                                   (ip.pares IS NOT NULL AND c_miolo.pares = ip.pares AND c_miolo.formulario_id = ip.formulario_id)
-                                                                   OR (ip.pares IS NULL AND c_miolo.especificacao_id = ip.especificacao_id)
-                                                               )
+                                                             SELECT 1 FROM materiais c_miolo
+                                                             WHERE c_miolo.distribuicao_id = mat.distribuicao_id
+                                                               AND c_miolo.is_miolo
                                                          )
                                                     THEN
                                                         COALESCE(
-                                                            comp_sel.gramatura_catalogo,
-                                                            NULLIF(replace(regexp_replace(comp_sel.gramatura_miolo::text, '[^0-9.,]', '', 'g'), ',', '.'), '')::numeric
+                                                            mat.gramatura_catalogo,
+                                                            NULLIF(replace(regexp_replace(mat.gramatura_miolo::text, '[^0-9.,]', '', 'g'), ',', '.'), '')::numeric
                                                         )
                                                     ELSE NULL
                                                 END,
@@ -470,9 +393,9 @@ SELECT json_strip_nulls(json_build_object(
                                                 FROM bremen_perguntas bp
                                                 INNER JOIN respostas_componentes rc
                                                     ON rc.pergunta_id = bp.id
-                                                    AND rc.id_componente = comp_sel.id_componente
-                                                    AND rc.especificacao_id = comp_sel.especificacao_id
-                                                WHERE bp.id_componente = comp_sel.id_componente
+                                                    AND rc.distribuicao_id = mat.distribuicao_id
+                                                    AND rc.id_componente = mat.id_componente
+                                                WHERE bp.id_componente = mat.id_componente
                                             ), '[]'::json),
                                             'tarefas_componente', COALESCE((
                                                 SELECT json_agg(
@@ -483,7 +406,7 @@ SELECT json_strip_nulls(json_build_object(
                                                     ORDER BY tc.id_tarefa
                                                 )
                                                 FROM tarefas_componentes tc
-                                                WHERE tc.especificacao_id = comp_sel.especificacao_id
+                                                WHERE tc.especificacao_id = mat.especificacao_form_id
                                             ), '[]'::json)
                                         )
                                     )
@@ -493,14 +416,14 @@ SELECT json_strip_nulls(json_build_object(
                                 -- ==========================================================
                                 ELSE
                                     json_build_object(
-                                        'id', comp_sel.id_componente,
-                                        'id_distribuicao', ip.id_distribuicao,
-                                        'descricao', comp_sel.descricao,
-                                        'altura', comp_sel.altura,
-                                        'largura', comp_sel.largura,
-                                        'gramaturasubstratoimpressao', 
-                                            CASE WHEN LOWER(comp_sel.descricao) LIKE '%folha%rosto%' 
-                                            THEN COALESCE(comp_sel.gramatura_catalogo, NULLIF(replace(regexp_replace(comp_sel.gramatura_miolo::text, '[^0-9.,]', '', 'g'), ',', '.'), '')::numeric)
+                                        'id', mat.id_componente,
+                                        'id_distribuicao', ip.distribuicao_id,
+                                        'descricao', mat.componente_descricao,
+                                        'altura', ROUND(mat.altura_mm::numeric / 10, 2),
+                                        'largura', ROUND(mat.largura_mm::numeric / 10, 2),
+                                        'gramaturasubstratoimpressao',
+                                            CASE WHEN LOWER(mat.componente_descricao) LIKE '%folha%rosto%'
+                                            THEN COALESCE(mat.gramatura_catalogo, NULLIF(replace(regexp_replace(mat.gramatura_miolo::text, '[^0-9.,]', '', 'g'), ',', '.'), '')::numeric)
                                             ELSE NULL END,
                                         'perguntas_componente', COALESCE((
                                             SELECT json_agg(
@@ -515,9 +438,9 @@ SELECT json_strip_nulls(json_build_object(
                                             FROM bremen_perguntas bp
                                             INNER JOIN respostas_componentes rc
                                                 ON rc.pergunta_id = bp.id
-                                                AND rc.id_componente = comp_sel.id_componente
-                                                AND rc.especificacao_id = comp_sel.especificacao_id
-                                            WHERE bp.id_componente = comp_sel.id_componente
+                                                AND rc.distribuicao_id = mat.distribuicao_id
+                                                AND rc.id_componente = mat.id_componente
+                                            WHERE bp.id_componente = mat.id_componente
                                         ), '[]'::json),
                                         'tarefas_componente', COALESCE((
                                             SELECT json_agg(
@@ -528,40 +451,13 @@ SELECT json_strip_nulls(json_build_object(
                                                 ORDER BY tc.id_tarefa
                                             )
                                             FROM tarefas_componentes tc
-                                            WHERE tc.especificacao_id = comp_sel.especificacao_id
+                                            WHERE tc.especificacao_id = mat.especificacao_form_id
                                         ), '[]'::json)
                                     )
                             END
                         )
-                        FROM (
-                            SELECT DISTINCT ON (comp.id_componente)
-                                comp.componente_id,
-                                comp.id_componente,
-                                comp.id_produto,
-                                comp.descricao,
-                                comp.altura,
-                                comp.largura,
-                                comp.gramatura_miolo,
-                                comp.gramatura_catalogo,
-                                comp.quantidade_paginas,
-                                comp.especificacao_id,
-                                comp.corfrente,
-                                comp.corverso,
-                                comp.idgruposubstratoimpressao,
-                                comp.sub_grupo,
-                                comp."categoria_Prod",
-                                comp.is_capa,
-                                comp.is_miolo
-                            FROM componentes comp
-                            WHERE (
-                                (ip.pares IS NOT NULL AND comp.pares = ip.pares AND comp.formulario_id = ip.formulario_id)
-                                OR (ip.pares IS NULL AND comp.especificacao_id = ip.especificacao_id)
-                            )
-                            ORDER BY comp.id_componente,
-                                CASE WHEN comp.gramatura_catalogo IS NOT NULL OR comp.gramatura_miolo IS NOT NULL THEN 0 ELSE 1 END,
-                                CASE WHEN EXISTS (SELECT 1 FROM respostas_componentes rc_pref WHERE rc_pref.id_componente = comp.id_componente AND rc_pref.especificacao_id = comp.especificacao_id) THEN 0 ELSE 1 END,
-                                comp.especificacao_id
-                        ) comp_sel
+                        FROM materiais mat
+                        WHERE mat.distribuicao_id = ip.distribuicao_id
                     ), '[]'::json),
                     'perguntas_gerais', COALESCE((
                         SELECT
@@ -576,7 +472,7 @@ SELECT json_strip_nulls(json_build_object(
                         FROM bremen_perguntas bp
                         INNER JOIN respostas_gerais rg
                             ON rg.pergunta_id = bp.id
-                           AND rg.especificacao_id = ip.especificacao_id
+                           AND rg.distribuicao_id = ip.distribuicao_id
                         WHERE bp.id_geral = ip.id_produto
                     ), '[]'::json),
                     'tarefas_gerais', COALESCE((
@@ -589,14 +485,14 @@ SELECT json_strip_nulls(json_build_object(
                             ORDER BY tg.id_tarefa
                         )
                         FROM tarefas_gerais tg
-                        WHERE tg.especificacao_id = ip.especificacao_id
+                        WHERE tg.especificacao_id = ip.especificacao_id_geral
                     ), '[]'::json)
                 )
-                ORDER BY ip.chave_agrupamento
+                ORDER BY ip.distribuicao_id
             ), '[]'::json
         )
     )
-))
+)
 FROM itens_produto ip
-GROUP BY ip.unidade_id, ip.cliente_id, ip.tipo_agrupamento, ip.client_id_venda, ip.vendedor_id, ip.forma_pagamento_venda, ip.nome_unidade
+GROUP BY ip.unidade_id, ip.cliente_id, ip.tipo_agrupamento, ip.client_id_venda, ip.vendedor_id, ip.forma_pagamento, ip.nome_unidade
 ORDER BY ip.unidade_id, ip.tipo_agrupamento DESC;
