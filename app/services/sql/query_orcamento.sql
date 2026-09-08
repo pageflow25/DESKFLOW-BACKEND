@@ -176,13 +176,7 @@ itens_produto AS (
         COALESCE(
             MAX(CASE WHEN mat.is_miolo THEN mat.arquivo_nome END),
             MAX(mat.arquivo_nome)
-        ) AS arquivo_nome_raw,
-        CASE
-            WHEN (MAX(mat.paginas) > 2 AND UPPER(MAX(mat.frente_verso)) = 'FV' AND UPPER(MAX(mat."categoria_Prod")) = 'PROVA')
-              OR (MAX(mat.paginas) > 1 AND UPPER(MAX(mat.frente_verso)) = 'SF' AND UPPER(MAX(mat."categoria_Prod")) = 'PROVA')
-            THEN 'normal'
-            ELSE 'separado'
-        END AS tipo_agrupamento
+        ) AS arquivo_nome_raw
     FROM distribuicoes d
     JOIN materiais mat ON mat.distribuicao_id = d.distribuicao_id
     JOIN pedido_formularios form ON form.id = d.formulario_id
@@ -494,5 +488,5 @@ SELECT json_strip_nulls(json_build_object(
     )
 )
 FROM itens_produto ip
-GROUP BY ip.unidade_id, ip.cliente_id, ip.tipo_agrupamento, ip.client_id_venda, ip.vendedor_id, ip.forma_pagamento, ip.nome_unidade
-ORDER BY ip.unidade_id, ip.tipo_agrupamento DESC;
+GROUP BY ip.unidade_id, ip.cliente_id, ip.client_id_venda, ip.vendedor_id, ip.forma_pagamento, ip.nome_unidade
+ORDER BY ip.unidade_id;

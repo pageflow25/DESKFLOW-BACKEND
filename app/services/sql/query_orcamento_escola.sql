@@ -175,13 +175,7 @@ itens_produto AS (
         MAX(mat.gramatura_miolo) AS gramatura_miolo,
         MAX(form.observacoes) AS obs_producao,
         MAX(TO_CHAR(form.data_entrega, 'DD/MM/YYYY')) AS data_entrega_pedido,
-        MAX(form.titulo) AS form_titulo,
-        CASE
-            WHEN (MAX(mat.paginas) > 2 AND UPPER(MAX(mat.frente_verso)) = 'FV' AND UPPER(MAX(mat."categoria_Prod")) = 'PROVA')
-              OR (MAX(mat.paginas) > 1 AND UPPER(MAX(mat.frente_verso)) = 'SF' AND UPPER(MAX(mat."categoria_Prod")) = 'PROVA')
-            THEN 'normal'
-            ELSE 'separado'
-        END AS tipo_agrupamento
+        MAX(form.titulo) AS form_titulo
     FROM itens_agrupados ia
     CROSS JOIN parametros p
     LEFT JOIN escola_turmas t ON t.id = ia.id_turma
@@ -471,5 +465,5 @@ SELECT json_strip_nulls(json_build_object(
     )
 ))
 FROM itens_produto ip
-GROUP BY ip.escola_id, ip.id_turma, ip.nome_turma, ip.tipo_agrupamento
-ORDER BY ip.escola_id, ip.id_turma NULLS FIRST, ip.tipo_agrupamento DESC;
+GROUP BY ip.escola_id, ip.id_turma, ip.nome_turma
+ORDER BY ip.escola_id, ip.id_turma NULLS FIRST;
