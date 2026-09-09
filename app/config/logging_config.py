@@ -44,6 +44,11 @@ def setup_logging(level: str = None) -> None:
     # Formatter
     formatter = logging.Formatter(LOG_FORMAT, DATE_FORMAT)
     
+    # Garante que o console consiga exibir caracteres UTF-8 (ex: →, ✅), já que no
+    # Windows o stdout costuma herdar a codepage do terminal (cp1252) por padrão.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     # 1. Handler para console (stdout)
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(numeric_level)
