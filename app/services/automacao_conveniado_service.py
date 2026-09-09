@@ -13,6 +13,7 @@ from ..controllers.orcamento_controller import OrcamentoController
 from ..models.distribuicao_material import DistribuicaoMaterial
 from ..models.escola import Escola
 from ..models.especificacao_form import EspecificacaoForm
+from ..models.pedido_distribuicao_arquivo import PedidoDistribuicaoArquivo
 from ..models.unidade_escolar import UnidadeEscolar
 from ..schemas.orcamento import FluxoOrcamentoRequest
 
@@ -94,6 +95,11 @@ class AutomacaoConveniadoService:
 
     @staticmethod
     def _obter_filtros_escola(db: Session, escola_id: int) -> Dict[str, Any]:
+        # id_produto agora vive na especificação de cada material
+        # (pedido_distribuicao_arquivos), não mais direto na distribuição.
+        # .distinct() evita repetir a mesma distribuição quando ela tem mais
+        # de um material (capa + miolo) — os sets abaixo já deduplicariam de
+        # qualquer forma, é só pra não buscar linhas à toa.
         rows = (
             db.query(
                 EspecificacaoForm.id_produto,
@@ -102,13 +108,15 @@ class AutomacaoConveniadoService:
                 UnidadeEscolar.divisao_logistica,
                 UnidadeEscolar.dias_uteis,
             )
-            .join(DistribuicaoMaterial, DistribuicaoMaterial.especificacao_form_id == EspecificacaoForm.id)
+            .join(PedidoDistribuicaoArquivo, PedidoDistribuicaoArquivo.distribuicao_material_id == DistribuicaoMaterial.id)
+            .join(EspecificacaoForm, EspecificacaoForm.id == PedidoDistribuicaoArquivo.especificacao_form_id)
             .join(UnidadeEscolar, UnidadeEscolar.id == DistribuicaoMaterial.unidade_escolar_id)
             .filter(
                 UnidadeEscolar.escola_id == escola_id,
                 DistribuicaoMaterial.status_id == STATUS_ID_PENDENTE_PROCESSAMENTO,
                 DistribuicaoMaterial.quantidade > 0,
             )
+            .distinct()
             .all()
         )
 

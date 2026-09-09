@@ -7,6 +7,7 @@ from .unidade_escolar import UnidadeEscolar
 from .turma import Turma
 from .distribuicao_material import DistribuicaoMaterial
 from .especificacao_form import EspecificacaoForm
+from .pedido_distribuicao_arquivo import PedidoDistribuicaoArquivo
 from .bremen_pedido import BremenPedido
 from .bremen_item import BremenItem
 from .bremen_componente import BremenComponente
@@ -38,6 +39,7 @@ __all__ = [
     "Turma",
     "DistribuicaoMaterial",
     "EspecificacaoForm",
+    "PedidoDistribuicaoArquivo",
     "BremenPedido",
     "BremenItem",
     "BremenComponente",

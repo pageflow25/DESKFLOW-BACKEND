@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import text, update
+from sqlalchemy import text, update, select
 from typing import List, Dict, Any, Optional
 from ..models.orcamento_api import OrcamentoAPI
 from ..models.aprovacao_api import AprovacaoAPI
@@ -10,6 +10,9 @@ from ..models.lote_envio import LoteEnvio
 from ..models.envio_item import EnvioItem
 from ..models.unidade_escolar import UnidadeEscolar
 from ..models.arquivo_pdf import ArquivoPdf
+from ..models.pedido_distribuicao_arquivo import PedidoDistribuicaoArquivo
+from ..models.bremen_componente import BremenComponente
+from ..models.especificacao_form import EspecificacaoForm
 from ..schemas.orcamento import (
     OrcamentoRequest, OrcamentoListResponse, OrcamentoData, 
     OrcamentoResponse, ItemOrcamento
@@ -135,12 +138,27 @@ class OrcamentoService:
         faltantes = [did for did in ids_unicos if did not in mapa]
 
         if faltantes:
+            # descricao_material não existe mais em pedido_distribuicoes; o nome do
+            # arquivo agora vem de pedido_distribuicao_arquivos (1+ por distribuição —
+            # prefere o miolo quando houver capa+miolo, senão pega o primeiro).
+            arquivo_nome_subq = (
+                select(ArquivoPdf.nome)
+                .select_from(PedidoDistribuicaoArquivo)
+                .join(ArquivoPdf, ArquivoPdf.id == PedidoDistribuicaoArquivo.arquivo_pdf_id)
+                .outerjoin(BremenComponente, BremenComponente.id_componente == PedidoDistribuicaoArquivo.id_componente)
+                .where(PedidoDistribuicaoArquivo.distribuicao_material_id == DistribuicaoMaterial.id)
+                .order_by(BremenComponente.is_miolo.desc().nullslast())
+                .limit(1)
+                .correlate(DistribuicaoMaterial)
+                .scalar_subquery()
+            )
+
             distribuicoes = db.query(
                 DistribuicaoMaterial.id,
                 DistribuicaoMaterial.formulario_id,
                 DistribuicaoMaterial.id_orcamento,
                 DistribuicaoMaterial.id_ops,
-                DistribuicaoMaterial.descricao_material,
+                arquivo_nome_subq.label("arquivo_nome"),
                 UnidadeEscolar.escola_id,
             ).outerjoin(
                 UnidadeEscolar,
@@ -157,7 +175,7 @@ class OrcamentoService:
                         "sucesso_ultimo_evento": False,
                         "id_orcamento_snapshot": d.id_orcamento,
                         "id_ops_snapshot": d.id_ops,
-                        "arquivo_nome_snapshot": d.descricao_material,
+                        "arquivo_nome_snapshot": d.arquivo_nome,
                         "escola_id_snapshot": d.escola_id,
                         "formulario_id_snapshot": d.formulario_id,
                     }
@@ -618,25 +636,27 @@ class OrcamentoService:
                                     envio_item_id: Optional[int] = None) -> HistoricoProcessamento:
         """
         Atualiza o status de uma distribuição e salva no histórico.
-        
-        CASCATA: Também atualiza automaticamente todas as distribuições
-        relacionadas (capa/miolo) que compartilham o mesmo formulario_id 
-        e unidade_escolar_id, mantendo-as sempre sincronizadas.
-        
+
+        Antes cascateava pra distribuições "irmãs" (capa/miolo) que
+        compartilhavam formulario_id + unidade_escolar_id, porque cada
+        arquivo tinha sua própria linha de distribuição. Na arquitetura
+        atual uma distribuição já é 1 linha por item comercial — capa e
+        miolo vivem como materiais da MESMA linha (pedido_distribuicao_arquivos)
+        — então não há mais nada pra cascatear.
+
         Args:
             db: Sessão do banco de dados
             distribuicao_id: ID da distribuição
             novo_status: Novo status
             mensagem: Mensagem do evento
             sucesso: Se a operação foi bem-sucedida
-            
+
         Returns:
-            HistoricoProcessamento: Registro de histórico criado para a distribuição principal
+            HistoricoProcessamento: Registro de histórico criado, ou None se nada mudou
         """
         logger.info(f"Atualizando status da distribuição {distribuicao_id} para {novo_status}")
 
         try:
-            # Buscar distribuição principal
             distribuicao = db.query(DistribuicaoMaterial).filter(
                 DistribuicaoMaterial.id == distribuicao_id
             ).first()
@@ -647,51 +667,11 @@ class OrcamentoService:
             # Obter status via cache (evita query repetida a cada chamada)
             status = OrcamentoService._get_or_create_status(db, novo_status)
 
-            # Coletar todos os IDs a atualizar (principal + relacionadas por capa/miolo)
-            todos_ids = [distribuicao_id]
             status_anteriores: Dict[int, Optional[int]] = {distribuicao_id: distribuicao.status_id}
-
-            if distribuicao.formulario_id and distribuicao.unidade_escolar_id:
-                # Cascata por escopo: mesmo formulário + unidade + turma.
-                # Distribuições sem turma (id_turma IS NULL) cascatam apenas entre si.
-                relacionadas_query = db.query(
-                    DistribuicaoMaterial.id,
-                    DistribuicaoMaterial.status_id
-                ).filter(
-                    DistribuicaoMaterial.formulario_id == distribuicao.formulario_id,
-                    DistribuicaoMaterial.unidade_escolar_id == distribuicao.unidade_escolar_id,
-                    DistribuicaoMaterial.id != distribuicao_id
-                )
-
-                if distribuicao.id_turma is None:
-                    relacionadas_query = relacionadas_query.filter(
-                        DistribuicaoMaterial.id_turma.is_(None)
-                    )
-                else:
-                    relacionadas_query = relacionadas_query.filter(
-                        DistribuicaoMaterial.id_turma == distribuicao.id_turma
-                    )
-
-                relacionadas = relacionadas_query.all()
-
-                if relacionadas:
-                    ids_relacionadas = [r.id for r in relacionadas]
-                    logger.info(
-                        f"Cascata: {len(relacionadas)} distribuição(ões) relacionada(s): "
-                        f"{ids_relacionadas}"
-                    )
-                    todos_ids.extend(ids_relacionadas)
-                    for r in relacionadas:
-                        status_anteriores[r.id] = r.status_id
-
-            # Filtrar somente os que precisam mudar (excluir os que já estão no status alvo)
-            ids_para_atualizar = [
-                i for i in todos_ids
-                if status_anteriores.get(i) != status
-            ]
+            ids_para_atualizar = [] if status_anteriores[distribuicao_id] == status else [distribuicao_id]
 
             if not ids_para_atualizar:
-                logger.debug(f"Todas as distribuições já estão no status {novo_status}, nada a fazer")
+                logger.debug(f"Distribuição {distribuicao_id} já está no status {novo_status}, nada a fazer")
                 return None
 
             # Bulk UPDATE em uma única query SQL
@@ -719,37 +699,25 @@ class OrcamentoService:
                     lote_envio_id=lote_envio_id,
                     distribuicoes_ids=ids_para_atualizar,
                 )
-            else:
-                mapa_envio = {dist_id: envio_item_id for dist_id in ids_para_atualizar}
+                envio_item_id = mapa_envio.get(distribuicao_id)
 
-            # Criar os registros de histórico em bulk
-            historicos: List[Dict[str, Any]] = []
-            for dist_id in ids_para_atualizar:
-                msg = mensagem if dist_id == distribuicao_id else (
-                    f"[Cascata] {mensagem} (atualizado junto com distribuição #{distribuicao_id})"
-                )
-                historicos.append({
-                    "distribuicao_material_id": dist_id,
-                    "status_anterior_id": status_anteriores.get(dist_id),
-                    "status_novo_id": status,
-                    "mensagem": msg,
-                    "sucesso": sucesso,
-                    "envio_item_id": mapa_envio.get(dist_id),
-                })
-
-            db.bulk_insert_mappings(HistoricoProcessamento, historicos)
+            historico_dict = {
+                "distribuicao_material_id": distribuicao_id,
+                "status_anterior_id": status_anteriores[distribuicao_id],
+                "status_novo_id": status,
+                "mensagem": mensagem,
+                "sucesso": sucesso,
+                "envio_item_id": envio_item_id,
+            }
+            db.bulk_insert_mappings(HistoricoProcessamento, [historico_dict])
             db.commit()
 
-            # Buscar o histórico principal para retorno
             historico_principal = db.query(HistoricoProcessamento).filter(
                 HistoricoProcessamento.distribuicao_material_id == distribuicao_id,
                 HistoricoProcessamento.status_novo_id == status,
             ).order_by(HistoricoProcessamento.data_evento.desc()).first()
 
-            logger.info(
-                f"Status atualizado para {novo_status} — "
-                f"{len(ids_para_atualizar)} distribuição(ões) afetada(s)"
-            )
+            logger.info(f"Status atualizado para {novo_status} — distribuição {distribuicao_id}")
             return historico_principal
 
         except Exception as e:
@@ -772,7 +740,12 @@ class OrcamentoService:
         Atualiza o status de múltiplas distribuições em uma única operação
         de banco de dados (sem loop de transações individuais).
 
-        Inclui a lógica de cascata capa/miolo para cada distribuição informada.
+        Antes cascateava pra distribuições "irmãs" (capa/miolo) que
+        compartilhavam formulario_id + unidade_escolar_id, porque cada
+        arquivo tinha sua própria linha de distribuição. Na arquitetura
+        atual uma distribuição já é 1 linha por item comercial — capa e
+        miolo vivem como materiais da MESMA linha (pedido_distribuicao_arquivos)
+        — então os IDs recebidos já são exatamente o que precisa mudar.
 
         Args:
             db: Sessão do banco de dados
@@ -796,104 +769,20 @@ class OrcamentoService:
             # Obter status via cache
             status = OrcamentoService._get_or_create_status(db, novo_status)
 
-            # -- 1. Buscar todas as distribuições informadas + pares do arquivo (capa/miolo) --
-            from sqlalchemy import and_, or_
-            from sqlalchemy.orm import aliased
-
-            ArquivoBase = aliased(ArquivoPdf)
             distribuicoes_base = db.query(
                 DistribuicaoMaterial.id,
                 DistribuicaoMaterial.status_id,
-                DistribuicaoMaterial.formulario_id,
-                DistribuicaoMaterial.unidade_escolar_id,
-                DistribuicaoMaterial.especificacao_form_id,
-                DistribuicaoMaterial.id_turma,
-                ArquivoBase.pares.label('pares'),
-            ).outerjoin(
-                ArquivoBase,
-                ArquivoBase.id == DistribuicaoMaterial.arquivo_pdf_id,
             ).filter(DistribuicaoMaterial.id.in_(distribuicoes_ids)).all()
 
             if not distribuicoes_base:
                 logger.warning(f"Nenhuma distribuição encontrada para os IDs: {distribuicoes_ids}")
                 return 0
 
-            # IDs já conhecidos (os passados + suas cascatas)
-            todos_ids_set: set = set(distribuicoes_ids)
             status_map: Dict[int, Optional[int]] = {d.id: d.status_id for d in distribuicoes_base}
 
-            # Cascata: agrupar por pares (vincula capa↔miolo do mesmo livro).
-            # Distribuições sem pares usam especificacao_form_id como chave — evita
-            # expansão indevida para livros diferentes na mesma (form, unidade, turma).
-            grupos_pares: list = []    # (form_id, unit_id, turma, pares_val)
-            conds_sem_pares: list = [] # condições SQLAlchemy para distribuições sem pares
-
-            for d in distribuicoes_base:
-                if not (d.formulario_id and d.unidade_escolar_id):
-                    continue
-                turma_cond = (
-                    DistribuicaoMaterial.id_turma.is_(None)
-                    if d.id_turma is None
-                    else DistribuicaoMaterial.id_turma == d.id_turma
-                )
-                if d.pares is not None:
-                    grupos_pares.append((d.formulario_id, d.unidade_escolar_id, d.id_turma, d.pares))
-                else:
-                    conds_sem_pares.append(and_(
-                        DistribuicaoMaterial.formulario_id == d.formulario_id,
-                        DistribuicaoMaterial.unidade_escolar_id == d.unidade_escolar_id,
-                        DistribuicaoMaterial.especificacao_form_id == d.especificacao_form_id,
-                        turma_cond,
-                    ))
-
-            # Cascata 1 — por pares (capa ↔ miolo)
-            if grupos_pares:
-                ArquivoCascata = aliased(ArquivoPdf)
-                pares_conds = []
-                for form_id, unit_id, turma, pares_val in grupos_pares:
-                    turma_cond = (
-                        DistribuicaoMaterial.id_turma.is_(None)
-                        if turma is None
-                        else DistribuicaoMaterial.id_turma == turma
-                    )
-                    pares_conds.append(and_(
-                        DistribuicaoMaterial.formulario_id == form_id,
-                        DistribuicaoMaterial.unidade_escolar_id == unit_id,
-                        turma_cond,
-                        ArquivoCascata.pares == pares_val,
-                    ))
-                relacionadas_pares = db.query(
-                    DistribuicaoMaterial.id,
-                    DistribuicaoMaterial.status_id,
-                ).join(
-                    ArquivoCascata,
-                    ArquivoCascata.id == DistribuicaoMaterial.arquivo_pdf_id,
-                ).filter(
-                    or_(*pares_conds),
-                    DistribuicaoMaterial.id.notin_(distribuicoes_ids),
-                ).all()
-                for r in relacionadas_pares:
-                    todos_ids_set.add(r.id)
-                    status_map[r.id] = r.status_id
-                    logger.debug(f"Cascata (pares): incluindo distribuição {r.id}")
-
-            # Cascata 2 — por especificação (sem pares)
-            if conds_sem_pares:
-                relacionadas_spec = db.query(
-                    DistribuicaoMaterial.id,
-                    DistribuicaoMaterial.status_id,
-                ).filter(
-                    or_(*conds_sem_pares),
-                    DistribuicaoMaterial.id.notin_(distribuicoes_ids),
-                ).all()
-                for r in relacionadas_spec:
-                    todos_ids_set.add(r.id)
-                    status_map[r.id] = r.status_id
-                    logger.debug(f"Cascata (spec): incluindo distribuição {r.id}")
-
-            # -- 2. Filtrar somente os que precisam mudar --
+            # Filtrar somente os que precisam mudar
             ids_para_atualizar = [
-                i for i in todos_ids_set
+                i for i in status_map
                 if status_map.get(i) != status
             ]
 
@@ -901,7 +790,7 @@ class OrcamentoService:
                 logger.debug(f"Todas as distribuições já estão no status {novo_status}")
                 return 0
 
-            # -- 3. Bulk UPDATE em uma única query --
+            # -- Bulk UPDATE em uma única query --
             mapa_envio_item: Dict[int, int] = envio_item_ids_por_distribuicao or {}
 
             if lote_envio_id is None and grupo_lote_id is not None:
@@ -964,19 +853,14 @@ class OrcamentoService:
                     .values(status_id=status)
                 )
 
-            # -- 4. Bulk INSERT de histórico --
-            ids_originais = set(distribuicoes_ids)
+            # -- Bulk INSERT de histórico --
             historicos: List[Dict[str, Any]] = []
             for dist_id in ids_para_atualizar:
-                if dist_id in ids_originais:
-                    msg = mensagem
-                else:
-                    msg = f"[Cascata] {mensagem}"
                 hist_entry = {
                     "distribuicao_material_id": dist_id,
                     "status_anterior_id": status_map.get(dist_id),
                     "status_novo_id": status,
-                    "mensagem": msg,
+                    "mensagem": mensagem,
                     "sucesso": sucesso,
                     "envio_item_id": mapa_envio_item.get(dist_id),
                 }
@@ -987,10 +871,7 @@ class OrcamentoService:
             db.bulk_insert_mappings(HistoricoProcessamento, historicos)
             db.commit()
 
-            logger.info(
-                f"Lote concluído: {len(ids_para_atualizar)} distribuições → {novo_status} "
-                f"({len(ids_para_atualizar) - len(distribuicoes_ids)} via cascata)"
-            )
+            logger.info(f"Lote concluído: {len(ids_para_atualizar)} distribuições → {novo_status}")
             return len(ids_para_atualizar)
 
         except Exception as e:
@@ -1013,16 +894,18 @@ class OrcamentoService:
             List[DistribuicaoMaterial]: Lista de distribuições
         """
         from ..models.unidade_escolar import UnidadeEscolar
-        from ..models.especificacao_form import EspecificacaoForm
-        
+
         logger.info(f"Buscando distribuições para escola {escola_id} com produtos {ids_produtos}")
-        
+
         try:
-            # Usar ORM diretamente com join - uma única query
+            # id_produto agora vive na especificação de cada material (pedido_distribuicao_arquivos),
+            # não mais direto em pedido_distribuicoes — passa pela tabela de junção.
             distribuicoes = db.query(DistribuicaoMaterial).join(
                 UnidadeEscolar, UnidadeEscolar.id == DistribuicaoMaterial.unidade_escolar_id
             ).join(
-                EspecificacaoForm, EspecificacaoForm.id == DistribuicaoMaterial.especificacao_form_id
+                PedidoDistribuicaoArquivo, PedidoDistribuicaoArquivo.distribuicao_material_id == DistribuicaoMaterial.id
+            ).join(
+                EspecificacaoForm, EspecificacaoForm.id == PedidoDistribuicaoArquivo.especificacao_form_id
             ).filter(
                 UnidadeEscolar.escola_id == escola_id,
                 EspecificacaoForm.id_produto.in_(ids_produtos),

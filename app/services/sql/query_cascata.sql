@@ -38,17 +38,26 @@ dados_normalizados AS (
 
     FROM pedido_formularios f
     CROSS JOIN parametros p
-    INNER JOIN pedido_especificacoes e 
-        ON f.id = e.formulario_id
-    INNER JOIN pedido_distribuicoes distri 
-        ON distri.especificacao_form_id = e.id
+    INNER JOIN pedido_distribuicoes distri
+        ON distri.formulario_id = f.id
+    -- pedido_distribuicoes não tem mais especificacao_form_id/arquivo_pdf_id
+    -- diretos (arquitetura nova): 1 distribuição pode ter 1+ materiais
+    -- (capa + miolo), cada um com sua própria especificação/arquivo, via
+    -- pedido_distribuicao_arquivos. Isso mantém 1 linha por arquivo aqui
+    -- embaixo (mesma cardinalidade de antes, quando cada arquivo já tinha
+    -- sua própria linha de distribuição) — o nível seguinte (nivel_arquivos)
+    -- já espera 1 linha por arquivo pra montar a lista.
+    INNER JOIN pedido_distribuicao_arquivos pda
+        ON pda.distribuicao_material_id = distri.id
+    INNER JOIN pedido_especificacoes e
+        ON e.id = pda.especificacao_form_id
     INNER JOIN escola_unidades uc
         ON distri.unidade_escolar_id = uc.id
     INNER JOIN escola_escolas esc
         ON esc.id = uc.escola_id
     LEFT JOIN pedido_arquivos_pdf ar
-        ON ar.id = distri.arquivo_pdf_id
-    LEFT JOIN bremen_itens b 
+        ON ar.id = pda.arquivo_pdf_id
+    LEFT JOIN bremen_itens b
         ON e.id_produto = b.id_produto
     WHERE (
             p.tipo_formulario IS NULL

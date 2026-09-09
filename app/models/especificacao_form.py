@@ -94,11 +94,12 @@ class EspecificacaoForm(Base):
         cascade="all, delete-orphan"
     )
     
-    # Uma especificação pode ter múltiplas distribuições de materiais
-    distribuicoes = relationship(
-        "DistribuicaoMaterial",
-        back_populates="especificacao",
-        foreign_keys="DistribuicaoMaterial.especificacao_form_id"
+    # Uma especificação pode estar vinculada a vários materiais de entrega
+    # (pedido_distribuicao_arquivos) — a distribuição não referencia a
+    # especificação diretamente, o vínculo passa pelo arquivo entregue.
+    distribuicao_arquivos = relationship(
+        "PedidoDistribuicaoArquivo",
+        back_populates="especificacao"
     )
     
     # Relacionamento lógico (sem FK) com BremenItem via id_produto

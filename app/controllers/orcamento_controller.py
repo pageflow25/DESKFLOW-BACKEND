@@ -195,10 +195,10 @@ class OrcamentoController:
                             u.data_evento,
                             e.nome AS escola_nome,
                             ue.nome AS unidade_nome,
-                            dm.descricao_material AS material_descricao,
+                            mat.arquivo_nome AS material_descricao,
                             dm.quantidade,
                             COALESCE(oa_agg.id_orcamento, dm.id_orcamento) AS id_orcamento,
-                            ap.nome AS arquivo_nome
+                            mat.arquivo_nome AS arquivo_nome
                         FROM ultimos u
                         LEFT JOIN status_deskflow_pedido s ON s.id = u.status_novo_id
                         LEFT JOIN pedido_distribuicoes dm ON dm.id = u.distribuicao_material_id
@@ -212,7 +212,17 @@ class OrcamentoController:
                         ) oa_agg ON oa_agg.distribuicao_material_id = dm.id
                         LEFT JOIN escola_unidades ue ON ue.id = dm.unidade_escolar_id
                         LEFT JOIN escola_escolas e ON e.id = ue.escola_id
-                        LEFT JOIN pedido_arquivos_pdf ap ON ap.id = dm.arquivo_pdf_id
+                        -- descricao_material não existe mais em pedido_distribuicoes; usa o
+                        -- nome de um material vinculado (prefere miolo quando há capa+miolo)
+                        LEFT JOIN LATERAL (
+                            SELECT ap.nome AS arquivo_nome
+                            FROM pedido_distribuicao_arquivos pda
+                            JOIN pedido_arquivos_pdf ap ON ap.id = pda.arquivo_pdf_id
+                            LEFT JOIN bremen_componentes bc ON bc.id_componente = pda.id_componente
+                            WHERE pda.distribuicao_material_id = dm.id
+                            ORDER BY COALESCE(bc.is_miolo, FALSE) DESC
+                            LIMIT 1
+                        ) mat ON TRUE
                         ORDER BY dm.id_orcamento NULLS LAST, u.distribuicao_material_id
                         """
                     ),

@@ -500,31 +500,44 @@ async def consultar_status_orcamentos(
     try:
         # Buscar distribuições da escola
         from sqlalchemy import text
+        # nome_item/quantidade agora vêm de pedido_especificacoes via
+        # pedido_distribuicao_arquivos (1+ materiais por distribuição — pega o
+        # nome de um representante, preferindo miolo); a quantidade real da
+        # entrega é dm.quantidade (ef.quantidade é só o "peso" do item dentro
+        # do próprio material, não a quantidade entregue).
+        # status_distribuicao não existe mais — sdf.codigo/sdf.descricao já cobrem isso.
         query = """
-            SELECT 
+            SELECT
                 dm.id,
                 dm.unidade_escolar_id,
                 ue.nome as unidade_nome,
-                ef.nome_item,
-                ef.quantidade,
+                mat.nome_item,
+                dm.quantidade,
                 sdf.codigo as status_codigo,
                 sdf.descricao as status_descricao,
                 oa.id_orcamento,
-                aa.id_ops,
-                dm.status_distribuicao
+                aa.id_ops
             FROM pedido_distribuicoes dm
             JOIN escola_unidades ue ON ue.id = dm.unidade_escolar_id
-            JOIN pedido_especificacoes ef ON ef.id = dm.especificacao_form_id
+            LEFT JOIN LATERAL (
+                SELECT ef.nome_item
+                FROM pedido_distribuicao_arquivos pda
+                JOIN pedido_especificacoes ef ON ef.id = pda.especificacao_form_id
+                LEFT JOIN bremen_componentes bc ON bc.id_componente = pda.id_componente
+                WHERE pda.distribuicao_material_id = dm.id
+                ORDER BY COALESCE(bc.is_miolo, FALSE) DESC
+                LIMIT 1
+            ) mat ON TRUE
             LEFT JOIN status_deskflow_pedido sdf ON sdf.id = dm.status_id
             LEFT JOIN orcamento_api oa ON oa.distribuicao_material_id = dm.id
             LEFT JOIN aprovacao_api aa ON aa.distribuicao_material_id = dm.id
             WHERE ue.escola_id = :escola_id
             ORDER BY dm.id
         """
-        
+
         result = db.execute(text(query), {"escola_id": escola_id})
         distribuicoes = []
-        
+
         for row in result:
             distribuicoes.append({
                 "distribuicao_id": row.id,
@@ -534,7 +547,6 @@ async def consultar_status_orcamentos(
                 "quantidade": row.quantidade,
                 "status_codigo": row.status_codigo,
                 "status_descricao": row.status_descricao,
-                "status_distribuicao": row.status_distribuicao,
                 "id_orcamento": row.id_orcamento,
                 "id_ops": row.id_ops,
                 "tem_orcamento": row.id_orcamento is not None,
