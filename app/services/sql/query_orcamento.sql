@@ -486,7 +486,7 @@ SELECT json_strip_nulls(json_build_object(
             ), '[]'::json
         )
     )
-)
+))
 FROM itens_produto ip
 GROUP BY ip.unidade_id, ip.cliente_id, ip.client_id_venda, ip.vendedor_id, ip.forma_pagamento, ip.nome_unidade
 ORDER BY ip.unidade_id;
