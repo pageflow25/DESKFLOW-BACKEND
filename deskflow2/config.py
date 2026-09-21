@@ -14,7 +14,7 @@ class Settings(BaseSettings):
         env_file=os.environ.get("DESKFLOW2_ENV_FILE", ".env"), env_file_encoding="utf-8", extra="ignore"
     )
 
-    # Banco compartilhado com o PageFlow (as tabelas orcamento_envio_* são dele).
+    # Banco compartilhado com o PageFlow (as tabelas orcamento_api_* são dele).
     DATABASE_URL: str
     DB_SSL: bool = True
     DB_STATEMENT_TIMEOUT_MS: int = 120_000

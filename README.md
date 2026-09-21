@@ -124,7 +124,7 @@ deskflow2/
 │   ├── erp.py             # cliente do Wingraph: login, retry de 503
 │   └── pageflow.py        # repasse dos resultados ao PageFlow
 ├── repositorios/
-│   ├── fila.py            # leitura e claim das filas orcamento_envio_*
+│   ├── fila.py            # leitura e claim das filas orcamento_api_*
 │   └── status.py          # catálogo de status do PCP
 ├── servicos/
 │   ├── despacho_orcamento.py
@@ -204,7 +204,7 @@ arquivo (ex.: `testing`), defina `DESKFLOW2_ENV_FILE=.env.testing`. Arquivos
 
 | Variável | Descrição |
 |---|---|
-| `DATABASE_URL` | o mesmo Postgres do PageFlow (as tabelas `orcamento_envio_*` são dele) |
+| `DATABASE_URL` | o mesmo Postgres do PageFlow (as tabelas `orcamento_api_*` são dele) |
 | `ERP_BASE_URL` | base da API do Wingraph |
 | `ERP_USER` / `ERP_PASSWORD` | credenciais do ERP |
 | `PAGEFLOW_API_URL` | base do backend do PageFlow, **sem** `/api` (se vier com `/api`, é removido) |

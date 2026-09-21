@@ -22,8 +22,8 @@ from .status import (
     CatalogoStatus,
 )
 
-TABELA_ORCAMENTOS = "orcamento_envio_orcamentos"
-TABELA_APROVACOES = "orcamento_envio_aprovacoes"
+TABELA_ORCAMENTOS = "orcamento_api_orcamentos"
+TABELA_APROVACOES = "orcamento_api_aprovacoes"
 TABELAS_CHAMADA = (TABELA_ORCAMENTOS, TABELA_APROVACOES)
 
 
@@ -57,7 +57,7 @@ class AprovacaoReivindicada:
 def listar_orcamentos_pendentes(conn, status: CatalogoStatus, limite: int) -> list:
     return list(conn.execute(text("""
         SELECT o.id
-          FROM orcamento_envio_orcamentos o
+          FROM orcamento_api_orcamentos o
          WHERE o.status_id = :pendente
            AND o.substituida_por_id IS NULL
          ORDER BY o.criado_em, o.id
@@ -75,9 +75,9 @@ def reivindicar_orcamento(conn, status: CatalogoStatus, orcamento_id: int, modo_
     `em_fila` para `em_processamento` na mesma transação. Sem linha
     atualizada, outro processo pegou (ou a linha mudou): não chamar o ERP."""
     linha = conn.execute(text(f"""
-        UPDATE orcamento_envio_orcamentos
+        UPDATE orcamento_api_orcamentos
            SET status_id = :aguardando,
-               modo_envio = CAST({_MODO_EFETIVO} AS enum_orcamento_envio_orcamentos_modo_envio),
+               modo_envio = CAST({_MODO_EFETIVO} AS enum_orcamento_api_orcamentos_modo_envio),
                data_envio = NOW(),
                atualizado_em = NOW()
          WHERE id = :id
@@ -95,7 +95,7 @@ def reivindicar_orcamento(conn, status: CatalogoStatus, orcamento_id: int, modo_
 
     orcamento = carregar_orcamento(conn, orcamento_id)
     conn.execute(text("""
-        UPDATE orcamento_envio_parametro
+        UPDATE orcamento_api_lotes
            SET status_id = :em_processamento, atualizado_em = NOW()
          WHERE id = :lote_id AND status_id = :em_fila
     """), {
@@ -110,12 +110,12 @@ def carregar_orcamento(conn, orcamento_id: int) -> Optional[OrcamentoReivindicad
     """Dados para montar a chamada: grupo (cliente/vendedor/forma), modo do
     lote e os pedidos do orçamento. Também usado pelo dry-run, sem claim."""
     linha = conn.execute(text("""
-        SELECT o.id, o.orcamento_envio_requisicao_id, o.modo_envio::text AS modo_envio, o.url_webhook,
-               r.orcamento_envio_parametro_id AS lote_id, r.cliente_id, r.vendedor_id, r.forma_pagamento,
+        SELECT o.id, o.orcamento_api_requisicao_id, o.modo_envio::text AS modo_envio, o.url_webhook,
+               r.orcamento_api_lote_id AS lote_id, r.cliente_id, r.vendedor_id, r.forma_pagamento,
                p.modo_agrupamento::text AS modo_agrupamento
-          FROM orcamento_envio_orcamentos o
-          JOIN orcamento_envio_requisicoes r ON r.id = o.orcamento_envio_requisicao_id
-          JOIN orcamento_envio_parametro p ON p.id = r.orcamento_envio_parametro_id
+          FROM orcamento_api_orcamentos o
+          JOIN orcamento_api_requisicoes r ON r.id = o.orcamento_api_requisicao_id
+          JOIN orcamento_api_lotes p ON p.id = r.orcamento_api_lote_id
          WHERE o.id = :id
     """), {"id": orcamento_id}).mappings().first()
     if not linha:
@@ -123,14 +123,14 @@ def carregar_orcamento(conn, orcamento_id: int) -> Optional[OrcamentoReivindicad
 
     pedidos = list(conn.execute(text("""
         SELECT pedido_distribuicao_id
-          FROM orcamento_envio_itens
-         WHERE orcamento_envio_orcamento_id = :id
+          FROM orcamento_api_itens
+         WHERE orcamento_api_orcamento_id = :id
          ORDER BY pedido_distribuicao_id
     """), {"id": orcamento_id}).scalars())
 
     return OrcamentoReivindicado(
         id=linha["id"],
-        requisicao_id=linha["orcamento_envio_requisicao_id"],
+        requisicao_id=linha["orcamento_api_requisicao_id"],
         lote_id=linha["lote_id"],
         modo_envio=linha["modo_envio"],
         url_webhook=linha["url_webhook"],
@@ -147,7 +147,7 @@ def carregar_orcamento(conn, orcamento_id: int) -> Optional[OrcamentoReivindicad
 def listar_aprovacoes_pendentes(conn, status: CatalogoStatus, limite: int) -> list:
     return list(conn.execute(text("""
         SELECT a.id
-          FROM orcamento_envio_aprovacoes a
+          FROM orcamento_api_aprovacoes a
          WHERE a.status_id = :pendente
            AND a.substituida_por_id IS NULL
          ORDER BY a.criado_em, a.id
@@ -157,17 +157,17 @@ def listar_aprovacoes_pendentes(conn, status: CatalogoStatus, limite: int) -> li
 
 def reivindicar_aprovacao(conn, status: CatalogoStatus, aprovacao_id: int, modo_envio: str) -> Optional[AprovacaoReivindicada]:
     linha = conn.execute(text(f"""
-        UPDATE orcamento_envio_aprovacoes a
+        UPDATE orcamento_api_aprovacoes a
            SET status_id = :aguardando,
-               modo_envio = CAST({_MODO_EFETIVO.replace("url_webhook", "a.url_webhook")} AS enum_orcamento_envio_aprovacoes_modo_envio),
+               modo_envio = CAST({_MODO_EFETIVO.replace("url_webhook", "a.url_webhook")} AS enum_orcamento_api_aprovacoes_modo_envio),
                data_envio = NOW(),
                atualizado_em = NOW()
-          FROM orcamento_envio_orcamentos o
+          FROM orcamento_api_orcamentos o
          WHERE a.id = :id
            AND a.status_id = :pendente
            AND a.substituida_por_id IS NULL
-           AND o.id = a.orcamento_envio_orcamento_id
-        RETURNING a.id, a.orcamento_envio_orcamento_id, o.id_orcamento, a.gerar_op, a.itens_aprovados,
+           AND o.id = a.orcamento_api_orcamento_id
+        RETURNING a.id, a.orcamento_api_orcamento_id, o.id_orcamento, a.gerar_op, a.itens_aprovados,
                   a.modo_envio::text AS modo_envio, a.url_webhook
     """), {
         "aguardando": status.id_chamada(AGUARDANDO_RETORNO),
@@ -179,7 +179,7 @@ def reivindicar_aprovacao(conn, status: CatalogoStatus, aprovacao_id: int, modo_
         return None
     return AprovacaoReivindicada(
         id=linha["id"],
-        orcamento_id=linha["orcamento_envio_orcamento_id"],
+        orcamento_id=linha["orcamento_api_orcamento_id"],
         id_orcamento=linha["id_orcamento"],
         gerar_op=bool(linha["gerar_op"]),
         itens_aprovados=linha["itens_aprovados"] or [],
@@ -191,8 +191,8 @@ def reivindicar_aprovacao(conn, status: CatalogoStatus, aprovacao_id: int, modo_
 def id_orcamento_da_aprovacao(conn, aprovacao_id: int) -> Optional[int]:
     return conn.execute(text("""
         SELECT o.id_orcamento
-          FROM orcamento_envio_aprovacoes a
-          JOIN orcamento_envio_orcamentos o ON o.id = a.orcamento_envio_orcamento_id
+          FROM orcamento_api_aprovacoes a
+          JOIN orcamento_api_orcamentos o ON o.id = a.orcamento_api_orcamento_id
          WHERE a.id = :id
     """), {"id": aprovacao_id}).scalar()
 
@@ -241,10 +241,10 @@ def listar_aguardando_retorno(conn, status: CatalogoStatus, tabela: str, minutos
 def listar_downloads_pendentes(conn, status: CatalogoStatus, reinicio_minutos: int, limite: int) -> list:
     return list(conn.execute(text("""
         SELECT a.id
-          FROM orcamento_envio_aprovacoes a
-          JOIN orcamento_envio_orcamentos o ON o.id = a.orcamento_envio_orcamento_id
-          JOIN orcamento_envio_requisicoes r ON r.id = o.orcamento_envio_requisicao_id
-          JOIN orcamento_envio_parametro p ON p.id = r.orcamento_envio_parametro_id
+          FROM orcamento_api_aprovacoes a
+          JOIN orcamento_api_orcamentos o ON o.id = a.orcamento_api_orcamento_id
+          JOIN orcamento_api_requisicoes r ON r.id = o.orcamento_api_requisicao_id
+          JOIN orcamento_api_lotes p ON p.id = r.orcamento_api_lote_id
          WHERE p.baixar_arquivos
            AND a.gerar_op
            AND a.status_id = :sucesso
@@ -262,7 +262,7 @@ def reivindicar_download(conn, aprovacao_id: int, reinicio_minutos: int) -> bool
     `reinicio_minutos` (processo morreu no meio) pode ser retomado — baixar de
     novo é seguro, a pasta é montada à parte e só publicada no fim."""
     resultado = conn.execute(text("""
-        UPDATE orcamento_envio_aprovacoes
+        UPDATE orcamento_api_aprovacoes
            SET downloads_iniciado_em = NOW(), atualizado_em = NOW()
          WHERE id = :id
            AND downloads_em IS NULL
@@ -273,7 +273,7 @@ def reivindicar_download(conn, aprovacao_id: int, reinicio_minutos: int) -> bool
 
 
 def arquivos_da_aprovacao(conn, aprovacao_id: int) -> list:
-    """Arquivos de cada OP da aprovação: OP (orcamento_envio_item_retornos.id_op)
+    """Arquivos de cada OP da aprovação: OP (orcamento_api_itens_retorno.id_op)
     -> pedido -> pedido_distribuicao_arquivos -> pedido_arquivos_pdf."""
     return [dict(linha) for linha in conn.execute(text("""
         SELECT ir.id_op,
@@ -283,15 +283,15 @@ def arquivos_da_aprovacao(conn, aprovacao_id: int) -> list:
                COALESCE(NULLIF(ap.caminho_remoto, ''), ap.arquivo) AS url,
                ap.tipo_arquivo,
                e.nome AS escola_nome
-          FROM orcamento_envio_item_retornos ir
+          FROM orcamento_api_itens_retorno ir
           JOIN pedido_distribuicao_arquivos pda ON pda.distribuicao_material_id = ir.pedido_distribuicao_id
           JOIN pedido_arquivos_pdf ap ON ap.id = pda.arquivo_pdf_id
-          JOIN orcamento_envio_aprovacoes a ON a.id = ir.orcamento_envio_aprovacao_id
-          JOIN orcamento_envio_orcamentos o ON o.id = a.orcamento_envio_orcamento_id
-          JOIN orcamento_envio_requisicoes r ON r.id = o.orcamento_envio_requisicao_id
-          JOIN orcamento_envio_parametro p ON p.id = r.orcamento_envio_parametro_id
+          JOIN orcamento_api_aprovacoes a ON a.id = ir.orcamento_api_aprovacao_id
+          JOIN orcamento_api_orcamentos o ON o.id = a.orcamento_api_orcamento_id
+          JOIN orcamento_api_requisicoes r ON r.id = o.orcamento_api_requisicao_id
+          JOIN orcamento_api_lotes p ON p.id = r.orcamento_api_lote_id
           LEFT JOIN escola_escolas e ON e.id = p.escola_id
-         WHERE ir.orcamento_envio_aprovacao_id = :aprovacao_id
+         WHERE ir.orcamento_api_aprovacao_id = :aprovacao_id
            AND ir.id_op IS NOT NULL
          ORDER BY ir.id_op, pda.arquivo_pdf_id, ir.pedido_distribuicao_id
     """), {"aprovacao_id": aprovacao_id}).mappings()]

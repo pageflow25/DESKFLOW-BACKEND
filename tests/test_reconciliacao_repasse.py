@@ -36,10 +36,10 @@ CONSULTA_PROCESSADA = {
 class TestReconciliacao(unittest.TestCase):
     def setUp(self):
         self.fila = mock.patch.object(reconciliacao, "fila").start()
-        self.fila.TABELA_ORCAMENTOS = "orcamento_envio_orcamentos"
-        self.fila.TABELA_APROVACOES = "orcamento_envio_aprovacoes"
+        self.fila.TABELA_ORCAMENTOS = "orcamento_api_orcamentos"
+        self.fila.TABELA_APROVACOES = "orcamento_api_aprovacoes"
         mock.patch.object(reconciliacao, "carregar_catalogo", return_value=SimpleNamespace()).start()
-        mock.patch.object(reconciliacao, "TIPO_POR_TABELA", {"orcamento_envio_orcamentos": "orcamentos"}).start()
+        mock.patch.object(reconciliacao, "TIPO_POR_TABELA", {"orcamento_api_orcamentos": "orcamentos"}).start()
         self.addCleanup(mock.patch.stopall)
         self.repassador = RepassadorFalso()
 

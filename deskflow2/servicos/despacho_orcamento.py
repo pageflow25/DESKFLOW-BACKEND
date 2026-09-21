@@ -1,6 +1,6 @@
 """Despacho dos orçamentos do PCP (POST /api/v1/orcamento).
 
-Para cada orcamento_envio_orcamentos em `pendente_envio`:
+Para cada orcamento_api_orcamentos em `pendente_envio`:
 1. claim CAS no banco (e o lote vai para `em_processamento`);
 2. monta o corpo com o SQL do modo do lote e grava `payload_enviado`;
 3. chama o ERP:

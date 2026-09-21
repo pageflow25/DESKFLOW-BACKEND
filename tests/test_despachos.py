@@ -97,7 +97,7 @@ def orcamento_reivindicado(**campos):
 class TestDespachoOrcamentos(unittest.TestCase):
     def setUp(self):
         self.fila = mock.patch.object(despacho_orcamento, "fila").start()
-        self.fila.TABELA_ORCAMENTOS = "orcamento_envio_orcamentos"
+        self.fila.TABELA_ORCAMENTOS = "orcamento_api_orcamentos"
         mock.patch.object(despacho_orcamento, "carregar_catalogo", return_value=SimpleNamespace()).start()
         self.montar = mock.patch.object(despacho_orcamento, "montar_payload_orcamento").start()
         self.montar.return_value = {"identifier": "PageFlow", "data": {"itens": [{"codigo_externo": "1"}]}}
@@ -169,7 +169,7 @@ def aprovacao_reivindicada(**campos):
 class TestDespachoAprovacoes(unittest.TestCase):
     def setUp(self):
         self.fila = mock.patch.object(despacho_aprovacao, "fila").start()
-        self.fila.TABELA_APROVACOES = "orcamento_envio_aprovacoes"
+        self.fila.TABELA_APROVACOES = "orcamento_api_aprovacoes"
         self.fila.id_orcamento_da_aprovacao.return_value = 36191
         mock.patch.object(despacho_aprovacao, "carregar_catalogo", return_value=SimpleNamespace()).start()
         self.addCleanup(mock.patch.stopall)

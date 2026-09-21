@@ -2,7 +2,7 @@
 
 Só para aprovações concluídas de lotes que pediram "baixar arquivos na pasta
 da OP" (decisão do clique "Enviar"). Para cada OP da aprovação:
-  - os arquivos vêm de orcamento_envio_item_retornos (id_op, pedido)
+  - os arquivos vêm de orcamento_api_itens_retorno (id_op, pedido)
     -> pedido_distribuicao_arquivos -> pedido_arquivos_pdf (Vercel Blob);
   - são baixados numa pasta temporária dentro de DOWNLOAD_BASE_PATH e só
     depois publicados em DOWNLOAD_BASE_PATH/<escola>/<op>/, para a produção

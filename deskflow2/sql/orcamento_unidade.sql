@@ -1,10 +1,10 @@
--- Orçamento no modo NORMAL (orcamento_envio_parametro.modo_agrupamento = 'unidade').
+-- Orçamento no modo NORMAL (orcamento_api_lotes.modo_agrupamento = 'unidade').
 --
 -- Base: docs/legado/query_orcamento.sql. Monta o corpo de UM POST /api/v1/orcamento
--- para UM orcamento_envio_orcamentos do PCP — que o PageFlow já criou com os
+-- para UM orcamento_api_orcamentos do PCP — que o PageFlow já criou com os
 -- pedidos de uma única unidade escolar. Diferenças para a query legada:
 --   - Entrada: os ids exatos de pedido_distribuicoes do orçamento
---     (orcamento_envio_itens), não mais filtros por escola/data/status. Nada é
+--     (orcamento_api_itens), não mais filtros por escola/data/status. Nada é
 --     re-selecionado: some o vazamento de "data_saida IS NULL" e o filtro de
 --     status (os pedidos já estão em "enviado para o bremen").
 --   - Cabeçalho (id_cliente/id_vendedor/id_forma_pagamento) vem da requisição,

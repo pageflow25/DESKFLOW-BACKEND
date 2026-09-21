@@ -1,7 +1,7 @@
--- Orçamento no modo POR ESCOLA (orcamento_envio_parametro.modo_agrupamento = 'escola').
+-- Orçamento no modo POR ESCOLA (orcamento_api_lotes.modo_agrupamento = 'escola').
 --
 -- Base: docs/legado/query_orcamento_escola.sql. Monta o corpo de UM POST
--- /api/v1/orcamento para UM orcamento_envio_orcamentos do PCP — que o PageFlow
+-- /api/v1/orcamento para UM orcamento_api_orcamentos do PCP — que o PageFlow
 -- já criou com os pedidos de uma única turma (ou dos pedidos sem turma) de um
 -- mesmo cliente/vendedor/forma de pagamento. Soma as quantidades de todas as
 -- unidades que compartilham o mesmo item de carrinho.

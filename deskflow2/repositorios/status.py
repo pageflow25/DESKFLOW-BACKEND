@@ -19,9 +19,9 @@ EM_PROCESSAMENTO = "em_processamento"
 
 @dataclass(frozen=True)
 class CatalogoStatus:
-    # orcamento_envio_requisicao_status (orçamentos e aprovações)
+    # orcamento_api_status_etapa (orçamentos e aprovações)
     chamada: dict
-    # orcamento_envio_parametro_status (lote)
+    # orcamento_api_status_lote (lote)
     lote: dict
 
     def id_chamada(self, codigo: str) -> int:
@@ -37,8 +37,8 @@ _cache: CatalogoStatus | None = None
 def carregar_catalogo(conn) -> CatalogoStatus:
     global _cache
     if _cache is None:
-        chamada = dict(conn.execute(text("SELECT codigo, id FROM orcamento_envio_requisicao_status")).all())
-        lote = dict(conn.execute(text("SELECT codigo, id FROM orcamento_envio_parametro_status")).all())
+        chamada = dict(conn.execute(text("SELECT codigo, id FROM orcamento_api_status_etapa")).all())
+        lote = dict(conn.execute(text("SELECT codigo, id FROM orcamento_api_status_lote")).all())
         faltando = [c for c in (PENDENTE_ENVIO, AGUARDANDO_RETORNO, SUCESSO, ERRO) if c not in chamada]
         faltando += [c for c in (EM_FILA, EM_PROCESSAMENTO) if c not in lote]
         if faltando:
