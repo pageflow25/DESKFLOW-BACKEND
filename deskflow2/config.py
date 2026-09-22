@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     PAGEFLOW_TENTATIVAS: int = 5
 
     # Fila do PCP.
+    # Padrão para linha sem `modo_envio`; o modo gravado na linha tem prioridade.
     PCP_MODO_ENVIO: Literal["assincrono", "sincrono"] = "assincrono"
     PCP_ENVIO_ATIVO: bool = True
     PCP_ENVIO_INTERVALO_SEGUNDOS: int = 60

@@ -47,7 +47,7 @@ def _verificar(app) -> int:
     print("Banco: ok (catálogo de status do PCP encontrado)")
     app.erp.garantir_login()
     print("ERP: login ok")
-    print(f"Modo de envio: {app.settings.PCP_MODO_ENVIO}")
+    print(f"Modo de envio: o da linha no banco (padrão para linha vazia: {app.settings.PCP_MODO_ENVIO})")
     print(f"Download: {app.settings.DOWNLOAD_BASE_PATH or '(desligado: DOWNLOAD_BASE_PATH vazio)'}")
     return 0
 
@@ -79,7 +79,7 @@ def main(argv=None) -> int:
             from .jobs import criar_agendador
 
             logger.info(
-                "DESKFLOW2.0 iniciado: modo %s, ciclo a cada %ss, download %s",
+                "DESKFLOW2.0 iniciado: modo padrão %s (vale o da linha), ciclo a cada %ss, download %s",
                 settings.PCP_MODO_ENVIO,
                 settings.PCP_ENVIO_INTERVALO_SEGUNDOS,
                 settings.DOWNLOAD_BASE_PATH or "desligado",

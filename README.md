@@ -54,6 +54,13 @@ ERP, confere se todo pedido virou item. Pedido sem arquivo, sem especificação
 ou com produto fora do catálogo bloqueia o envio com uma mensagem clara na
 tela, em vez de sumir do orçamento.
 
+**Síncrono ou assíncrono** vem do banco, por linha: vale o `modo_envio` já
+gravado em `orcamento_api_orcamentos` / `orcamento_api_aprovacoes`. Só a linha
+com `modo_envio` vazio usa o padrão `PCP_MODO_ENVIO`. Sem `url_webhook` a linha
+vai síncrona (o ERP não teria para onde devolver), exceto a aprovação de um
+orçamento assíncrono: ela vai assíncrona sempre, sem olhar a `url_webhook`. O
+modo usado fica gravado na linha no claim.
+
 Os SQLs originais estão em `docs/legado/`, para referência. Os novos foram
 comparados com eles no banco `testing` (148 de 148 itens idênticos) e só
 mudam no que o PCP exige:
@@ -230,7 +237,7 @@ arquivo (ex.: `testing`), defina `DESKFLOW2_ENV_FILE=.env.testing`. Arquivos
 | `ERP_503_RETRY_MAX_INTERVAL_SECONDS` | `30` | espera máxima entre tentativas |
 | `PAGEFLOW_TIMEOUT` | `30` | timeout das chamadas ao PageFlow (s) |
 | `PAGEFLOW_TENTATIVAS` | `5` | tentativas de repasse antes de guardar localmente |
-| `PCP_MODO_ENVIO` | `assincrono` | `assincrono` (resultado pelo webhook) ou `sincrono` |
+| `PCP_MODO_ENVIO` | `assincrono` | modo **padrão**, só para linha com `modo_envio` vazio no banco: `assincrono` (resultado pelo webhook) ou `sincrono` |
 | `PCP_ENVIO_ATIVO` | `true` | `false` faz o `worker` sair sem iniciar |
 | `PCP_ENVIO_INTERVALO_SEGUNDOS` | `60` | intervalo dos ciclos de orçamentos, aprovações e downloads |
 | `PCP_ENVIO_LOTE_MAXIMO` | `20` | linhas processadas por ciclo |

@@ -65,19 +65,34 @@ def listar_orcamentos_pendentes(conn, status: CatalogoStatus, limite: int) -> li
     """), {"pendente": status.id_chamada(PENDENTE_ENVIO), "limite": limite}).scalars())
 
 
-# Sem url_webhook (BACKEND_PUBLIC_BASE_URL não configurada no PageFlow) não há
-# para onde o ERP devolver o resultado: a linha vai no modo síncrono.
-_MODO_EFETIVO = "CASE WHEN url_webhook IS NULL THEN 'sincrono' ELSE CAST(:modo AS text) END"
+def _modo_efetivo(alias: str = "") -> str:
+    """Modo gravado no claim. Vale o `modo_envio` que já está na linha; vazio,
+    usa o padrão (`:modo`, de PCP_MODO_ENVIO). Sem url_webhook
+    (BACKEND_PUBLIC_BASE_URL não configurada no PageFlow) não há para onde o
+    ERP devolver o resultado: a linha vai no modo síncrono."""
+    return (
+        f"CASE WHEN {alias}url_webhook IS NULL THEN 'sincrono' "
+        f"ELSE COALESCE({alias}modo_envio::text, CAST(:modo AS text)) END"
+    )
 
 
-def reivindicar_orcamento(conn, status: CatalogoStatus, orcamento_id: int, modo_envio: str) -> Optional[OrcamentoReivindicado]:
+# Aprovação de orçamento que foi assíncrono vai assíncrona também, sem olhar a
+# url_webhook da aprovação. `modo_envio` já gravado na aprovação continua valendo.
+_MODO_EFETIVO_APROVACAO = (
+    "CASE WHEN a.modo_envio IS NULL AND o.modo_envio::text = 'assincrono' THEN 'assincrono' "
+    f"ELSE {_modo_efetivo('a.')} END"
+)
+
+
+def reivindicar_orcamento(conn, status: CatalogoStatus, orcamento_id: int, modo_padrao: str) -> Optional[OrcamentoReivindicado]:
     """Claim CAS `pendente_envio -> aguardando_retorno`; o lote vai de
     `em_fila` para `em_processamento` na mesma transação. Sem linha
-    atualizada, outro processo pegou (ou a linha mudou): não chamar o ERP."""
+    atualizada, outro processo pegou (ou a linha mudou): não chamar o ERP.
+    `modo_padrao` só vale para linha sem `modo_envio`."""
     linha = conn.execute(text(f"""
         UPDATE orcamento_api_orcamentos
            SET status_id = :aguardando,
-               modo_envio = CAST({_MODO_EFETIVO} AS enum_orcamento_api_orcamentos_modo_envio),
+               modo_envio = CAST({_modo_efetivo()} AS enum_orcamento_api_orcamentos_modo_envio),
                data_envio = NOW(),
                atualizado_em = NOW()
          WHERE id = :id
@@ -87,7 +102,7 @@ def reivindicar_orcamento(conn, status: CatalogoStatus, orcamento_id: int, modo_
     """), {
         "aguardando": status.id_chamada(AGUARDANDO_RETORNO),
         "pendente": status.id_chamada(PENDENTE_ENVIO),
-        "modo": modo_envio,
+        "modo": modo_padrao,
         "id": orcamento_id,
     }).first()
     if not linha:
@@ -155,11 +170,13 @@ def listar_aprovacoes_pendentes(conn, status: CatalogoStatus, limite: int) -> li
     """), {"pendente": status.id_chamada(PENDENTE_ENVIO), "limite": limite}).scalars())
 
 
-def reivindicar_aprovacao(conn, status: CatalogoStatus, aprovacao_id: int, modo_envio: str) -> Optional[AprovacaoReivindicada]:
+def reivindicar_aprovacao(conn, status: CatalogoStatus, aprovacao_id: int, modo_padrao: str) -> Optional[AprovacaoReivindicada]:
+    """Mesmo claim do orçamento. O modo segue o do orçamento quando ele foi
+    assíncrono; `modo_padrao` só vale para linha sem modo definido."""
     linha = conn.execute(text(f"""
         UPDATE orcamento_api_aprovacoes a
            SET status_id = :aguardando,
-               modo_envio = CAST({_MODO_EFETIVO.replace("url_webhook", "a.url_webhook")} AS enum_orcamento_api_aprovacoes_modo_envio),
+               modo_envio = CAST({_MODO_EFETIVO_APROVACAO} AS enum_orcamento_api_aprovacoes_modo_envio),
                data_envio = NOW(),
                atualizado_em = NOW()
           FROM orcamento_api_orcamentos o
@@ -172,7 +189,7 @@ def reivindicar_aprovacao(conn, status: CatalogoStatus, aprovacao_id: int, modo_
     """), {
         "aguardando": status.id_chamada(AGUARDANDO_RETORNO),
         "pendente": status.id_chamada(PENDENTE_ENVIO),
-        "modo": modo_envio,
+        "modo": modo_padrao,
         "id": aprovacao_id,
     }).mappings().first()
     if not linha:
