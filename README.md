@@ -103,6 +103,11 @@ Um ciclo com erro não derruba o worker; o próximo tenta de novo.
 - **Nenhum resultado se perde.** Se o PageFlow estiver fora, o resultado fica
   em `DADOS_DIR/repasses_pendentes/` e é reenviado pela reconciliação. O
   retorno do PageFlow é idempotente (repetir devolve `ja_processado`).
+- **Nada novo com repasse pendente.** Enquanto houver resultado guardado em
+  `repasses_pendentes/`, os despachos de orçamento e aprovação não reivindicam
+  nada — cada linha nova ficaria presa em `aguardando_retorno`. Voltam sozinhos
+  quando a reconciliação entrega (ou o PageFlow descarta com 409) o que estava
+  guardado.
 - **Transações curtas.** Nenhuma transação fica aberta durante uma chamada
   HTTP. O claim é gravado e commitado antes de chamar o ERP.
 - **Token fora da tela.** O `url_webhook` (que carrega o token) nunca é

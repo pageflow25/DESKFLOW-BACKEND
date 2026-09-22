@@ -49,6 +49,8 @@ class DespachoAprovacoes:
         self._dormir = dormir
 
     def executar_ciclo(self) -> int:
+        if self._repasse_travado():
+            return 0
         with self._engine.begin() as conn:
             status = carregar_catalogo(conn)
             pendentes = fila.listar_aprovacoes_pendentes(conn, status, self._settings.PCP_ENVIO_LOTE_MAXIMO)
@@ -64,6 +66,8 @@ class DespachoAprovacoes:
         despachadas = 0
         for indice, aprovacao_id in enumerate(pendentes):
             if indice > 0:
+                if self._repasse_travado():
+                    break
                 self._dormir(self._settings.PCP_PAUSA_ENTRE_ENVIOS_SEGUNDOS)
             if self.despachar(aprovacao_id) not in ("ja_reivindicada", "consulta_indisponivel"):
                 despachadas += 1
@@ -73,6 +77,15 @@ class DespachoAprovacoes:
         resposta = self._erp.get(CAMINHO_PROPOSTA, {"id_orcamento": id_orcamento, "apenas_ultima": "true"})
         dados = ler_json(resposta)
         return dados if isinstance(dados, dict) else {"success": False, "message": f"HTTP {resposta.status_code}"}
+
+    def _repasse_travado(self) -> bool:
+        guardados = self._repassador.quantos_pendentes()
+        if guardados:
+            logger.warning(
+                "Aprovações: %s resultado(s) ainda não entregue(s) ao PageFlow — nada novo é reivindicado "
+                "até a reconciliação entregá-los (dados/repasses_pendentes)", guardados,
+            )
+        return guardados > 0
 
     def despachar(self, aprovacao_id: int) -> str:
         with self._engine.begin() as conn:

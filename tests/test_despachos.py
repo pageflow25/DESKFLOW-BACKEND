@@ -155,6 +155,28 @@ class TestDespachoOrcamentos(unittest.TestCase):
         self.assertEqual(self.despacho(erp).executar_ciclo(), 0)
         self.fila.reivindicar_orcamento.assert_not_called()
 
+    def test_repasse_pendente_nao_reivindica_nada(self):
+        self.repassador.guardados = 2
+        self.fila.listar_orcamentos_pendentes.return_value = [700]
+
+        self.assertEqual(self.despacho(ErpFalso()).executar_ciclo(), 0)
+        self.fila.listar_orcamentos_pendentes.assert_not_called()
+        self.fila.reivindicar_orcamento.assert_not_called()
+
+    def test_para_no_meio_do_ciclo_quando_um_repasse_fica_guardado(self):
+        self.fila.listar_orcamentos_pendentes.return_value = [700, 701, 702]
+        despacho = self.despacho(ErpFalso())
+        chamados = []
+
+        def despachar(orcamento_id):
+            chamados.append(orcamento_id)
+            self.repassador.guardados = 1  # o PageFlow recusou o primeiro
+            return "repassado"
+
+        despacho.despachar = despachar
+        self.assertEqual(despacho.executar_ciclo(), 1)
+        self.assertEqual(chamados, [700])
+
 
 def aprovacao_reivindicada(**campos):
     base = dict(
@@ -210,6 +232,13 @@ class TestDespachoAprovacoes(unittest.TestCase):
 
         self.fila.reivindicar_aprovacao.assert_not_called()
         self.assertEqual(self.repassador.enviados, [])
+
+    def test_repasse_pendente_nao_reivindica_aprovacao(self):
+        self.repassador.guardados = 1
+        self.fila.listar_aprovacoes_pendentes.return_value = [900]
+
+        self.assertEqual(self.despacho(ErpFalso()).executar_ciclo(), 0)
+        self.fila.reivindicar_aprovacao.assert_not_called()
 
     def test_itens_ja_aprovados_exige_todos_confirmados(self):
         consulta = {"data": [{"itens": [{"id": 1, "status": "Confirmada"}, {"id": 2, "status": "Pendente"}]}]}

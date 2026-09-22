@@ -53,6 +53,10 @@ class MotorFalso:
 class RepassadorFalso:
     def __init__(self):
         self.enviados = []
+        self.guardados = 0
+
+    def quantos_pendentes(self):
+        return self.guardados
 
     def orcamento(self, registro_id, corpo):
         self.enviados.append(("orcamentos", registro_id, corpo))

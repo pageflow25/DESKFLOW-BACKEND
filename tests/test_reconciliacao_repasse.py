@@ -110,16 +110,19 @@ class TestRepassador(unittest.TestCase):
             resultado = repassador.orcamento(700, RESULTADO)
             self.assertIs(resultado.desfecho, Desfecho.NAO_ENTREGUE)
             self.assertEqual(repassador.pendentes("orcamentos"), {700})
+            self.assertEqual(repassador.quantos_pendentes(), 1)
 
             estado["no_ar"] = True
             self.assertEqual(repassador.reenviar_pendentes(), 1)
             self.assertEqual(repassador.pendentes("orcamentos"), set())
+            self.assertEqual(repassador.quantos_pendentes(), 0)
             self.assertEqual(recebidos, [("/api/pcp/retorno/orcamentos/700", RESULTADO, "pk_test_x")])
 
     def test_409_descarta_sem_guardar(self):
+        # Inclui o PEDIDO_SEM_ARQUIVO do PageFlow: erro definitivo, não volta à fila.
         cliente = PageflowClient(
             configuracao(),
-            http=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(409, json={"codigo": "RETORNO_FORA_DE_ESTADO"}))),
+            http=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(409, json={"codigo": "PEDIDO_SEM_ARQUIVO"}))),
             dormir=lambda s: None,
         )
         with tempfile.TemporaryDirectory() as pasta:

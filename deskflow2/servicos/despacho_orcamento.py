@@ -36,6 +36,8 @@ class DespachoOrcamentos:
         self._dormir = dormir
 
     def executar_ciclo(self) -> int:
+        if self._repasse_travado():
+            return 0
         with self._engine.begin() as conn:
             status = carregar_catalogo(conn)
             pendentes = fila.listar_orcamentos_pendentes(conn, status, self._settings.PCP_ENVIO_LOTE_MAXIMO)
@@ -51,10 +53,21 @@ class DespachoOrcamentos:
         despachados = 0
         for indice, orcamento_id in enumerate(pendentes):
             if indice > 0:
+                if self._repasse_travado():
+                    break
                 self._dormir(self._settings.PCP_PAUSA_ENTRE_ENVIOS_SEGUNDOS)
             if self.despachar(orcamento_id) != "ja_reivindicado":
                 despachados += 1
         return despachados
+
+    def _repasse_travado(self) -> bool:
+        guardados = self._repassador.quantos_pendentes()
+        if guardados:
+            logger.warning(
+                "Orçamentos: %s resultado(s) ainda não entregue(s) ao PageFlow — nada novo é reivindicado "
+                "até a reconciliação entregá-los (dados/repasses_pendentes)", guardados,
+            )
+        return guardados > 0
 
     def despachar(self, orcamento_id: int) -> str:
         with self._engine.begin() as conn:

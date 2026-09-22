@@ -40,6 +40,12 @@ class Repassador:
 
     # --- Pendentes ------------------------------------------------------------
 
+    def quantos_pendentes(self) -> int:
+        """Resultados guardados à espera do PageFlow. Enquanto houver algum, os
+        despachos não reivindicam nada novo: se o PageFlow está recusando,
+        cada linha nova reivindicada ficaria presa em `aguardando_retorno`."""
+        return sum(1 for nome in os.listdir(self._pasta) if nome.endswith(".json"))
+
     def pendentes(self, tipo: str) -> set:
         prefixo = f"{tipo}-"
         return {
