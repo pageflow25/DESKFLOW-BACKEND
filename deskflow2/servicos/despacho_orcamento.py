@@ -77,7 +77,12 @@ class DespachoOrcamentos:
             logger.info("Orçamento #%s já foi reivindicado ou mudou de estado", orcamento_id)
             return "ja_reivindicado"
 
-        rotulo = f"Orçamento #{orcamento.id} (lote {orcamento.lote_id}, {len(orcamento.pedido_distribuicao_ids)} pedido(s))"
+        # `ids_origem` já é a lista certa para a origem do lote: pedidos de
+        # escola ou produtos de pedido de integração.
+        rotulo = (
+            f"Orçamento #{orcamento.id} (lote {orcamento.lote_id}, origem {orcamento.origem}, "
+            f"{len(orcamento.ids_origem)} item(ns))"
+        )
         try:
             with self._engine.begin() as conn:
                 corpo = montar_payload_orcamento(conn, orcamento, self._settings.ERP_IDENTIFIER)

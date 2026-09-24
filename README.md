@@ -33,26 +33,63 @@ O contrato completo está em
 
 ```
 PageFlow (clique "Enviar")          DESKFLOW2.0 (worker)                        Wingraph
-lote: modo + par + decisões
+lote: origem + modo/par + decisões
  └ requisição (cliente/vendedor/forma)
-    └ orçamento pendente_envio ──claim──▶ SQL do modo ──▶ POST /api/v1/orcamento ──▶
+    └ orçamento pendente_envio ──claim──▶ SQL da origem ──▶ POST /api/v1/orcamento ──▶
                                           assíncrono: grava id_requisicao ─── webhook ──▶ PageFlow
                                           síncrono: repassa a resposta ──────────────────▶ PageFlow
     └ aprovação pendente_envio ──▶ GET /proposta (consulta) ──▶ POST /proposta/aprovar ──▶ idem
-    └ aprovação com OP + "baixar arquivos" ──▶ Vercel Blob ──▶ <DOWNLOAD_BASE_PATH>/<escola>/<op>/
+    └ aprovação com OP + "baixar arquivos" ──▶ Vercel Blob ──▶ <DOWNLOAD_BASE_PATH>/<escola|integração-pedido>/<op>/
                                                              └─▶ PageFlow /retorno/aprovacoes/:id/downloads
 ```
 
-| Modo do lote (`modo_agrupamento`) | SQL | Orçamentos | Itens |
+O SQL é escolhido pela **origem** do lote (`orcamento_api_lotes.origem`) e,
+na origem escola, pelo modo de agrupamento:
+
+| Origem / modo | SQL | Orçamentos | Itens |
 |---|---|---|---|
-| `unidade` (normal) | `sql/orcamento_unidade.sql` | 1 por unidade escolar | 1 por pedido (`codigo_externo` = id do pedido) |
-| `escola` | `sql/orcamento_escola.sql` | 1 por turma (pedidos sem turma formam um) | soma as unidades do mesmo item (`codigo_externo` = ids separados por vírgula) |
+| escola, `unidade` (normal) | `sql/orcamento_unidade.sql` | 1 por unidade escolar | 1 por pedido (`codigo_externo` = id do `pedido_distribuicoes`) |
+| escola, `escola` | `sql/orcamento_escola.sql` | 1 por turma (pedidos sem turma formam um) | soma as unidades do mesmo item (`codigo_externo` = ids separados por vírgula) |
+| **integração** | `sql/orcamento_integracao.sql` | 1 por pedido do parceiro (`integra_pedidos`) | 1 por produto (`codigo_externo` = id do `integra_pedido_produtos`) |
 
 Quem divide o lote em orçamentos é o PageFlow, no clique "Enviar". O
-DESKFLOW2.0 roda o SQL só com os pedidos daquele orçamento. Antes de mandar ao
-ERP, confere se todo pedido virou item. Pedido sem arquivo, sem especificação
-ou com produto fora do catálogo bloqueia o envio com uma mensagem clara na
-tela, em vez de sumir do orçamento.
+DESKFLOW2.0 roda o SQL só com os ids daquele orçamento. Antes de mandar ao
+ERP, confere se todo id virou item. Pedido sem arquivo, sem especificação ou
+com produto fora do catálogo bloqueia o envio com uma mensagem clara na tela,
+em vez de sumir do orçamento.
+
+### Lotes de integração
+
+Pedidos que chegam ao PageFlow pela API de integração (`integra_pedidos`)
+usam as MESMAS tabelas `orcamento_api_*` e o mesmo ciclo — muda só de onde
+vêm os itens. O consumidor não precisa saber mais que isso:
+
+- `OrcamentoReivindicado.origem` diz qual lado vale, e `ids_origem` devolve a
+  lista certa (`pedido_distribuicao_ids` ou `integra_pedido_produto_ids`);
+- o cabeçalho (cliente/vendedor/forma) vem da requisição, como sempre — na
+  integração o PageFlow o copiou do cadastro da integração, não da unidade;
+- `modo_agrupamento` é NULL num lote de integração (a divisão é fixa);
+- a estrutura do item (componentes, perguntas, tarefas) vem do **catálogo
+  vivo** (`catalogo_bremen_modelos` e filhas), não de especificação de pedido.
+  O snapshot do modelo existe no banco mas está vazio e não é lido: mudar o
+  modelo no catálogo muda o que vai ao ERP nos envios seguintes;
+- `altura`/`largura` saem como estão em
+  `catalogo_bremen_modelo_componentes` (já em **centímetros**) — ao contrário
+  dos SQLs de escola, que leem milímetros e dividem por 10;
+- capa e miolo são decididos por `bremen_componentes.is_capa/is_miolo`.
+
+**Downloads de lote de integração**: os arquivos não estão em
+`pedido_arquivos_pdf` — são URLs no próprio produto (`arquivo_pdf` e, quando
+existirem, `design_capa_frente`/`design_capa_verso`; mockups e etiqueta ficam
+de fora). A pasta de destino é
+`<DOWNLOAD_BASE_PATH>/<integração> - <numero_pedido>/<op>/`, no lugar da
+escola, e a linha de `downloads_bremen` vai com `integra_pedido_produto_id`
+(com `arquivo_pdf_id` NULL).
+
+> O DESKFLOW2.0 só entende `origem` depois das migrations
+> `20260922205000..2` do PageFlow. **Ordem de deploy: backend primeiro,
+> DESKFLOW depois** — e nenhum lote de integração deve ser criado antes de o
+> DESKFLOW estar atualizado.
 
 **Síncrono ou assíncrono** vem do banco, por linha: vale o `modo_envio` já
 gravado em `orcamento_api_orcamentos` / `orcamento_api_aprovacoes`. Só a linha
@@ -61,9 +98,9 @@ vai síncrona (o ERP não teria para onde devolver), exceto a aprovação de um
 orçamento assíncrono: ela vai assíncrona sempre, sem olhar a `url_webhook`. O
 modo usado fica gravado na linha no claim.
 
-Os SQLs originais estão em `docs/legado/`, para referência. Os novos foram
-comparados com eles no banco `testing` (148 de 148 itens idênticos) e só
-mudam no que o PCP exige:
+Os SQLs originais **de escola** estão em `docs/legado/`, para referência. Os
+novos foram comparados com eles no banco `testing` (148 de 148 itens
+idênticos) e só mudam no que o PCP exige:
 
 - entram os ids exatos dos pedidos, e não mais filtros;
 - o cabeçalho vem do par cliente/vendedor escolhido na tela;
@@ -148,7 +185,8 @@ deskflow2/
 │   └── comum.py
 └── sql/
     ├── orcamento_unidade.sql
-    └── orcamento_escola.sql
+    ├── orcamento_escola.sql
+    └── orcamento_integracao.sql
 docs/legado/               # SQLs do DESKFLOW antigo, só para referência
 tests/                     # unittest, sem banco e sem rede
 ```
@@ -308,7 +346,7 @@ BLOB_READ_WRITE_TOKEN=token
 .venv\Scripts\python -m unittest discover -s tests -t .
 ```
 
-Os testes rodam sem banco e sem rede. O ERP, o PageFlow e o Blob são
+São 79 testes, sem banco e sem rede. O ERP, o PageFlow e o Blob são
 simulados com `httpx.MockTransport`.
 
 ## Versionamento e releases
