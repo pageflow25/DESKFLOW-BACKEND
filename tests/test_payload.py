@@ -2,7 +2,9 @@ import unittest
 from types import SimpleNamespace
 
 from deskflow2.repositorios.fila import OrcamentoReivindicado
+from deskflow2.servicos import payload as modulo_payload
 from deskflow2.servicos.payload import (
+    ARQUIVO_POR_MODO,
     PayloadIncompleto,
     ids_do_codigo_externo,
     montar_payload_orcamento,
@@ -85,6 +87,43 @@ class TestPayload(unittest.TestCase):
     def test_modo_desconhecido_bloqueia(self):
         with self.assertRaises(PayloadIncompleto):
             montar_payload_orcamento(ConexaoFalsa([]), orcamento(modo_agrupamento="turma"), "PageFlow")
+
+
+
+class TestDataDeEntregaNosSqlsDeEscola(unittest.TestCase):
+    """A data escolhida no \"Enviar\" manda no obs_producao também na escola.
+
+    Desde 2026-09-24 o modal da cascata pede as duas datas e o PageFlow as
+    grava em orcamento_api_orcamentos. Os SQLs de escola passaram a recebê-la
+    em :data_entrega e a preferi-la à do formulário — com COALESCE, para os
+    lotes que já estavam na fila (coluna nula) seguirem montando igual.
+    """
+
+    def _corpo(self, arquivo):
+        sql = (modulo_payload.PASTA_SQL / arquivo).read_text(encoding="utf-8-sig")
+        # Só o SQL de verdade: comentário citando a coluna daria falso positivo.
+        return chr(10).join(
+            linha for linha in sql.splitlines() if not linha.lstrip().startswith("--")
+        )
+
+    def test_os_dois_sqls_declaram_e_preferem_a_data_do_orcamento(self):
+        for arquivo in ARQUIVO_POR_MODO.values():
+            with self.subTest(arquivo=arquivo):
+                corpo = self._corpo(arquivo)
+                self.assertIn(":data_entrega", corpo)
+                self.assertIn(
+                    "'Data de Entrega: ' || COALESCE(p.data_entrega, ip.data_entrega_pedido, '-')",
+                    corpo,
+                )
+
+    def test_a_data_vai_ao_sql_nos_dois_modos_de_escola(self):
+        for modo in ARQUIVO_POR_MODO:
+            with self.subTest(modo=modo):
+                conn = ConexaoFalsa([corpo_sql("1,2,3")])
+                montar_payload_orcamento(
+                    conn, orcamento(modo_agrupamento=modo, data_entrega="01/12/2026"), "PageFlow"
+                )
+                self.assertEqual(conn.parametros["data_entrega"], "01/12/2026")
 
 
 if __name__ == "__main__":

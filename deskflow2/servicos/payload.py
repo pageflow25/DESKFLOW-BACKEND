@@ -135,11 +135,12 @@ def montar_payload_orcamento(conn, orcamento: OrcamentoReivindicado, identifier:
         "id_cliente": orcamento.cliente_id,
         "id_vendedor": orcamento.vendedor_id,
         "id_forma_pagamento": None if orcamento.forma_pagamento is None else str(orcamento.forma_pagamento),
+        # Os TRÊS SQLs declaram :data_entrega desde 2026-09-24: a data escolhida
+        # no "Enviar" passou a valer também na origem escola, onde manda sobre a
+        # do formulário. Vem None nos lotes de escola que já estavam na fila, e
+        # aí o COALESCE do SQL cai de volta em form.data_entrega.
+        "data_entrega": orcamento.data_entrega,
     }
-    if orcamento.origem == ORIGEM_INTEGRACAO:
-        # Só o SQL de integração declara :data_entrega — passar o parâmetro
-        # para um SQL que não o usa faria o SQLAlchemy reclamar.
-        parametros["data_entrega"] = orcamento.data_entrega
     linhas = conn.execute(_consulta(arquivo, parametro_ids), parametros).scalars().all()
 
     if not linhas:

@@ -18,15 +18,23 @@
 --   - Campos internos (ids_distribuicao, id_escola) não vão mais no corpo.
 --
 -- Parâmetros: :pedido_distribuicao_ids (int[]), :id_cliente, :id_vendedor,
--- :id_forma_pagamento. Devolve 1 linha por turma — para um orçamento do PCP,
--- exatamente 1 (o serviço confere).
+-- :id_forma_pagamento, :data_entrega (texto 'DD/MM/YYYY' do orçamento, vindo do
+-- claim — ver repositorios/fila.py; NULL nos lotes anteriores a 2026-09-24, que
+-- caem de volta na data do formulário). Devolve 1 linha por turma — para um
+-- orçamento do PCP, exatamente 1 (o serviço confere).
 
 WITH parametros AS (
     SELECT
         CAST(:pedido_distribuicao_ids AS int[]) AS pedido_distribuicao_ids,
         CAST(:id_cliente AS int) AS id_cliente,
         CAST(:id_vendedor AS int) AS id_vendedor,
-        CAST(:id_forma_pagamento AS text) AS id_forma_pagamento
+        CAST(:id_forma_pagamento AS text) AS id_forma_pagamento,
+        -- Data de entrega ESCOLHIDA no "Enviar" e gravada em
+        -- orcamento_api_orcamentos.data_entrega ('DD/MM/YYYY', vinda do claim
+        -- — ver repositorios/fila.py). Manda sobre a do formulário; vem NULL
+        -- só nos lotes de escola anteriores a 2026-09-24, que já estavam na
+        -- fila, e aí o COALESCE lá embaixo cai em form.data_entrega.
+        CAST(:data_entrega AS text) AS data_entrega
 ),
 
 -- 1 linha por item comercial entregue a uma unidade/turma.
@@ -214,7 +222,7 @@ SELECT json_strip_nulls(json_build_object(
                         ip.obs_producao,
                         CONCAT_WS(
                             CHR(10),
-                            'Data de Entrega: ' || COALESCE(ip.data_entrega_pedido, '-'),
+                            'Data de Entrega: ' || COALESCE(p.data_entrega, ip.data_entrega_pedido, '-'),
                             'Título: ' || COALESCE(ip.form_titulo, '-')
                         )
                     ),

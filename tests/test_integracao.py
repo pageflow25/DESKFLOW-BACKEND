@@ -155,14 +155,23 @@ class TestPayloadIntegracao(unittest.TestCase):
         # A data de entrega do orçamento vai ao SQL para entrar no obs_producao.
         self.assertEqual(conn.parametros["data_entrega"], "01/12/2026")
 
-    def test_a_data_de_entrega_so_vai_ao_sql_na_origem_integracao(self):
-        # Os SQLs de escola não declaram :data_entrega — mandar o parâmetro
-        # para eles faria o SQLAlchemy reclamar de bind sobrando.
+    def test_a_data_de_entrega_vai_ao_sql_tambem_na_origem_escola(self):
+        # Desde 2026-09-24 a data escolhida no "Enviar" vale nas duas origens:
+        # os três SQLs declaram :data_entrega e o parâmetro vai sempre.
+        conn = ConexaoFalsa([corpo_sql("1", "2")])
+
+        montar_payload_orcamento(conn, orcamento_escola(data_entrega="01/12/2026"), "PageFlow")
+
+        self.assertEqual(conn.parametros["data_entrega"], "01/12/2026")
+
+    def test_lote_de_escola_antigo_manda_none_e_o_sql_cai_no_formulario(self):
+        # Lote que já estava na fila antes de 2026-09-24 está com a coluna nula;
+        # o COALESCE do SQL volta para form.data_entrega, sem quebrar o envio.
         conn = ConexaoFalsa([corpo_sql("1", "2")])
 
         montar_payload_orcamento(conn, orcamento_escola(), "PageFlow")
 
-        self.assertNotIn("data_entrega", conn.parametros)
+        self.assertIsNone(conn.parametros["data_entrega"])
 
     def test_orcamento_de_integracao_sem_data_passa_none_ao_sql(self):
         # O CHECK do banco exige a data, mas o SQL trata NULL ('-') em vez de
