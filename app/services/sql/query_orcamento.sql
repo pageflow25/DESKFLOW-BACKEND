@@ -472,7 +472,7 @@ SELECT json_strip_nulls(json_build_object(
                     'tarefas_gerais', COALESCE((
                         SELECT json_agg(
                             json_build_object(
-                                'id_tarefa', tg.id_tarefa,
+                                'id', tg.id_tarefa,
                                 'descricao', tg.descricao,
                                 'descricao_pf', tg.descricao_pf
                             )
