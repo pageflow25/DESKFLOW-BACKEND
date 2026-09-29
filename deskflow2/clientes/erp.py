@@ -8,16 +8,65 @@
   conexão. Um POST que estoura o tempo de leitura (ou devolve 2xx ilegível)
   pode ter criado o orçamento/aprovação — o ERP não é idempotente —, então
   vira `ResultadoIncerto` e não é repetido.
+
+Sob a fila (`modo_fila()`), duas coisas mudam e SÓ ali:
+
+- o semáforo passa a cobrar reserva de classe: a classe assíncrona enxerga
+  (ERP_MAX_CONEXOES - ERP_CONEXOES_RESERVADAS_SINCRONO) conexões e a síncrona
+  enxerga todas. Sem isso os pools separados do escalonador seriam ilusórios,
+  porque disputariam o mesmo cliente HTTP;
+- a espera do 503 sai da thread: `ErpIndisponivel` na primeira ocorrência, e
+  quem devolve a linha para `pendente` com `disponivel_em` futuro é o motor.
+
+Fora do `modo_fila()` — que é o caso dos quatro ciclos antigos — nada disso
+entra em cena e o comportamento é exatamente o de antes.
 """
 
+import contextlib
+import contextvars
 import logging
 import threading
 import time
+from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+PADRAO_MAX_CONEXOES = 6
+PADRAO_CONEXOES_RESERVADAS_SINCRONO = 2
+
+CAMINHO_CLIENTE = "/api/v1/cliente"
+CAMINHO_CARACTERISTICAS_PRODUTO = "/api/v1/caracteristicasproduto"
+
+# `origem` do GET de características: 2 = modelo de produto (o que corresponde
+# ao `id_produto` do PageFlow); 1 = item de estoque, cadastro diferente no ERP e
+# não usado aqui.
+ORIGEM_MODELO_DE_PRODUTO = 2
+
+
+@dataclass(frozen=True)
+class ContextoFila:
+    classe: str
+
+
+# Nulo fora da fila: os ciclos antigos nunca entram no `modo_fila()`.
+_contexto_fila: contextvars.ContextVar = contextvars.ContextVar("erp_contexto_fila", default=None)
+
+
+@contextlib.contextmanager
+def modo_fila(classe: str):
+    """Marca a execução atual como item da fila, da classe informada."""
+    token = _contexto_fila.set(ContextoFila(classe=classe))
+    try:
+        yield
+    finally:
+        _contexto_fila.reset(token)
+
+
+def contexto_fila() -> Optional[ContextoFila]:
+    return _contexto_fila.get()
 
 
 class ErroErp(Exception):
@@ -78,12 +127,29 @@ class ErpClient:
     ):
         self._settings = settings
         self._base = settings.ERP_BASE_URL
-        self._http = http or httpx.Client(timeout=settings.ERP_TIMEOUT)
+        self._maximo = max(1, int(getattr(settings, "ERP_MAX_CONEXOES", PADRAO_MAX_CONEXOES)))
+        reserva = int(getattr(settings, "ERP_CONEXOES_RESERVADAS_SINCRONO", PADRAO_CONEXOES_RESERVADAS_SINCRONO))
+        self._reserva_sincrono = min(max(0, reserva), self._maximo - 1)
+        # Limites explícitos: o pool default do httpx funcionava por acidente.
+        self._http = http or httpx.Client(
+            timeout=settings.ERP_TIMEOUT,
+            limits=httpx.Limits(
+                max_connections=self._maximo,
+                max_keepalive_connections=self._maximo,
+                keepalive_expiry=30.0,
+            ),
+        )
         self._relogio = relogio
         self._dormir = dormir
         self._token: Optional[str] = None
         self._token_obtido_em = 0.0
+        self._geracao_token = 0
         self._lock = threading.Lock()
+        # Reserva de classe: a assíncrona tem de segurar OS DOIS semáforos, a
+        # síncrona só o total. Logo a assíncrona nunca passa de
+        # (máximo - reserva) e sempre sobra conexão para o síncrono.
+        self._vagas_total = threading.BoundedSemaphore(self._maximo)
+        self._vagas_assincrono = threading.BoundedSemaphore(max(1, self._maximo - self._reserva_sincrono))
 
     # --- Token -----------------------------------------------------------------
 
@@ -113,19 +179,32 @@ class ErpClient:
 
         self._token = token.removeprefix("Bearer ").strip()
         self._token_obtido_em = self._relogio()
+        self._geracao_token += 1
         logger.info("ERP: token renovado")
         return self._token
 
     def garantir_login(self) -> None:
         """Faz login se o token estiver vencido. Chamado no início de cada
         ciclo, antes de qualquer claim: com o ERP fora ou a senha errada, nada
-        sai da fila."""
+        sai da fila.
+
+        Lazy, com dupla verificação: o caminho comum (token válido) não toca no
+        lock. Antes, com o lock tomado em TODA chamada, N threads serializavam
+        aqui só para descobrir que o token estava bom."""
+        if not self._token_vencido():
+            return
         with self._lock:
             if self._token_vencido():
                 self._autenticar()
 
-    def _renovar_token(self) -> None:
+    def _renovar_token(self, geracao_vista: Optional[int] = None) -> None:
+        """Renovação depois de um 401. `geracao_vista` é a geração do token que
+        o chamador usou: se outra thread já renovou no meio tempo, esta não
+        renova de novo — é a guarda contra duas threads em 401 simultâneo
+        fazerem dois logins (e um invalidar o token do outro)."""
         with self._lock:
+            if geracao_vista is not None and geracao_vista != self._geracao_token:
+                return
             self._token = None
             self._autenticar()
 
@@ -139,18 +218,48 @@ class ErpClient:
 
     # --- Chamadas ---------------------------------------------------------------
 
+    @contextlib.contextmanager
+    def _vaga(self):
+        """Uma conexão ao ERP. Fora da fila não há espera nenhuma: o semáforo
+        total tem `ERP_MAX_CONEXOES` vagas e os ciclos antigos são
+        single-thread."""
+        contexto = _contexto_fila.get()
+        assincrono = contexto is not None and contexto.classe == "assincrono"
+        if assincrono:
+            self._vagas_assincrono.acquire()
+        self._vagas_total.acquire()
+        try:
+            yield
+        finally:
+            self._vagas_total.release()
+            if assincrono:
+                self._vagas_assincrono.release()
+
     def _enviar(self, metodo: str, caminho: str, **kwargs) -> httpx.Response:
         self.garantir_login()
+        geracao = self._geracao_token
         url = f"{self._base}{caminho}"
-        resposta = self._http.request(metodo, url, headers=self._headers(), **kwargs)
-        if resposta.status_code == 401:
-            logger.warning("ERP: 401 em %s %s, renovando o token", metodo, caminho)
-            self._renovar_token()
+        with self._vaga():
             resposta = self._http.request(metodo, url, headers=self._headers(), **kwargs)
+            if resposta.status_code == 401:
+                logger.warning("ERP: 401 em %s %s, renovando o token", metodo, caminho)
+                self._renovar_token(geracao)
+                resposta = self._http.request(metodo, url, headers=self._headers(), **kwargs)
         return resposta
 
+    def _janela_de_espera(self) -> int:
+        """Quanto tempo o cliente pode insistir num erro retentável.
+
+        Sob a fila é ZERO: nenhuma thread dorme esperando o ERP voltar. A
+        espera vira `disponivel_em` na linha, com backoff e jitter, e o worker
+        segue com o próximo item. Fora da fila continua valendo
+        `ERP_503_MAX_WAIT_SECONDS`, como sempre."""
+        if _contexto_fila.get() is not None:
+            return 0
+        return max(0, self._settings.ERP_503_MAX_WAIT_SECONDS)
+
     def _com_retry(self, metodo: str, caminho: str, idempotente: bool, **kwargs) -> httpx.Response:
-        janela = max(0, self._settings.ERP_503_MAX_WAIT_SECONDS)
+        janela = self._janela_de_espera()
         base = max(1, self._settings.ERP_503_RETRY_BASE_SECONDS)
         teto = max(1, self._settings.ERP_503_RETRY_MAX_INTERVAL_SECONDS)
         inicio = self._relogio()
@@ -188,11 +297,69 @@ class ErpClient:
     def get(self, caminho: str, params: Optional[dict] = None) -> httpx.Response:
         return self._com_retry("GET", caminho, idempotente=True, params=params)
 
-    def post(self, caminho: str, corpo: dict) -> httpx.Response:
-        resposta = self._com_retry("POST", caminho, idempotente=False, json=corpo)
+    def _mutacao(self, metodo: str, caminho: str, corpo: dict) -> httpx.Response:
+        """POST e PATCH têm exatamente a mesma regra: a API não é idempotente,
+        então uma resposta 2xx ilegível pode ser uma escrita que aconteceu."""
+        resposta = self._com_retry(metodo, caminho, idempotente=False, json=corpo)
         if 200 <= resposta.status_code < 300 and ler_json(resposta) is None:
             raise ResultadoIncerto(f"resposta ilegível do ERP em {caminho} (HTTP {resposta.status_code})")
         return resposta
+
+    def post(self, caminho: str, corpo: dict) -> httpx.Response:
+        return self._mutacao("POST", caminho, corpo)
+
+    def patch(self, caminho: str, corpo: dict) -> httpx.Response:
+        return self._mutacao("PATCH", caminho, corpo)
+
+    # --- Cliente (/api/v1/cliente) ----------------------------------------------
+    #
+    # Contrato espelhado de `services/Integracoes/wingraphErpClient.js`, que é o
+    # que fala com esse endpoint em produção hoje e será desligado: GET com os
+    # filtros soltos em querystring; POST e PATCH com o corpo dentro do envelope
+    # `{identifier, data}`; e o `id_cliente` viajando DENTRO de `data` no PATCH.
+
+    def _envelope(self, dados: dict) -> dict:
+        return {"identifier": self._settings.ERP_IDENTIFIER, "data": dados}
+
+    def listar_clientes(self, id_cliente: Optional[int] = None, cpfcnpj: Optional[str] = None,
+                        email: Optional[str] = None, page: Optional[int] = None) -> httpx.Response:
+        """GET /api/v1/cliente. Todos os filtros são opcionais; sem nenhum, a
+        API pagina o cadastro inteiro (`metadata.pages`)."""
+        params: dict = {}
+        if id_cliente is not None:
+            params["id"] = id_cliente
+        if cpfcnpj:
+            params["cpfcnpj"] = cpfcnpj
+        if email:
+            params["email"] = email
+        if page is not None:
+            params["page"] = page
+        return self.get(CAMINHO_CLIENTE, params or None)
+
+    def criar_cliente(self, cliente: dict) -> httpx.Response:
+        """POST /api/v1/cliente. Escrita NÃO idempotente."""
+        return self.post(CAMINHO_CLIENTE, self._envelope(cliente))
+
+    def atualizar_cliente(self, cliente: dict) -> httpx.Response:
+        """PATCH /api/v1/cliente. O corpo precisa ser a estrutura COMPLETA, com
+        `id_cliente` e com os ids de contato/endereço: omitir um id faz o ERP
+        CRIAR a linha em vez de editá-la, duplicando os registros a cada
+        salvamento."""
+        return self.patch(CAMINHO_CLIENTE, self._envelope(cliente))
+
+    # --- Produto (/api/v1/caracteristicasproduto) --------------------------------
+
+    def buscar_caracteristicas_produto(
+        self, id_produto: int, origem: int = ORIGEM_MODELO_DE_PRODUTO
+    ) -> httpx.Response:
+        """GET /api/v1/caracteristicasproduto — item, componentes, perguntas
+        (gerais e por componente) e opções de resposta de um produto.
+
+        Contrato espelhado de `buscarCaracteristicasProduto` em
+        `services/Integracoes/wingraphErpClient.js`: os dois filtros vão soltos
+        na querystring (`id` e `origem`), sem envelope. Leitura, logo
+        idempotente — repetir é grátis."""
+        return self.get(CAMINHO_CARACTERISTICAS_PRODUTO, {"id": id_produto, "origem": origem})
 
     def fechar(self) -> None:
         self._http.close()

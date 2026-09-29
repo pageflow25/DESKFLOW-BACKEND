@@ -38,12 +38,18 @@ def _protegido(nome: str, ciclo):
     return executar
 
 
-def criar_agendador(app: Aplicacao) -> BlockingScheduler:
+def criar_agendador(app: Aplicacao, incluir_ciclos_pcp: bool = True) -> BlockingScheduler:
+    """`incluir_ciclos_pcp=False` sobe só a fila nova: é o caso de
+    PCP_ENVIO_ATIVO=false com FILA_ATIVA=true. Os quatro ciclos antigos ficam
+    de fora exatamente como ficariam hoje, sem worker nenhum."""
     intervalo = max(10, app.settings.PCP_ENVIO_INTERVALO_SEGUNDOS)
     agendador = BlockingScheduler(
         timezone="America/Sao_Paulo",
         job_defaults={"max_instances": 1, "coalesce": True, "misfire_grace_time": 300},
     )
+    if not incluir_ciclos_pcp:
+        _agendar_fila(agendador, app)
+        return agendador
     agendador.add_job(_protegido("orcamentos", app.orcamentos.executar_ciclo), "interval", seconds=intervalo, id="orcamentos")
     agendador.add_job(_protegido("aprovacoes", app.aprovacoes.executar_ciclo), "interval", seconds=intervalo, id="aprovacoes")
     agendador.add_job(_protegido("downloads", app.downloads.executar_ciclo), "interval", seconds=intervalo, id="downloads")
@@ -52,4 +58,40 @@ def criar_agendador(app: Aplicacao) -> BlockingScheduler:
         "interval", seconds=intervalo_reconciliacao(app.settings.PCP_RECONCILIACAO_MINUTOS), id="reconciliacao",
         next_run_time=datetime.now(ZoneInfo("America/Sao_Paulo")) + timedelta(seconds=ATRASO_PRIMEIRA_RECONCILIACAO_SEGUNDOS),
     )
+    _agendar_fila(agendador, app)
     return agendador
+
+
+def _agendar_fila(agendador: BlockingScheduler, app: Aplicacao) -> None:
+    """Os quatro ciclos da fila de processamento única, no mesmo agendador.
+
+    Só entram quando o escalonador foi montado (FILA_ATIVA e catálogo presente
+    no banco). Os quatro ciclos antigos não são tocados nem quando ele existe.
+
+    Sem `LISTEN/NOTIFY`: o banco responde pelo pooler de transação do Supabase,
+    onde ele não funciona. O pickup é por poll curto — 1 s no síncrono, que
+    cabe folgado nos 30 s de latência aceitável, e 5 s no assíncrono.
+    """
+    fila = getattr(app, "fila", None)
+    if fila is None:
+        return
+    settings = app.settings
+    agendador.add_job(
+        _protegido("fila_sincrona", fila.ciclo_sincrono),
+        "interval", seconds=max(1, settings.FILA_POLL_SINCRONO_SEGUNDOS), id="fila_sincrona",
+        misfire_grace_time=5,
+    )
+    agendador.add_job(
+        _protegido("fila_assincrona", fila.ciclo_assincrono),
+        "interval", seconds=max(1, settings.FILA_POLL_ASSINCRONO_SEGUNDOS), id="fila_assincrona",
+        misfire_grace_time=15,
+    )
+    agendador.add_job(
+        _protegido("fila_reaper", fila.ciclo_reaper),
+        "interval", seconds=max(5, settings.FILA_REAPER_SEGUNDOS), id="fila_reaper",
+    )
+    agendador.add_job(
+        _protegido("fila_heartbeat", fila.ciclo_heartbeat),
+        "interval", seconds=max(5, settings.FILA_HEARTBEAT_SEGUNDOS), id="fila_heartbeat",
+        next_run_time=datetime.now(ZoneInfo("America/Sao_Paulo")),
+    )

@@ -45,6 +45,14 @@ def _verificar(app) -> int:
         conn.execute(text("SELECT 1"))
         carregar_catalogo(conn)
     print("Banco: ok (catálogo de status do PCP encontrado)")
+    if app.fila is None:
+        print("Fila de processamento: desligada (FILA_ATIVA=false ou catálogo fila_* ausente)")
+    else:
+        print(
+            f"Fila de processamento: worker {app.fila.worker_id}, "
+            f"pool sincrono={app.fila.sincrono.capacidade} assincrono={app.fila.assincrono.capacidade}, "
+            f"destino {app.settings.FILA_DESTINO}"
+        )
     app.erp.garantir_login()
     print("ERP: login ok")
     print(f"Modo de envio: o da linha no banco (padrão para linha vazia: {app.settings.PCP_MODO_ENVIO})")
@@ -73,11 +81,13 @@ def main(argv=None) -> int:
     app = montar_aplicacao(settings)
     try:
         if args.comando == "worker":
-            if not settings.PCP_ENVIO_ATIVO:
-                logger.warning("PCP_ENVIO_ATIVO=false: worker não iniciado")
+            if not settings.PCP_ENVIO_ATIVO and app.fila is None:
+                logger.warning("PCP_ENVIO_ATIVO=false e fila inativa: worker não iniciado")
                 return 0
             from .jobs import criar_agendador
 
+            if not settings.PCP_ENVIO_ATIVO:
+                logger.warning("PCP_ENVIO_ATIVO=false: só os ciclos da fila de processamento sobem")
             logger.info(
                 "DESKFLOW2.0 iniciado: modo padrão %s (vale o da linha), ciclo a cada %ss, download %s",
                 settings.PCP_MODO_ENVIO,
@@ -85,7 +95,7 @@ def main(argv=None) -> int:
                 settings.DOWNLOAD_BASE_PATH or "desligado",
             )
             try:
-                criar_agendador(app).start()
+                criar_agendador(app, incluir_ciclos_pcp=settings.PCP_ENVIO_ATIVO).start()
             except (KeyboardInterrupt, SystemExit):
                 logger.info("DESKFLOW2.0 encerrado")
             return 0

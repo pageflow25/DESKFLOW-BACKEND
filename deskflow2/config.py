@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     DB_SSL: bool = True
     DB_STATEMENT_TIMEOUT_MS: int = 120_000
+    # 0 = dimensionar pelo que o processo realmente abre (ver `db.py`).
+    DB_POOL_SIZE: int = 0
+    DB_MAX_OVERFLOW: int = 5
 
     # ERP Wingraph (a API é servida pela Bremen Sistemas).
     ERP_BASE_URL: str
@@ -31,6 +34,11 @@ class Settings(BaseSettings):
     ERP_503_MAX_WAIT_SECONDS: int = 300
     ERP_503_RETRY_BASE_SECONDS: int = 5
     ERP_503_RETRY_MAX_INTERVAL_SECONDS: int = 30
+    # Teto de conexões simultâneas ao ERP e quantas ficam RESERVADAS à classe
+    # síncrona. O pool assíncrono só enxerga (TETO - RESERVA): sem isso os dois
+    # pools seriam separados só no nome, porque disputariam o mesmo cliente HTTP.
+    ERP_MAX_CONEXOES: int = 6
+    ERP_CONEXOES_RESERVADAS_SINCRONO: int = 2
 
     # PageFlow: só recebe o resultado (POST /api/pcp/retorno/...).
     PAGEFLOW_API_URL: str
@@ -49,6 +57,42 @@ class Settings(BaseSettings):
     # O ERP tenta o webhook 5x, de hora em hora: depois disso, desiste da linha.
     PCP_RECONCILIACAO_LIMITE_HORAS: int = 6
     PCP_DOWNLOAD_REINICIO_MINUTOS: int = 60
+
+    # --- Fila de processamento única (tabelas fila_*) ---
+    # Fase 1: o motor sobe e dá heartbeat, mas o registry está vazio e os 10
+    # tipos semeados estão com `ativo = false` — nada é processado.
+    FILA_ATIVA: bool = True
+    FILA_DESTINO: str = "erp_wingraph"
+    # Vazio = "<host>:<pid>". Duas instâncias no mesmo host precisam de ids
+    # diferentes (a coluna é UNIQUE em fila_workers).
+    FILA_WORKER_ID: str = ""
+
+    # Pool síncrono = 1: um lançamento síncrono roda de cada vez e os
+    # seguintes esperam em ordem. Assíncrono = 4, independente.
+    FILA_POOL_SINCRONO: int = 1
+    FILA_POOL_ASSINCRONO: int = 4
+    # Sem LISTEN/NOTIFY (pooler de transação do Supabase): o pickup é por poll.
+    FILA_POLL_SINCRONO_SEGUNDOS: int = 1
+    FILA_POLL_ASSINCRONO_SEGUNDOS: int = 5
+    # Teto de itens por claim; o despachante ainda corta pelos slots livres.
+    FILA_LOTE_CLAIM: int = 10
+    # Quantos candidatos o claim examina por item pedido, para que itens
+    # travados por `chave_bloqueio` ou por teto de tipo não esvaziem o lote.
+    FILA_JANELA_CLAIM_MULTIPLICADOR: int = 4
+    # lease = tipos.timeout_segundos + esta margem.
+    FILA_LEASE_MARGEM_SEGUNDOS: int = 30
+    FILA_REAPER_SEGUNDOS: int = 30
+    FILA_HEARTBEAT_SEGUNDOS: int = 30
+    # Envelhecimento da fila assíncrona (seção 3 do plano).
+    FILA_ENVELHECIMENTO_MINUTOS: int = 15
+    FILA_ENVELHECIMENTO_PASSO: int = 10
+    FILA_ENVELHECIMENTO_TETO: int = 690
+    # Backoff com jitter completo, gravado em `disponivel_em`.
+    # Síncrono: orçamento total ~20 s, dentro dos 30 s de latência aceitável.
+    FILA_BACKOFF_SINCRONO_BASE: float = 2.0
+    FILA_BACKOFF_SINCRONO_TETO: float = 8.0
+    FILA_BACKOFF_ASSINCRONO_BASE: float = 15.0
+    FILA_BACKOFF_ASSINCRONO_TETO: float = 900.0
 
     # Download dos arquivos da OP.
     BLOB_READ_WRITE_TOKEN: str = ""

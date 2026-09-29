@@ -150,6 +150,52 @@ class TestErpClient(unittest.TestCase):
         erp.garantir_login()
         self.assertEqual(logins["n"], 2)
 
+    def test_patch_segue_a_mesma_regra_do_post_para_2xx_ilegivel(self):
+        # PATCH é escrita e a API não é idempotente: resposta 2xx que não dá
+        # para ler pode ser uma alteração que aconteceu.
+        def roteador(request):
+            if request.url.path == "/api/v1/auth":
+                return login_ok(request)
+            return httpx.Response(200, text="<html>proxy</html>")
+
+        erp, _ = cliente(roteador)
+        with self.assertRaises(ResultadoIncerto):
+            erp.patch("/api/v1/cliente", {"identifier": "PageFlow", "data": {}})
+
+    def test_cliente_criar_e_atualizar_usam_o_envelope_identifier_data(self):
+        vistos = []
+
+        def roteador(request):
+            if request.url.path == "/api/v1/auth":
+                return login_ok(request)
+            vistos.append((request.method, json.loads(request.content)))
+            return httpx.Response(200, json={"success": True, "data": {"id_cliente": 7}})
+
+        erp, _ = cliente(roteador)
+        erp.criar_cliente({"cnpj": "1"})
+        erp.atualizar_cliente({"cnpj": "1", "id_cliente": 7})
+
+        self.assertEqual(vistos[0], ("POST", {"identifier": "PageFlow", "data": {"cnpj": "1"}}))
+        self.assertEqual(vistos[1], ("PATCH", {"identifier": "PageFlow", "data": {"cnpj": "1", "id_cliente": 7}}))
+
+    def test_listar_clientes_manda_so_os_filtros_informados(self):
+        vistos = []
+
+        def roteador(request):
+            if request.url.path == "/api/v1/auth":
+                return login_ok(request)
+            vistos.append(dict(request.url.params))
+            return httpx.Response(200, json={"success": True, "data": []})
+
+        erp, _ = cliente(roteador)
+        erp.listar_clientes(cpfcnpj="12345678000199")
+        erp.listar_clientes(id_cliente=7, page=2)
+        erp.listar_clientes()
+
+        self.assertEqual(vistos[0], {"cpfcnpj": "12345678000199"})
+        self.assertEqual(vistos[1], {"id": "7", "page": "2"})
+        self.assertEqual(vistos[2], {})
+
     def test_sucesso_erp_aceita_as_duas_grafias(self):
         self.assertTrue(sucesso_erp({"success": True, "code": 200}))
         self.assertTrue(sucesso_erp({"sucess": True}))
