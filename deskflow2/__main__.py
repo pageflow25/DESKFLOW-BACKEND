@@ -1,10 +1,8 @@
 """Linha de comando do DESKFLOW2.0.
 
-    python -m deskflow2 worker                      # serviço: todos os ciclos em loop
+    python -m deskflow2 worker                      # serviço: os ciclos da fila em loop
     python -m deskflow2 verificar                   # testa banco e login no ERP
     python -m deskflow2 dry-run --orcamento 123     # mostra o corpo que iria ao ERP (não muda nada)
-    python -m deskflow2 despachar --orcamento 123   # despacha um orçamento pendente agora
-    python -m deskflow2 ciclo orcamentos            # roda um ciclo uma vez (orcamentos|aprovacoes|downloads|reconciliacao)
 """
 
 import argparse
@@ -19,6 +17,9 @@ logger = logging.getLogger("deskflow2")
 
 
 def _dry_run(app, orcamento_id: int) -> int:
+    """Corpo que o SQL monta para um orçamento já gravado em
+    `orcamento_api_orcamentos`. Só leitura, e sem passar pela fila: serve para
+    conferir o payload de um orçamento real antes de enfileirá-lo."""
     from .repositorios.fila import carregar_orcamento
     from .servicos.payload import PayloadIncompleto, montar_payload_orcamento
 
@@ -55,7 +56,6 @@ def _verificar(app) -> int:
         )
     app.erp.garantir_login()
     print("ERP: login ok")
-    print(f"Modo de envio: o da linha no banco (padrão para linha vazia: {app.settings.PCP_MODO_ENVIO})")
     print(f"Download: {app.settings.DOWNLOAD_BASE_PATH or '(desligado: DOWNLOAD_BASE_PATH vazio)'}")
     return 0
 
@@ -63,14 +63,10 @@ def _verificar(app) -> int:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="deskflow2", description="Consumidor da fila do PCP (PageFlow -> Wingraph)")
     sub = parser.add_subparsers(dest="comando", required=True)
-    sub.add_parser("worker", help="roda todos os ciclos em loop")
+    sub.add_parser("worker", help="roda os ciclos da fila em loop")
     sub.add_parser("verificar", help="testa banco e login no ERP")
     dry = sub.add_parser("dry-run", help="mostra o corpo do orçamento sem enviar")
     dry.add_argument("--orcamento", type=int, required=True)
-    desp = sub.add_parser("despachar", help="despacha um orçamento pendente agora")
-    desp.add_argument("--orcamento", type=int, required=True)
-    ciclo = sub.add_parser("ciclo", help="roda um ciclo uma vez")
-    ciclo.add_argument("nome", choices=["orcamentos", "aprovacoes", "downloads", "reconciliacao"])
     args = parser.parse_args(argv)
 
     settings = get_settings()
@@ -81,21 +77,19 @@ def main(argv=None) -> int:
     app = montar_aplicacao(settings)
     try:
         if args.comando == "worker":
-            if not settings.PCP_ENVIO_ATIVO and app.fila is None:
-                logger.warning("PCP_ENVIO_ATIVO=false e fila inativa: worker não iniciado")
+            if app.fila is None:
+                logger.warning("Fila inativa (FILA_ATIVA=false ou catálogo fila_* ausente): worker não iniciado")
                 return 0
             from .jobs import criar_agendador
 
-            if not settings.PCP_ENVIO_ATIVO:
-                logger.warning("PCP_ENVIO_ATIVO=false: só os ciclos da fila de processamento sobem")
             logger.info(
-                "DESKFLOW2.0 iniciado: modo padrão %s (vale o da linha), ciclo a cada %ss, download %s",
-                settings.PCP_MODO_ENVIO,
-                settings.PCP_ENVIO_INTERVALO_SEGUNDOS,
+                "DESKFLOW2.0 iniciado: fila de processamento, poll sincrono %ss / assincrono %ss, download %s",
+                settings.FILA_POLL_SINCRONO_SEGUNDOS,
+                settings.FILA_POLL_ASSINCRONO_SEGUNDOS,
                 settings.DOWNLOAD_BASE_PATH or "desligado",
             )
             try:
-                criar_agendador(app, incluir_ciclos_pcp=settings.PCP_ENVIO_ATIVO).start()
+                criar_agendador(app).start()
             except (KeyboardInterrupt, SystemExit):
                 logger.info("DESKFLOW2.0 encerrado")
             return 0
@@ -103,14 +97,6 @@ def main(argv=None) -> int:
             return _verificar(app)
         if args.comando == "dry-run":
             return _dry_run(app, args.orcamento)
-        if args.comando == "despachar":
-            app.erp.garantir_login()
-            print(app.orcamentos.despachar(args.orcamento))
-            return 0
-        if args.comando == "ciclo":
-            servico = getattr(app, args.nome)
-            print(f"{args.nome}: {servico.executar_ciclo()} registro(s)")
-            return 0
     finally:
         app.fechar()
     return 1

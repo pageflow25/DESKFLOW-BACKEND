@@ -30,6 +30,12 @@ def configuracao(**sobrescritas):
         DOWNLOAD_BASE_PATH="",
         DOWNLOAD_TIMEOUT=5,
         DOWNLOAD_TENTATIVAS=2,
+        # Fase 6b: com os ciclos antigos removidos, os unicos ciclos do worker
+        # sao os da fila, e `criar_agendador` le estes quatro intervalos.
+        FILA_POLL_SINCRONO_SEGUNDOS=1,
+        FILA_POLL_ASSINCRONO_SEGUNDOS=5,
+        FILA_REAPER_SEGUNDOS=30,
+        FILA_HEARTBEAT_SEGUNDOS=30,
     )
     padrao.update(sobrescritas)
     return SimpleNamespace(**padrao)

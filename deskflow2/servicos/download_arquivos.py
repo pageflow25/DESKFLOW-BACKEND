@@ -14,8 +14,12 @@ da OP" (decisão do clique "Enviar"). Para cada OP da aprovação:
     produção nunca ver uma pasta pela metade;
   - arquivo que já está na pasta final (tamanho > 0) não é baixado de novo, o
     que torna seguro repetir depois de uma falha;
-  - cada origem x arquivo ganha uma linha em downloads_bremen.
-No fim, o desfecho vai para o PageFlow (/retorno/aprovacoes/:id/downloads).
+  - cada origem x arquivo ganha uma linha de `downloads_bremen` PRONTA, que
+    sai no resultado do item da fila — quem grava é o PageFlow.
+
+Quem orquestra é o handler `pcp.download_arquivos`
+(`handlers/pcp_download_arquivos.py`); aqui ficam só as peças que levam o
+arquivo até a pasta da OP.
 """
 
 import logging
@@ -29,10 +33,6 @@ from typing import Callable, Optional
 from urllib.parse import urlparse
 
 import httpx
-
-from ..repositorios import fila
-from ..repositorios.status import carregar_catalogo
-from .repasse import Repassador
 
 logger = logging.getLogger(__name__)
 
@@ -152,13 +152,8 @@ def baixar_arquivos_das_ops(baixador: BaixadorArquivos, pasta_base: str, arquivo
     """Baixa os arquivos de TODAS as OPs de uma aprovação e devolve
     `(total, erros, linhas_bremen)`.
 
-    Extraída do ciclo antigo para ser a mesma peça usada pelo handler
-    `pcp.download_arquivos` da fila: o que muda entre os dois caminhos é só de
-    onde vêm as linhas e para onde vai o desfecho, nunca como o arquivo chega à
-    pasta da OP — e duplicar isso seria duplicar a regra de publicação atômica.
-
-    `linhas_bremen` sai PRONTA mas NÃO é gravada aqui: no caminho da fila quem
-    grava `downloads_bremen` é o PageFlow, a partir do resultado do item.
+    `linhas_bremen` sai PRONTA mas NÃO é gravada aqui: quem grava
+    `downloads_bremen` é o PageFlow, a partir do resultado do item da fila.
     """
     base = os.path.abspath(pasta_base)
     os.makedirs(base, exist_ok=True)
@@ -242,48 +237,3 @@ def baixar_op(baixador: BaixadorArquivos, base: str, temporaria: str, id_op: int
         if chave_arquivo(linha) in tamanhos
     ]
     return len(tamanhos), erros, linhas_bremen
-
-
-class DownloadArquivos:
-    def __init__(self, engine, baixador: BaixadorArquivos, repassador: Repassador, settings, dormir: Callable[[float], None] = time.sleep):
-        self._engine = engine
-        self._baixador = baixador
-        self._repassador = repassador
-        self._settings = settings
-        self._dormir = dormir
-
-    def executar_ciclo(self) -> int:
-        if not self._settings.DOWNLOAD_BASE_PATH:
-            return 0
-        reinicio = self._settings.PCP_DOWNLOAD_REINICIO_MINUTOS
-        with self._engine.begin() as conn:
-            status = carregar_catalogo(conn)
-            pendentes = fila.listar_downloads_pendentes(conn, status, reinicio, self._settings.PCP_ENVIO_LOTE_MAXIMO)
-        processadas = 0
-        for aprovacao_id in pendentes:
-            with self._engine.begin() as conn:
-                if not fila.reivindicar_download(conn, aprovacao_id, reinicio):
-                    continue
-            self.baixar_aprovacao(aprovacao_id)
-            processadas += 1
-        return processadas
-
-    def baixar_aprovacao(self, aprovacao_id: int) -> dict:
-        with self._engine.begin() as conn:
-            arquivos = fila.arquivos_da_aprovacao(conn, aprovacao_id)
-
-        if not arquivos:
-            resultado = {"sucesso": False, "total_arquivos": 0, "erros": [MENSAGEM_SEM_ARQUIVOS]}
-            self._repassador.downloads(aprovacao_id, resultado)
-            return resultado
-
-        total, erros, linhas_bremen = baixar_arquivos_das_ops(
-            self._baixador, self._settings.DOWNLOAD_BASE_PATH, arquivos, str(aprovacao_id), self._dormir)
-
-        with self._engine.begin() as conn:
-            fila.registrar_downloads_bremen(conn, linhas_bremen)
-
-        resultado = {"sucesso": not erros, "total_arquivos": total, "erros": erros}
-        logger.info("Aprovação #%s: %s arquivo(s) na pasta da OP, %s erro(s)", aprovacao_id, total, len(erros))
-        self._repassador.downloads(aprovacao_id, resultado)
-        return resultado

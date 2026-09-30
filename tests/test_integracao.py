@@ -17,7 +17,7 @@ from deskflow2.repositorios.fila import (
     OrcamentoReivindicado,
 )
 from deskflow2.servicos import payload as modulo_payload
-from deskflow2.servicos.download_arquivos import DownloadArquivos, chave_arquivo
+from deskflow2.servicos.download_arquivos import baixar_arquivos_das_ops, chave_arquivo
 from deskflow2.servicos.payload import (
     ARQUIVO_INTEGRACAO,
     PARAMETRO_IDS_ESCOLA,
@@ -26,7 +26,7 @@ from deskflow2.servicos.payload import (
     _arquivo_e_parametro,
     montar_payload_orcamento,
 )
-from tests.apoio import MotorFalso, RepassadorFalso, configuracao
+from tests.apoio import configuracao  # noqa: F401 - usado por outros casos do arquivo
 
 
 def orcamento_integracao(**campos):
@@ -260,29 +260,30 @@ class TestChaveArquivo(unittest.TestCase):
 
 
 class TestDownloadIntegracao(unittest.TestCase):
+    """Layout de pasta e linhas de `downloads_bremen` na origem INTEGRACAO.
+
+    Reescrito na Fase 6b: antes exercitava a classe `DownloadArquivos`, do ciclo
+    antigo, que baixava E gravava no banco. A classe saiu; o que sobrou e
+    `baixar_arquivos_das_ops`, usada pelo handler `pcp.download_arquivos`. Os
+    casos sao os mesmos, e continuam valendo a pena porque os testes do handler
+    cobrem so a pasta de ESCOLA — o layout `<integracao> - <pedido>` e coberto
+    aqui e em lugar nenhum mais.
+
+    A diferenca real: as linhas de `downloads_bremen` agora SAEM PRONTAS no
+    retorno, em vez de serem gravadas aqui. Quem grava e o PageFlow, a partir do
+    resultado do item da fila — o worker nao tem escrita em tabela de dominio.
+    """
+
     def _baixar(self, arquivos, baixador=None):
         baixador = baixador or BaixadorFalso()
         base = tempfile.mkdtemp()
-        motor = MotorFalso()
-        repassador = RepassadorFalso()
-        gravadas = []
 
-        servico = DownloadArquivos(
-            motor, baixador, repassador,
-            configuracao(DOWNLOAD_BASE_PATH=base), dormir=lambda _s: None,
+        total, erros, linhas_bremen = baixar_arquivos_das_ops(
+            baixador, base, arquivos, "aprovacao 900", dormir=lambda _s: None,
         )
-        import deskflow2.servicos.download_arquivos as modulo
 
-        original_arquivos = modulo.fila.arquivos_da_aprovacao
-        original_registrar = modulo.fila.registrar_downloads_bremen
-        modulo.fila.arquivos_da_aprovacao = lambda _conn, _id: arquivos
-        modulo.fila.registrar_downloads_bremen = lambda _conn, linhas: gravadas.extend(linhas)
-        try:
-            resultado = servico.baixar_aprovacao(900)
-        finally:
-            modulo.fila.arquivos_da_aprovacao = original_arquivos
-            modulo.fila.registrar_downloads_bremen = original_registrar
-        return resultado, gravadas, base, baixador
+        resultado = {"sucesso": not erros, "total_arquivos": total, "erros": erros}
+        return resultado, linhas_bremen, base, baixador
 
     def test_baixa_pdf_e_designs_na_pasta_da_integracao(self):
         arquivos = [

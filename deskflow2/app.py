@@ -5,17 +5,12 @@ from dataclasses import dataclass
 from typing import Optional
 
 from .clientes.erp import ErpClient
-from .clientes.pageflow import PageflowClient
 from .config import Settings, get_settings
 from .db import get_engine
 from .fila.catalogo import carregar_catalogo
 from .fila.escalonador import Escalonador
 from .fila.registry import registry_padrao
-from .servicos.despacho_aprovacao import DespachoAprovacoes
-from .servicos.despacho_orcamento import DespachoOrcamentos
-from .servicos.download_arquivos import BaixadorArquivos, DownloadArquivos
-from .servicos.reconciliacao import Reconciliacao
-from .servicos.repasse import Repassador
+from .servicos.download_arquivos import BaixadorArquivos
 
 logger = logging.getLogger(__name__)
 
@@ -25,21 +20,15 @@ class Aplicacao:
     settings: Settings
     engine: object
     erp: ErpClient
-    pageflow: PageflowClient
-    repassador: Repassador
-    orcamentos: DespachoOrcamentos
-    aprovacoes: DespachoAprovacoes
-    downloads: DownloadArquivos
-    reconciliacao: Reconciliacao
     # None quando FILA_ATIVA=false ou quando o catálogo da fila ainda não
-    # existe no banco (Fase 0 não aplicada): os ciclos antigos seguem normais.
+    # existe no banco: nesse caso o worker sobe sem ciclo nenhum, porque a
+    # fila é o único caminho de processamento que existe.
     fila: Optional[Escalonador] = None
 
     def fechar(self) -> None:
         if self.fila is not None:
             self.fila.encerrar()
         self.erp.fechar()
-        self.pageflow.fechar()
         self.engine.dispose()
 
 
@@ -57,7 +46,7 @@ def _montar_fila(engine, settings: Settings, erp: ErpClient,
         logger.exception("Fila: catálogo indisponível no banco; escalonador não montado")
         return None
 
-    # O mesmo baixador dos downloads antigos: um cliente HTTP só, um pool só.
+    # Um cliente HTTP só para os downloads, um pool só.
     registry = registry_padrao(erp, baixador=baixador, pasta_download=settings.DOWNLOAD_BASE_PATH)
     escalonador = Escalonador(engine, catalogo, registry, settings)
     logger.info(
@@ -73,18 +62,10 @@ def montar_aplicacao(settings: Settings | None = None) -> Aplicacao:
     settings = settings or get_settings()
     engine = get_engine()
     erp = ErpClient(settings)
-    pageflow = PageflowClient(settings)
-    repassador = Repassador(pageflow, settings.DADOS_DIR)
     baixador = BaixadorArquivos(settings)
     return Aplicacao(
         settings=settings,
         engine=engine,
         erp=erp,
-        pageflow=pageflow,
-        repassador=repassador,
-        orcamentos=DespachoOrcamentos(engine, erp, repassador, settings),
-        aprovacoes=DespachoAprovacoes(engine, erp, repassador, settings),
-        downloads=DownloadArquivos(engine, baixador, repassador, settings),
-        reconciliacao=Reconciliacao(engine, erp, repassador, settings),
         fila=_montar_fila(engine, settings, erp, baixador),
     )

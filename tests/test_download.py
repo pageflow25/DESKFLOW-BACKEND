@@ -1,20 +1,17 @@
 import os
 import tempfile
 import unittest
-from unittest import mock
 
 import httpx
 
-from deskflow2.servicos import download_arquivos
 from deskflow2.servicos.download_arquivos import (
     BaixadorArquivos,
-    DownloadArquivos,
     dentro_da_base,
     nomes_unicos,
     publicar_arquivos,
     sanitizar_nome,
 )
-from tests.apoio import MotorFalso, RepassadorFalso, configuracao
+from tests.apoio import configuracao
 
 
 class BaixadorFalso:
@@ -101,63 +98,8 @@ class TestPublicar(unittest.TestCase):
             self.assertEqual(sorted(os.listdir(final)), ["antigo.pdf", "novo.pdf"])
 
 
-class TestDownloadArquivos(unittest.TestCase):
-    def setUp(self):
-        self.pasta = tempfile.TemporaryDirectory()
-        self.addCleanup(self.pasta.cleanup)
-        self.fila = mock.patch.object(download_arquivos, "fila").start()
-        self.addCleanup(mock.patch.stopall)
-        self.repassador = RepassadorFalso()
 
-    def servico(self, baixador):
-        config = configuracao(DOWNLOAD_BASE_PATH=self.pasta.name)
-        return DownloadArquivos(MotorFalso(), baixador, self.repassador, config, dormir=lambda s: None)
 
-    def test_baixa_por_op_na_pasta_da_escola_e_grava_downloads_bremen(self):
-        self.fila.arquivos_da_aprovacao.return_value = [
-            linha(106403, 11, 1, "miolo.pdf"),
-            linha(106403, 12, 1, "miolo.pdf"),  # mesmo arquivo, dois pedidos agrupados
-            linha(106403, 11, 2, "capa.pdf"),
-            linha(106404, 13, 3, "miolo.pdf"),
-        ]
-        baixador = BaixadorFalso()
-
-        resultado = self.servico(baixador).baixar_aprovacao(900)
-
-        self.assertEqual(resultado, {"sucesso": True, "total_arquivos": 3, "erros": []})
-        self.assertEqual(len(baixador.urls), 3)
-        pasta_op = os.path.join(self.pasta.name, "Colégio_ Exemplo_Centro", "106403")
-        self.assertEqual(sorted(os.listdir(pasta_op)), ["capa.pdf", "miolo.pdf"])
-        linhas = self.fila.registrar_downloads_bremen.call_args.args[1]
-        self.assertEqual(len(linhas), 4)
-        self.assertEqual({l["distribuicao_material_id"] for l in linhas if l["arquivo_pdf_id"] == 1}, {11, 12})
-        self.assertEqual(self.repassador.enviados[-1], ("downloads", 900, resultado))
-        self.assertFalse([n for n in os.listdir(self.pasta.name) if n.startswith(".deskflow2-")])
-
-    def test_falha_parcial_reporta_erro_e_repeticao_baixa_so_o_que_falta(self):
-        url_capa = "https://x.public.blob.vercel-storage.com/capa.pdf"
-        self.fila.arquivos_da_aprovacao.return_value = [
-            linha(106403, 11, 1, "miolo.pdf"),
-            linha(106403, 11, 2, "capa.pdf", url=url_capa),
-        ]
-
-        primeiro = self.servico(BaixadorFalso(falhar=[url_capa])).baixar_aprovacao(900)
-        self.assertFalse(primeiro["sucesso"])
-        self.assertEqual(primeiro["total_arquivos"], 1)
-        self.assertIn("capa.pdf", primeiro["erros"][0])
-
-        baixador = BaixadorFalso()
-        segundo = self.servico(baixador).baixar_aprovacao(900)
-        self.assertTrue(segundo["sucesso"])
-        self.assertEqual(baixador.urls, [url_capa])
-
-    def test_aprovacao_sem_op_vinculada_reporta_erro(self):
-        self.fila.arquivos_da_aprovacao.return_value = []
-
-        resultado = self.servico(BaixadorFalso()).baixar_aprovacao(900)
-
-        self.assertFalse(resultado["sucesso"])
-        self.assertEqual(self.repassador.enviados[-1][0], "downloads")
 
 
 if __name__ == "__main__":

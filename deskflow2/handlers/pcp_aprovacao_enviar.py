@@ -37,7 +37,6 @@ from typing import Any, Optional
 from ..clientes.erp import ErroErp, extrair_id_requisicao, sucesso_erp
 from ..fila.modelos import Desfecho, ItemReivindicado, Preparo
 from ..servicos.comum import com_modo_assincrono, corpo_para_auditoria
-from ..servicos.despacho_aprovacao import itens_ja_aprovados
 from .comum import (
     PayloadInvalido,
     classificar_falha,
@@ -48,6 +47,27 @@ from .comum import (
 from .pcp_comum import desfecho_do_ack, modo_envio_de, url_webhook_de
 
 TIPO = "pcp.aprovacao.enviar"
+
+STATUS_ITEM_APROVADO = "confirmada"
+
+
+def itens_ja_aprovados(consulta: dict, itens_aprovados: list) -> bool:
+    """True quando todos os itens a aprovar aparecem como "Confirmada" na
+    última proposta do orçamento.
+
+    Vinha de `servicos/despacho_aprovacao.py` e foi trazida para cá quando o
+    despacho antigo saiu: é a única proteção contra aprovar duas vezes (OP e PV
+    duplicados na produção), e este handler é seu único chamador.
+    """
+    ids = {int(item["id"]) for item in itens_aprovados if isinstance(item, dict) and item.get("id") is not None}
+    if not ids or not isinstance(consulta, dict):
+        return False
+    confirmados = set()
+    for proposta in consulta.get("data") or []:
+        for item in (proposta or {}).get("itens") or []:
+            if str(item.get("status", "")).strip().lower() == STATUS_ITEM_APROVADO and item.get("id") is not None:
+                confirmados.add(int(item["id"]))
+    return ids <= confirmados
 
 
 class ConsultaIndisponivel:

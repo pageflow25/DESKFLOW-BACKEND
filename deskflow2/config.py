@@ -2,7 +2,6 @@
 
 import os
 from functools import lru_cache
-from typing import Literal
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -40,23 +39,18 @@ class Settings(BaseSettings):
     ERP_MAX_CONEXOES: int = 6
     ERP_CONEXOES_RESERVADAS_SINCRONO: int = 2
 
-    # PageFlow: só recebe o resultado (POST /api/pcp/retorno/...).
-    PAGEFLOW_API_URL: str
-    PAGEFLOW_API_KEY: str
-    PAGEFLOW_TIMEOUT: float = 30.0
-    PAGEFLOW_TENTATIVAS: int = 5
-
-    # Fila do PCP.
-    # Padrão para linha sem `modo_envio`; o modo gravado na linha tem prioridade.
-    PCP_MODO_ENVIO: Literal["assincrono", "sincrono"] = "assincrono"
-    PCP_ENVIO_ATIVO: bool = True
-    PCP_ENVIO_INTERVALO_SEGUNDOS: int = 60
-    PCP_ENVIO_LOTE_MAXIMO: int = 20
-    PCP_PAUSA_ENTRE_ENVIOS_SEGUNDOS: float = 3.0
-    PCP_RECONCILIACAO_MINUTOS: int = 30
-    # O ERP tenta o webhook 5x, de hora em hora: depois disso, desiste da linha.
-    PCP_RECONCILIACAO_LIMITE_HORAS: int = 6
-    PCP_DOWNLOAD_REINICIO_MINUTOS: int = 60
+    # As chaves PAGEFLOW_* e PCP_* sairam na Fase 6b, junto dos ciclos antigos
+    # que as liam. O worker nao chama mais o PageFlow por HTTP (o resultado e
+    # gravado na propria fila e o PageFlow projeta), e nao ha mais ciclo de
+    # envio, reconciliacao ou reinicio de download.
+    #
+    # `extra="ignore"` no model_config: as chaves que sobrarem no .env ou no
+    # ambiente do Render ficam INERTES, nao derrubam o boot. Podem ser removidas
+    # de la sem pressa.
+    #
+    # PCP_MODO_ENVIO era o interruptor global sincrono/assincrono. No caminho da
+    # fila o modo e derivado da presenca de `url_webhook` no payload, decidida
+    # pelo PageFlow ao enfileirar — o handler nao recebe settings.
 
     # --- Fila de processamento única (tabelas fila_*) ---
     # Fase 1: o motor sobe e dá heartbeat, mas o registry está vazio e os 10
@@ -111,16 +105,6 @@ class Settings(BaseSettings):
     @classmethod
     def _sem_barra_final(cls, valor: str) -> str:
         return valor.rstrip("/")
-
-    @field_validator("PAGEFLOW_API_URL")
-    @classmethod
-    def _base_sem_api(cls, valor: str) -> str:
-        # As rotas já começam com /api: uma base terminando em /api dobrava o
-        # caminho (/api/api/pcp/...) no consumidor antigo.
-        valor = valor.rstrip("/")
-        if valor.endswith("/api"):
-            valor = valor[: -len("/api")]
-        return valor
 
 
 @lru_cache
