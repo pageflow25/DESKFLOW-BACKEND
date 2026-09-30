@@ -39,6 +39,9 @@ PADRAO_CONEXOES_RESERVADAS_SINCRONO = 2
 
 CAMINHO_CLIENTE = "/api/v1/cliente"
 CAMINHO_CARACTERISTICAS_PRODUTO = "/api/v1/caracteristicasproduto"
+CAMINHO_ORCAMENTO = "/api/v1/orcamento"
+CAMINHO_PROPOSTA = "/api/v1/proposta"
+CAMINHO_PROPOSTA_APROVAR = "/api/v1/proposta/aprovar"
 
 # `origem` do GET de características: 2 = modelo de produto (o que corresponde
 # ao `id_produto` do PageFlow); 1 = item de estoque, cadastro diferente no ERP e
@@ -106,6 +109,24 @@ def mensagem_de_erro(corpo: Any, resposta: Optional[httpx.Response] = None) -> s
     if resposta is not None:
         return (resposta.text or "").strip()[:500] or f"HTTP {resposta.status_code}"
     return "Resposta vazia do ERP"
+
+
+def extrair_id_requisicao(corpo: Any) -> Optional[int]:
+    """`id_requisicao` do ack de uma chamada assíncrona, em qualquer das duas
+    posições em que o Wingraph já o devolveu (`data.id_requisicao` e a raiz).
+
+    Mora aqui, com os outros leitores de envelope, porque os dois caminhos que o
+    consultam são independentes: o repasse do ciclo antigo e os handlers de PCP
+    da fila.
+    """
+    if not isinstance(corpo, dict):
+        return None
+    dados = corpo.get("data") if isinstance(corpo.get("data"), dict) else {}
+    valor = dados.get("id_requisicao", corpo.get("id_requisicao"))
+    try:
+        return int(valor) if valor is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def sucesso_erp(corpo: Any) -> bool:
@@ -318,8 +339,17 @@ class ErpClient:
     # filtros soltos em querystring; POST e PATCH com o corpo dentro do envelope
     # `{identifier, data}`; e o `id_cliente` viajando DENTRO de `data` no PATCH.
 
+    @property
+    def identifier(self) -> str:
+        """O `identifier` que todo corpo de escrita do Wingraph carrega.
+
+        Público porque o corpo do orçamento do PCP não é montado aqui: ele sai
+        pronto do SQL (`servicos/payload.py`), e o handler só precisa saber qual
+        identifier prefixar — sem alcançar `_settings` de fora."""
+        return self._settings.ERP_IDENTIFIER
+
     def _envelope(self, dados: dict) -> dict:
-        return {"identifier": self._settings.ERP_IDENTIFIER, "data": dados}
+        return {"identifier": self.identifier, "data": dados}
 
     def listar_clientes(self, id_cliente: Optional[int] = None, cpfcnpj: Optional[str] = None,
                         email: Optional[str] = None, page: Optional[int] = None) -> httpx.Response:
@@ -360,6 +390,30 @@ class ErpClient:
         na querystring (`id` e `origem`), sem envelope. Leitura, logo
         idempotente — repetir é grátis."""
         return self.get(CAMINHO_CARACTERISTICAS_PRODUTO, {"id": id_produto, "origem": origem})
+
+    # --- PCP (/api/v1/orcamento e /api/v1/proposta) -------------------------------
+    #
+    # Os três caminhos que os handlers de PCP usam. O corpo chega PRONTO (o do
+    # orçamento vem do SQL, o da aprovação é montado pelo handler), então aqui
+    # não há envelope a construir: o valor destes métodos é manter o caminho da
+    # API num lugar só, como já acontece com cliente e produto.
+
+    def enviar_orcamento(self, corpo: dict) -> httpx.Response:
+        """POST /api/v1/orcamento. Escrita NÃO idempotente: um orçamento
+        duplicado no ERP só sai de lá à mão."""
+        return self.post(CAMINHO_ORCAMENTO, corpo)
+
+    def aprovar_proposta(self, corpo: dict) -> httpx.Response:
+        """POST /api/v1/proposta/aprovar. Escrita NÃO idempotente: aprovar duas
+        vezes gera OP/PV duplicados na produção."""
+        return self.post(CAMINHO_PROPOSTA_APROVAR, corpo)
+
+    def consultar_proposta(self, id_orcamento: int) -> httpx.Response:
+        """GET /api/v1/proposta da ÚLTIMA proposta do orçamento.
+
+        É a consulta prévia da aprovação: leitura, portanto idempotente e sem
+        efeito nenhum se repetida."""
+        return self.get(CAMINHO_PROPOSTA, {"id_orcamento": id_orcamento, "apenas_ultima": "true"})
 
     def fechar(self) -> None:
         self._http.close()

@@ -356,7 +356,8 @@ class TestRegistry(unittest.TestCase):
         self.assertIsInstance(registry.obter("cliente.consultar"), HandlerClienteConsultar)
         self.assertIsInstance(registry.obter("cliente.criar"), HandlerClienteCriar)
         self.assertIsInstance(registry.obter("cliente.atualizar"), HandlerClienteAtualizar)
-        self.assertIsNone(registry.obter("pcp.orcamento.enviar"), "tipo de outra fase não pode ter handler")
+        self.assertIsNone(registry.obter("vendedor.listar_pagina"),
+                          "tipo sem endpoint confirmado não pode ter handler")
 
     def test_registrar_duplicado_e_recusado(self):
         roteador, _ = _roteador()

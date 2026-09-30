@@ -19,7 +19,7 @@ from typing import Any, Optional
 import httpx
 
 from ..clientes.erp import ErroErp, ler_json, mensagem_de_erro, sucesso_erp
-from ..fila.modelos import Desfecho
+from ..fila.modelos import Desfecho, Preparo
 
 # Status que o ERP devolve SEM ter processado a chamada — vale repetir mesmo em
 # tipo não idempotente. O 503 não chega aqui: o `ErpClient` já o converte em
@@ -43,6 +43,17 @@ class PayloadInvalido:
 
     def desfecho(self) -> Desfecho:
         return Desfecho.falhou(self.mensagem, self.codigo)
+
+
+def preparo_invalido(mensagem: str, codigo: str = "PAYLOAD_INVALIDO") -> Preparo:
+    """O `Preparo` de um item que não tem o mínimo para falar com o destino.
+
+    Empacota o idioma que os handlers repetiam à mão: NENHUMA chamada sai (o
+    `chamar` devolve o próprio `PayloadInvalido`, que o `interpretar` reconhece)
+    e o motivo fica em `payload_enviado`, visível na tela da fila.
+    """
+    invalido = PayloadInvalido(mensagem, codigo)
+    return Preparo(payload_enviado={"erro": invalido.mensagem}, chamar=lambda: invalido)
 
 
 def so_digitos(valor: Any) -> str:

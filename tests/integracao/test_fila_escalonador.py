@@ -90,9 +90,11 @@ class TestEscalonador(TesteDeFila):
 
     def test_registry_padrao_so_conhece_os_tipos_ja_entregues(self):
         # Fase 2a: os três de cliente. Fase 3: planilha, sincronização e
-        # produto. Tipo de fase futura — e `vendedor.listar_pagina`, cujo
-        # endpoint no ERP ainda não foi confirmado com a Bremen — continua sem
-        # handler, e sem handler o motor devolve o item em vez de o perder.
+        # produto. Fase 5: os três de PCP — `pcp.download_arquivos` só entra
+        # quando o worker recebe baixador e pasta de destino, e é por isso que
+        # ele não está nesta lista. `vendedor.listar_pagina`, cujo endpoint no
+        # ERP ainda não foi confirmado com a Bremen, continua sem handler — e
+        # sem handler o motor devolve o item em vez de o perder.
         from deskflow2.fila.registry import registry_padrao
 
         registry = registry_padrao(object())
@@ -103,9 +105,11 @@ class TestEscalonador(TesteDeFila):
             "cliente.criar",
             "cliente.planilha_linha",
             "cliente.sincronizar_pagina",
+            "pcp.aprovacao.enviar",
+            "pcp.orcamento.enviar",
             "produto.importar",
         ])
-        self.assertIsNone(registry.obter("pcp.orcamento.enviar"))
+        self.assertIsNone(registry.obter("pcp.download_arquivos"))
         self.assertIsNone(registry.obter("vendedor.listar_pagina"))
 
     def test_pool_sincrono_processa_um_de_cada_vez_com_o_assincrono_junto(self):

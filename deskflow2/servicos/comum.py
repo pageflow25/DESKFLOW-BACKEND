@@ -3,8 +3,15 @@
 import logging
 from typing import Optional
 
-from ..clientes.erp import ErpClient, ErpIndisponivel, ResultadoIncerto, ler_json, mensagem_de_erro, sucesso_erp
-from .repasse import extrair_id_requisicao
+from ..clientes.erp import (
+    ErpClient,
+    ErpIndisponivel,
+    ResultadoIncerto,
+    extrair_id_requisicao,
+    ler_json,
+    mensagem_de_erro,
+    sucesso_erp,
+)
 
 logger = logging.getLogger(__name__)
 

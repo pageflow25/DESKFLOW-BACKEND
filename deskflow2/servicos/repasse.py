@@ -10,7 +10,6 @@ import json
 import logging
 import os
 import tempfile
-from typing import Optional
 
 from ..clientes.pageflow import Desfecho, PageflowClient, ResultadoRepasse
 
@@ -96,14 +95,3 @@ class Repassador:
         with os.fdopen(descritor, "w", encoding="utf-8") as arquivo:
             json.dump({"tipo": tipo, "id": registro_id, "corpo": corpo}, arquivo, ensure_ascii=False)
         os.replace(temporario, destino)
-
-
-def extrair_id_requisicao(corpo) -> Optional[int]:
-    if not isinstance(corpo, dict):
-        return None
-    dados = corpo.get("data") if isinstance(corpo.get("data"), dict) else {}
-    valor = dados.get("id_requisicao", corpo.get("id_requisicao"))
-    try:
-        return int(valor) if valor is not None else None
-    except (TypeError, ValueError):
-        return None

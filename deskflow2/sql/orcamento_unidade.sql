@@ -11,8 +11,14 @@
 --     conforme o par escolhido no clique "Enviar" (venda ou cadastro).
 --   - Cada item leva `codigo_externo` = id do pedido_distribuicao: é por ele que
 --     o PageFlow liga os valores do retorno a cada pedido.
---   - `materiais` lê o papel em três eixos (id_substrato / bremen_formato_papel),
---     com id_papel (bremen_tamanho_papel) de reserva para pedidos antigos
+--   - `materiais` lê o papel em três eixos (id_substrato / bremen_formato_papel).
+--     A reserva por id_papel (bremen_tamanho_papel) SAIU em 2026-09-30: a
+--     migration 20260923110000-contract-papel-antigo dropou a coluna
+--     pedido_especificacoes.id_papel e moveu a tabela para o schema
+--     contract_backup, então o LEFT JOIN quebrava a query inteira com
+--     'relation does not exist' — não era fallback, era erro de deploy
+--     esperando para acontecer. Pedido antigo sem os três eixos resolvidos
+--     cai no texto livre de ef.altura/ef.largura, como já caía.
 --     (BACKEND_PAGEFLOW/docs/papel-tres-eixos-deskflow.md).
 --   - `tarefas_gerais` sai como { id, descricao } (formato do Wingraph).
 --   - Campos internos (id_distribuicao, nome_unidade) não vão mais no corpo.
@@ -73,9 +79,9 @@ materiais AS (
         ap.nome AS arquivo_nome,
         ap.paginas,
         bg.gramatura AS gramatura_catalogo,
-        COALESCE(ef.id_substrato, bt.idgruposubstratoimpressao) AS idgruposubstratoimpressao,
-        COALESCE(bf.altura, bt.altura, NULLIF(ef.altura, '')::numeric) AS altura_mm,
-        COALESCE(bf.largura, bt.largura, NULLIF(ef.largura, '')::numeric) AS largura_mm,
+        ef.id_substrato AS idgruposubstratoimpressao,
+        COALESCE(bf.altura, NULLIF(ef.altura, '')::numeric) AS altura_mm,
+        COALESCE(bf.largura, NULLIF(ef.largura, '')::numeric) AS largura_mm,
         bi.descricao AS produto_descricao,
         bi.sub_grupo,
         bi.frente_verso,
@@ -90,7 +96,6 @@ materiais AS (
     LEFT JOIN bremen_componentes bc ON bc.id_componente = pda.id_componente
     LEFT JOIN bremen_gramatura bg ON bg.id = ef.id_gramatura
     LEFT JOIN bremen_formato_papel bf ON bf.id = ef.id_formato
-    LEFT JOIN bremen_tamanho_papel bt ON bt.id = ef.id_papel
     WHERE pda.distribuicao_material_id IN (SELECT distribuicao_id FROM distribuicoes)
 ),
 

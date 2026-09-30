@@ -141,6 +141,109 @@ def publicar_arquivos(pasta_stage: str, pasta_final: str, dormir: Callable[[floa
         shutil.move(os.path.join(pasta_stage, nome), os.path.join(pasta_final, nome))
 
 
+MENSAGEM_SEM_ARQUIVOS = (
+    "Nenhuma OP com arquivos vinculada a esta aprovação "
+    "(confira ops[].codigo_externo no retorno do ERP)"
+)
+
+
+def baixar_arquivos_das_ops(baixador: BaixadorArquivos, pasta_base: str, arquivos: list,
+                            rotulo: str, dormir: Callable[[float], None] = time.sleep):
+    """Baixa os arquivos de TODAS as OPs de uma aprovação e devolve
+    `(total, erros, linhas_bremen)`.
+
+    Extraída do ciclo antigo para ser a mesma peça usada pelo handler
+    `pcp.download_arquivos` da fila: o que muda entre os dois caminhos é só de
+    onde vêm as linhas e para onde vai o desfecho, nunca como o arquivo chega à
+    pasta da OP — e duplicar isso seria duplicar a regra de publicação atômica.
+
+    `linhas_bremen` sai PRONTA mas NÃO é gravada aqui: no caminho da fila quem
+    grava `downloads_bremen` é o PageFlow, a partir do resultado do item.
+    """
+    base = os.path.abspath(pasta_base)
+    os.makedirs(base, exist_ok=True)
+    erros: list = []
+    linhas_bremen: list = []
+    total = 0
+
+    por_op: "OrderedDict[int, list]" = OrderedDict()
+    for linha in arquivos:
+        por_op.setdefault(linha["id_op"], []).append(linha)
+
+    temporaria = tempfile.mkdtemp(prefix=f".deskflow2-{rotulo}-", dir=base)
+    try:
+        for id_op, linhas in por_op.items():
+            total_op, erros_op, linhas_op = baixar_op(baixador, base, temporaria, id_op, linhas, dormir)
+            total += total_op
+            erros.extend(erros_op)
+            linhas_bremen.extend(linhas_op)
+    finally:
+        shutil.rmtree(temporaria, ignore_errors=True)
+
+    return total, erros, linhas_bremen
+
+
+def baixar_op(baixador: BaixadorArquivos, base: str, temporaria: str, id_op: int, linhas: list,
+              dormir: Callable[[float], None] = time.sleep):
+    # Primeiro nível da pasta: a escola (lote de escola) ou
+    # "<integração> - <numero_pedido>" (lote de integração). O SQL já
+    # resolve qual dos dois e devolve em `pasta`.
+    pasta_raiz = sanitizar_nome(linhas[0].get("pasta") or linhas[0].get("escola_nome"), "Sem nome")
+    pasta_final = os.path.join(base, pasta_raiz, str(id_op))
+    if not dentro_da_base(base, pasta_final):
+        return 0, [f"OP {id_op}: caminho fora da pasta base"], []
+
+    # Um arquivo pode servir a várias origens da mesma OP (modo por escola):
+    # baixa uma vez só, e depois grava uma linha de downloads_bremen por origem.
+    unicos: "OrderedDict[str, dict]" = OrderedDict()
+    for linha in linhas:
+        unicos.setdefault(chave_arquivo(linha), linha)
+    arquivos = list(unicos.values())
+    nomes = dict(zip((chave_arquivo(a) for a in arquivos), nomes_unicos(arquivos)))
+
+    pasta_stage = os.path.join(temporaria, str(id_op))
+    os.makedirs(pasta_stage, exist_ok=True)
+    erros, tamanhos = [], {}
+    for arquivo in arquivos:
+        chave = chave_arquivo(arquivo)
+        nome = nomes[chave]
+        final = os.path.join(pasta_final, nome)
+        if os.path.isfile(final) and os.path.getsize(final) > 0:
+            tamanhos[chave] = os.path.getsize(final)
+            continue
+        if not arquivo.get("url"):
+            erros.append(f"OP {id_op}: {nome} sem URL do arquivo")
+            continue
+        try:
+            tamanhos[chave] = baixador.baixar(arquivo["url"], os.path.join(pasta_stage, nome))
+        except (RuntimeError, ValueError) as exc:
+            erros.append(f"OP {id_op}: {nome} — {exc}")
+
+    if os.listdir(pasta_stage):
+        os.makedirs(os.path.dirname(pasta_final), exist_ok=True)
+        try:
+            publicar_arquivos(pasta_stage, pasta_final, dormir)
+        except OSError as exc:
+            return 0, erros + [f"OP {id_op}: falha ao publicar a pasta — {exc}"], []
+
+    # Arco exclusivo em downloads_bremen: um lado por linha, nunca os dois
+    # (CHECK ck_downloads_bremen_origem).
+    linhas_bremen = [
+        {
+            "distribuicao_material_id": linha.get("pedido_distribuicao_id"),
+            "integra_pedido_produto_id": linha.get("integra_pedido_produto_id"),
+            "id_ops": id_op,
+            "arquivo_pdf_id": linha.get("arquivo_pdf_id"),
+            "tipo_arquivo": linha.get("tipo_arquivo"),
+            "caminho_local": os.path.join(pasta_final, nomes[chave_arquivo(linha)]),
+            "tamanho": tamanhos[chave_arquivo(linha)],
+        }
+        for linha in linhas
+        if chave_arquivo(linha) in tamanhos
+    ]
+    return len(tamanhos), erros, linhas_bremen
+
+
 class DownloadArquivos:
     def __init__(self, engine, baixador: BaixadorArquivos, repassador: Repassador, settings, dormir: Callable[[float], None] = time.sleep):
         self._engine = engine
@@ -170,33 +273,12 @@ class DownloadArquivos:
             arquivos = fila.arquivos_da_aprovacao(conn, aprovacao_id)
 
         if not arquivos:
-            resultado = {
-                "sucesso": False,
-                "total_arquivos": 0,
-                "erros": ["Nenhuma OP com arquivos vinculada a esta aprovação (confira ops[].codigo_externo no retorno do ERP)"],
-            }
+            resultado = {"sucesso": False, "total_arquivos": 0, "erros": [MENSAGEM_SEM_ARQUIVOS]}
             self._repassador.downloads(aprovacao_id, resultado)
             return resultado
 
-        base = os.path.abspath(self._settings.DOWNLOAD_BASE_PATH)
-        os.makedirs(base, exist_ok=True)
-        erros: list = []
-        linhas_bremen: list = []
-        total = 0
-
-        por_op: "OrderedDict[int, list]" = OrderedDict()
-        for linha in arquivos:
-            por_op.setdefault(linha["id_op"], []).append(linha)
-
-        temporaria = tempfile.mkdtemp(prefix=f".deskflow2-{aprovacao_id}-", dir=base)
-        try:
-            for id_op, linhas in por_op.items():
-                total_op, erros_op, linhas_op = self._baixar_op(base, temporaria, id_op, linhas)
-                total += total_op
-                erros.extend(erros_op)
-                linhas_bremen.extend(linhas_op)
-        finally:
-            shutil.rmtree(temporaria, ignore_errors=True)
+        total, erros, linhas_bremen = baixar_arquivos_das_ops(
+            self._baixador, self._settings.DOWNLOAD_BASE_PATH, arquivos, str(aprovacao_id), self._dormir)
 
         with self._engine.begin() as conn:
             fila.registrar_downloads_bremen(conn, linhas_bremen)
@@ -205,62 +287,3 @@ class DownloadArquivos:
         logger.info("Aprovação #%s: %s arquivo(s) na pasta da OP, %s erro(s)", aprovacao_id, total, len(erros))
         self._repassador.downloads(aprovacao_id, resultado)
         return resultado
-
-    def _baixar_op(self, base: str, temporaria: str, id_op: int, linhas: list):
-        # Primeiro nível da pasta: a escola (lote de escola) ou
-        # "<integração> - <numero_pedido>" (lote de integração). O SQL já
-        # resolve qual dos dois e devolve em `pasta`.
-        pasta_raiz = sanitizar_nome(linhas[0].get("pasta") or linhas[0].get("escola_nome"), "Sem nome")
-        pasta_final = os.path.join(base, pasta_raiz, str(id_op))
-        if not dentro_da_base(base, pasta_final):
-            return 0, [f"OP {id_op}: caminho fora da pasta base"], []
-
-        # Um arquivo pode servir a várias origens da mesma OP (modo por escola):
-        # baixa uma vez só, e depois grava uma linha de downloads_bremen por origem.
-        unicos: "OrderedDict[str, dict]" = OrderedDict()
-        for linha in linhas:
-            unicos.setdefault(chave_arquivo(linha), linha)
-        arquivos = list(unicos.values())
-        nomes = dict(zip((chave_arquivo(a) for a in arquivos), nomes_unicos(arquivos)))
-
-        pasta_stage = os.path.join(temporaria, str(id_op))
-        os.makedirs(pasta_stage, exist_ok=True)
-        erros, tamanhos = [], {}
-        for arquivo in arquivos:
-            chave = chave_arquivo(arquivo)
-            nome = nomes[chave]
-            final = os.path.join(pasta_final, nome)
-            if os.path.isfile(final) and os.path.getsize(final) > 0:
-                tamanhos[chave] = os.path.getsize(final)
-                continue
-            if not arquivo.get("url"):
-                erros.append(f"OP {id_op}: {nome} sem URL do arquivo")
-                continue
-            try:
-                tamanhos[chave] = self._baixador.baixar(arquivo["url"], os.path.join(pasta_stage, nome))
-            except (RuntimeError, ValueError) as exc:
-                erros.append(f"OP {id_op}: {nome} — {exc}")
-
-        if os.listdir(pasta_stage):
-            os.makedirs(os.path.dirname(pasta_final), exist_ok=True)
-            try:
-                publicar_arquivos(pasta_stage, pasta_final, self._dormir)
-            except OSError as exc:
-                return 0, erros + [f"OP {id_op}: falha ao publicar a pasta — {exc}"], []
-
-        # Arco exclusivo em downloads_bremen: um lado por linha, nunca os dois
-        # (CHECK ck_downloads_bremen_origem).
-        linhas_bremen = [
-            {
-                "distribuicao_material_id": linha.get("pedido_distribuicao_id"),
-                "integra_pedido_produto_id": linha.get("integra_pedido_produto_id"),
-                "id_ops": id_op,
-                "arquivo_pdf_id": linha.get("arquivo_pdf_id"),
-                "tipo_arquivo": linha.get("tipo_arquivo"),
-                "caminho_local": os.path.join(pasta_final, nomes[chave_arquivo(linha)]),
-                "tamanho": tamanhos[chave_arquivo(linha)],
-            }
-            for linha in linhas
-            if chave_arquivo(linha) in tamanhos
-        ]
-        return len(tamanhos), erros, linhas_bremen

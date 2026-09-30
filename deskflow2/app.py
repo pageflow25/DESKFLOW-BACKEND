@@ -43,7 +43,8 @@ class Aplicacao:
         self.engine.dispose()
 
 
-def _montar_fila(engine, settings: Settings, erp: ErpClient) -> Optional[Escalonador]:
+def _montar_fila(engine, settings: Settings, erp: ErpClient,
+                 baixador: BaixadorArquivos) -> Optional[Escalonador]:
     """Catálogos resolvidos UMA vez, aqui — nada de número mágico no SQL nem de
     JOIN de status no caminho quente do claim."""
     if not settings.FILA_ATIVA:
@@ -56,7 +57,8 @@ def _montar_fila(engine, settings: Settings, erp: ErpClient) -> Optional[Escalon
         logger.exception("Fila: catálogo indisponível no banco; escalonador não montado")
         return None
 
-    registry = registry_padrao(erp)
+    # O mesmo baixador dos downloads antigos: um cliente HTTP só, um pool só.
+    registry = registry_padrao(erp, baixador=baixador, pasta_download=settings.DOWNLOAD_BASE_PATH)
     escalonador = Escalonador(engine, catalogo, registry, settings)
     logger.info(
         "Fila: worker %s, pools sincrono=%s assincrono=%s, destino %s, %s tipo(s) no catálogo, "
@@ -73,6 +75,7 @@ def montar_aplicacao(settings: Settings | None = None) -> Aplicacao:
     erp = ErpClient(settings)
     pageflow = PageflowClient(settings)
     repassador = Repassador(pageflow, settings.DADOS_DIR)
+    baixador = BaixadorArquivos(settings)
     return Aplicacao(
         settings=settings,
         engine=engine,
@@ -81,7 +84,7 @@ def montar_aplicacao(settings: Settings | None = None) -> Aplicacao:
         repassador=repassador,
         orcamentos=DespachoOrcamentos(engine, erp, repassador, settings),
         aprovacoes=DespachoAprovacoes(engine, erp, repassador, settings),
-        downloads=DownloadArquivos(engine, BaixadorArquivos(settings), repassador, settings),
+        downloads=DownloadArquivos(engine, baixador, repassador, settings),
         reconciliacao=Reconciliacao(engine, erp, repassador, settings),
-        fila=_montar_fila(engine, settings, erp),
+        fila=_montar_fila(engine, settings, erp, baixador),
     )

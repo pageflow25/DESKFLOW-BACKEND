@@ -32,7 +32,7 @@
 --   (e) `altura`/`largura` vão como estão em
 --       `catalogo_bremen_modelo_componentes.altura_padrao/largura_padrao`, que
 --       já estão em CENTÍMETROS (ao contrário dos SQLs de escola, que leem
---       milímetros de bremen_formato/bremen_tamanho_papel e por isso dividem
+--       milímetros de bremen_formato_papel e por isso dividem
 --       por 10). Ver o relatório: 86 das 89 linhas do catálogo em testing
 --       estão em cm; 3 linhas antigas (210, 230, 146) parecem mm e sairiam
 --       10x maiores — corrigir esses 3 cadastros, não o SQL;

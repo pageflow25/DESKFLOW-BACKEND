@@ -67,9 +67,9 @@ materiais AS (
         ap.nome AS arquivo_nome,
         ap.paginas,
         bg.gramatura AS gramatura_catalogo,
-        COALESCE(ef.id_substrato, bt.idgruposubstratoimpressao) AS idgruposubstratoimpressao,
-        COALESCE(bf.altura, bt.altura, NULLIF(ef.altura, '')::numeric) AS altura_mm,
-        COALESCE(bf.largura, bt.largura, NULLIF(ef.largura, '')::numeric) AS largura_mm,
+        ef.id_substrato AS idgruposubstratoimpressao,
+        COALESCE(bf.altura, NULLIF(ef.altura, '')::numeric) AS altura_mm,
+        COALESCE(bf.largura, NULLIF(ef.largura, '')::numeric) AS largura_mm,
         bi.descricao AS produto_descricao,
         bi.sub_grupo,
         bi.frente_verso,
@@ -84,7 +84,6 @@ materiais AS (
     LEFT JOIN bremen_componentes bc ON bc.id_componente = pda.id_componente
     LEFT JOIN bremen_gramatura bg ON bg.id = ef.id_gramatura
     LEFT JOIN bremen_formato_papel bf ON bf.id = ef.id_formato
-    LEFT JOIN bremen_tamanho_papel bt ON bt.id = ef.id_papel
     WHERE pda.distribuicao_material_id IN (SELECT distribuicao_id FROM distribuicoes)
 ),
 

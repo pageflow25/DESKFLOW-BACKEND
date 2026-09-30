@@ -65,7 +65,7 @@ class Registry:
         return len(self._handlers)
 
 
-def registry_padrao(erp) -> Registry:
+def registry_padrao(erp, *, baixador=None, pasta_download: str = "") -> Registry:
     """O registry do worker.
 
     O import é local para deixar claro o sentido da dependência: o motor (e este
@@ -73,9 +73,13 @@ def registry_padrao(erp) -> Registry:
     na borda da aplicação, que junta os dois. `erp` é o cliente do destino
     `erp_wingraph`, injetado para que o teste monte o registry com um transporte
     falso.
+
+    `baixador` e `pasta_download` são a segunda borda, do único handler que
+    escreve arquivo em disco em vez de falar com o ERP
+    (`pcp.download_arquivos`); ver `handlers/registrar_erp_wingraph`.
     """
     from ..handlers import registrar_erp_wingraph
 
     registry = Registry()
-    registrar_erp_wingraph(registry, erp)
+    registrar_erp_wingraph(registry, erp, baixador=baixador, pasta_download=pasta_download)
     return registry
