@@ -21,17 +21,16 @@ mandamos?**:
 
 from typing import Any, Optional
 
-from ..clientes.erp import ErroErp, sucesso_erp
-from ..fila.modelos import Desfecho, ItemReivindicado, Preparo
-from .comum import (
-    PayloadInvalido,
+from ...integracoes.erp import ErroErp, sucesso_erp
+from ...fila.modelos import Desfecho, ItemReivindicado, Preparo
+from ..comum import (
     classificar_falha,
     consultar_por_documento,
-    documento_do_payload,
     envelope_json,
     id_cliente_de,
-    so_digitos,
 )
+from ...validadores import clientes as validadores
+from ...validadores.comum import PayloadInvalido, so_digitos
 
 TIPO = "cliente.atualizar"
 
@@ -90,21 +89,10 @@ class HandlerClienteAtualizar:
 
     def preparar(self, conn, item: ItemReivindicado) -> Preparo:
         payload = item.payload or {}
-        cliente = payload.get("cliente")
-        if not isinstance(cliente, dict) or not cliente:
-            invalido = PayloadInvalido("cliente.atualizar exige `payload.cliente` com o cadastro completo.")
-            return Preparo(payload_enviado={"erro": invalido.mensagem}, chamar=lambda: invalido)
 
-        id_cliente = id_cliente_de({"id_cliente": payload.get("id_cliente", cliente.get("id_cliente"))})
-        if id_cliente is None:
-            invalido = PayloadInvalido("cliente.atualizar exige id_cliente numérico no payload.")
-            return Preparo(payload_enviado={"erro": invalido.mensagem}, chamar=lambda: invalido)
-        if not documento_do_payload(payload):
-            invalido = PayloadInvalido(
-                "cliente.atualizar exige CNPJ ou CPF: sem documento não há como verificar um resultado incerto.")
-            return Preparo(payload_enviado={"erro": invalido.mensagem}, chamar=lambda: invalido)
-
-        corpo = {**cliente, "id_cliente": id_cliente}
+        corpo, invalido = validadores.validar_atualizar(payload)
+        if invalido is not None:
+            return invalido.preparo()
         return Preparo(
             payload_enviado={"metodo": "PATCH", "caminho": "/api/v1/cliente", "data": corpo},
             chamar=lambda: self._erp.atualizar_cliente(corpo),
@@ -126,7 +114,7 @@ class HandlerClienteAtualizar:
     def verificar(self, conn, item: ItemReivindicado) -> Optional[Desfecho]:
         payload = item.payload or {}
         cliente = payload.get("cliente") or {}
-        documento = documento_do_payload(payload)
+        documento = validadores.documento_do_payload(payload)
         if not documento or not isinstance(cliente, dict):
             return None
 

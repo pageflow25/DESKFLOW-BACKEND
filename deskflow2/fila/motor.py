@@ -16,7 +16,7 @@ import threading
 import time
 from typing import Optional
 
-from ..clientes.erp import ErpIndisponivel, ResultadoIncerto, modo_fila
+from ..integracoes.erp import ErpIndisponivel, ResultadoIncerto, modo_fila
 from . import repositorio
 from .catalogo import Catalogo, CLASSE_SINCRONO, EXECUTANDO, RESERVADO
 from .modelos import Desfecho, Estado, ItemReivindicado, Preparo

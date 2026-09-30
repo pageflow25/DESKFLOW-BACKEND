@@ -33,94 +33,16 @@ adiaria a mensagem.
 
 from typing import Any, Optional
 
-from ..clientes.erp import extrair_id_requisicao, sucesso_erp
-from ..fila.modelos import Desfecho, ItemReivindicado, Preparo
-from ..repositorios.fila import ORIGEM_ESCOLA, ORIGEM_INTEGRACAO, OrcamentoReivindicado
-from ..servicos.comum import com_modo_assincrono, corpo_para_auditoria
-from ..servicos.payload import PayloadIncompleto, montar_payload_orcamento
-from .comum import (
-    PayloadInvalido,
-    classificar_falha,
-    envelope_json,
-    inteiro_positivo,
-    preparo_invalido,
-)
-from .pcp_comum import desfecho_do_ack, modo_envio_de, url_webhook_de
+from ...integracoes.erp import extrair_id_requisicao, sucesso_erp
+from ...fila.modelos import Desfecho, ItemReivindicado, Preparo
+from ...servicos.pcp.comum import com_modo_assincrono, corpo_para_auditoria
+from ...servicos.pcp.payload import PayloadIncompleto, montar_payload_orcamento
+from ...validadores import pcp as validadores
+from ...validadores.comum import PayloadInvalido, inteiro_positivo, preparo_invalido
+from ..comum import classificar_falha, envelope_json
+from .comum import desfecho_do_ack
 
 TIPO = "pcp.orcamento.enviar"
-
-ORIGENS = (ORIGEM_ESCOLA, ORIGEM_INTEGRACAO)
-MODOS_AGRUPAMENTO = ("unidade", "escola")
-
-
-def _data_entrega_valida(valor: Any) -> bool:
-    """`DD/MM/YYYY`, que é o formato que os três SQLs colocam em `obs_producao`.
-
-    A checagem é de forma, não de calendário: o que se quer evitar é texto
-    arbitrário do payload viajando para dentro da observação de produção.
-    """
-    partes = str(valor).split("/")
-    if len(partes) != 3:
-        return False
-    dia, mes, ano = partes
-    return (len(dia), len(mes), len(ano)) == (2, 2, 4) and all(p.isdigit() for p in partes)
-
-
-def orcamento_do_payload(payload: Optional[dict]):
-    """Traduz o payload do item no `OrcamentoReivindicado` que
-    `montar_payload_orcamento` já sabe consumir.
-
-    Devolve `(orcamento, None)` ou `(None, mensagem)`. Reaproveitar a dataclass
-    do caminho antigo é de propósito: é ela que os três SQLs e as duas
-    validações de `servicos/payload.py` enxergam, e uma segunda representação
-    dos mesmos campos seria a chance perfeita de os dois caminhos divergirem.
-    """
-    payload = payload or {}
-
-    orcamento_id = inteiro_positivo(payload.get("orcamento_id"))
-    if orcamento_id is None:
-        return None, "pcp.orcamento.enviar exige `orcamento_id` inteiro e maior que zero."
-
-    origem = str(payload.get("origem") or "").strip()
-    if origem not in ORIGENS:
-        return None, f"Origem do orçamento desconhecida: {payload.get('origem')!r} (esperado um de {list(ORIGENS)})."
-
-    modo_agrupamento = payload.get("modo_agrupamento")
-    if origem == ORIGEM_ESCOLA and modo_agrupamento not in MODOS_AGRUPAMENTO:
-        return None, (
-            f"Origem escola exige `modo_agrupamento` em {list(MODOS_AGRUPAMENTO)}; "
-            f"veio {modo_agrupamento!r}."
-        )
-
-    brutos = payload.get("ids_origem")
-    if not isinstance(brutos, list) or not brutos:
-        return None, "pcp.orcamento.enviar exige `ids_origem` com pelo menos um id."
-    ids = [inteiro_positivo(bruto) for bruto in brutos]
-    if any(id_ is None for id_ in ids):
-        return None, f"`ids_origem` tem valor que não é id: {brutos!r}."
-
-    data_entrega = payload.get("data_entrega")
-    if data_entrega is not None and not _data_entrega_valida(data_entrega):
-        return None, f"`data_entrega` precisa vir como DD/MM/YYYY; veio {data_entrega!r}."
-
-    de_integracao = origem == ORIGEM_INTEGRACAO
-    return OrcamentoReivindicado(
-        id=orcamento_id,
-        requisicao_id=inteiro_positivo(payload.get("requisicao_id")),
-        lote_id=inteiro_positivo(payload.get("lote_id")),
-        modo_envio=modo_envio_de(payload),
-        url_webhook=url_webhook_de(payload),
-        # O modo só existe na origem escola; na integração a divisão é fixa
-        # (1 orçamento por pedido do parceiro) e o SQL é escolhido pela origem.
-        modo_agrupamento=None if de_integracao else modo_agrupamento,
-        cliente_id=inteiro_positivo(payload.get("cliente_id")),
-        vendedor_id=inteiro_positivo(payload.get("vendedor_id")),
-        forma_pagamento=inteiro_positivo(payload.get("forma_pagamento")),
-        pedido_distribuicao_ids=[] if de_integracao else ids,
-        origem=origem,
-        integra_pedido_produto_ids=ids if de_integracao else [],
-        data_entrega=data_entrega,
-    ), None
 
 
 def id_orcamento_de(dados: Optional[dict]) -> Optional[int]:
@@ -137,9 +59,9 @@ class HandlerPcpOrcamentoEnviar:
         self._erp = erp
 
     def preparar(self, conn, item: ItemReivindicado) -> Preparo:
-        orcamento, erro = orcamento_do_payload(item.payload)
-        if orcamento is None:
-            return preparo_invalido(erro)
+        orcamento, invalido = validadores.orcamento_do_payload(item.payload)
+        if invalido is not None:
+            return invalido.preparo()
 
         try:
             # Roda na transação curta do preparo, como o despacho antigo rodava
@@ -165,7 +87,7 @@ class HandlerPcpOrcamentoEnviar:
         if bruto.status_code >= 400 or not sucesso_erp(dados):
             return classificar_falha(bruto, dados, mutacao=True)
 
-        modo = modo_envio_de(item.payload)
+        modo = validadores.modo_envio_de(item.payload)
         id_orcamento = id_orcamento_de(dados)
         resultado = {"id_orcamento": id_orcamento, "modo_envio": modo, "resposta": dados}
 

@@ -12,52 +12,17 @@ aquele projetor lê: `{"clientes": [...]}`.
 
 from typing import Any, Optional
 
-from ..clientes.erp import sucesso_erp
-from ..fila.modelos import Desfecho, ItemReivindicado, Preparo
-from .comum import (
-    PayloadInvalido,
+from ...integracoes.erp import sucesso_erp
+from ...fila.modelos import Desfecho, ItemReivindicado, Preparo
+from ..comum import (
     classificar_falha,
     clientes_do_envelope,
-    documento_do_payload,
     envelope_json,
 )
+from ...validadores import clientes as validadores
+from ...validadores.comum import PayloadInvalido
 
 TIPO = "cliente.consultar"
-
-
-def montar_consulta(payload: dict) -> dict:
-    """Traduz o payload do item nos parâmetros do GET.
-
-    Os quatro do contrato do ERP: `id`, `cpfcnpj`, `email` e `page`. O
-    documento vem normalizado (só dígitos), que é a forma com que o PageFlow o
-    grava na chave de bloqueio.
-    """
-    payload = payload or {}
-    consulta: dict = {}
-
-    identificador = payload.get("id_cliente", payload.get("id"))
-    if identificador not in (None, ""):
-        try:
-            consulta["id_cliente"] = int(identificador)
-        except (TypeError, ValueError):
-            pass
-
-    documento = documento_do_payload(payload)
-    if documento:
-        consulta["cpfcnpj"] = documento
-
-    email = (payload.get("email") or "").strip() if isinstance(payload.get("email"), str) else None
-    if email:
-        consulta["email"] = email
-
-    pagina = payload.get("page", payload.get("pagina"))
-    if pagina not in (None, ""):
-        try:
-            consulta["page"] = int(pagina)
-        except (TypeError, ValueError):
-            pass
-
-    return consulta
 
 
 class HandlerClienteConsultar:
@@ -67,11 +32,9 @@ class HandlerClienteConsultar:
         self._erp = erp
 
     def preparar(self, conn, item: ItemReivindicado) -> Preparo:
-        consulta = montar_consulta(item.payload)
-        if not consulta:
-            invalido = PayloadInvalido(
-                "cliente.consultar exige ao menos um critério (id_cliente, documento, email ou page).")
-            return Preparo(payload_enviado={"erro": invalido.mensagem}, chamar=lambda: invalido)
+        consulta, invalido = validadores.validar_consultar(item.payload)
+        if invalido is not None:
+            return invalido.preparo()
 
         return Preparo(
             payload_enviado={"metodo": "GET", "caminho": "/api/v1/cliente", "params": consulta},
@@ -91,7 +54,7 @@ class HandlerClienteConsultar:
         return Desfecho.concluido({
             "clientes": clientes,
             "total": len(clientes),
-            "consulta": montar_consulta(item.payload),
+            "consulta": validadores.montar_consulta(item.payload),
             "metadata": metadata,
         })
 

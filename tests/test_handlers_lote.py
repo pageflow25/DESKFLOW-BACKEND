@@ -19,7 +19,7 @@ from deskflow2.handlers import (
     HandlerClienteSincronizarPagina,
     HandlerProdutoImportar,
 )
-from deskflow2.handlers.comum import PayloadInvalido
+from deskflow2.validadores.comum import PayloadInvalido
 from tests.test_handlers_cliente import CLIENTE_ERP, DOCUMENTO, _erp, _executar, _item, _roteador
 
 PRODUTO_ERP = {

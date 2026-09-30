@@ -1,79 +1,33 @@
-"""Peças comuns aos handlers do destino `erp_wingraph`.
+"""Leitura da RESPOSTA do destino `erp_wingraph`, comum aos handlers.
 
-Três assuntos moram aqui porque os três handlers de cliente os compartilham e
-nenhum deles pertence ao motor:
+Tudo aqui olha para o que CHEGOU do ERP:
 
-- **classificação da resposta** nos três baldes da seção 5 do plano (definitiva,
-  retentável, incerta). A classificação de transporte (`ErpIndisponivel` ×
-  `ResultadoIncerto`) continua sendo do `ErpClient`; o que se classifica aqui é
-  a resposta que chegou inteira e diz "não";
-- **payload inválido**, que é falha DEFINITIVA e não pode virar exceção: exceção
-  no `preparar` é retentável por construção no motor, e CNPJ faltando não fica
-  melhor na terceira tentativa;
-- **a consulta por documento**, que é o verificador de `cliente.criar` e
+- **leitura do envelope** (`data`, `metadata.pages`), que e o mesmo em
+  `/api/v1/cliente` e `/api/v1/caracteristicasproduto`;
+- **classificacao da resposta** nos tres baldes (definitiva, retentavel,
+  incerta). A classificacao de transporte (`ErpIndisponivel` x
+  `ResultadoIncerto`) continua sendo do `ErpClient`; o que se classifica aqui e
+  a resposta que chegou inteira e diz "nao";
+- **a consulta por documento**, que e o verificador de `cliente.criar` e
   `cliente.atualizar`.
+
+O que olha para o payload que ENTROU saiu para `deskflow2/validadores/`:
+`PayloadInvalido`, `preparo_invalido`, `inteiro_positivo`, `so_digitos` e
+`documento_do_payload`. A fronteira e a direcao do dado — ver o docstring de lá.
 """
 
 from typing import Any, Optional
 
 import httpx
 
-from ..clientes.erp import ErroErp, ler_json, mensagem_de_erro, sucesso_erp
-from ..fila.modelos import Desfecho, Preparo
+from ..integracoes.erp import ErroErp, ler_json, mensagem_de_erro, sucesso_erp
+from ..fila.modelos import Desfecho
+from ..validadores.comum import inteiro_positivo, so_digitos
 
 # Status que o ERP devolve SEM ter processado a chamada — vale repetir mesmo em
 # tipo não idempotente. O 503 não chega aqui: o `ErpClient` já o converte em
 # `ErpIndisponivel` antes de devolver resposta.
 STATUS_RETENTAVEIS = frozenset({408, 425, 429, 502, 503, 504})
-
-
-class PayloadInvalido:
-    """Devolvida por `preparar()` NO LUGAR da chamada, quando o item não tem o
-    mínimo para falar com o ERP.
-
-    Não é exceção de propósito: o motor trata exceção no preparo como
-    retentável, e payload inválido não melhora na tentativa seguinte.
-    `interpretar()` a reconhece e devolve falha definitiva, sem gastar tentativa
-    e sem nenhuma chamada sair.
-    """
-
-    def __init__(self, mensagem: str, codigo: str = "PAYLOAD_INVALIDO"):
-        self.mensagem = mensagem
-        self.codigo = codigo
-
-    def desfecho(self) -> Desfecho:
-        return Desfecho.falhou(self.mensagem, self.codigo)
-
-
-def preparo_invalido(mensagem: str, codigo: str = "PAYLOAD_INVALIDO") -> Preparo:
-    """O `Preparo` de um item que não tem o mínimo para falar com o destino.
-
-    Empacota o idioma que os handlers repetiam à mão: NENHUMA chamada sai (o
-    `chamar` devolve o próprio `PayloadInvalido`, que o `interpretar` reconhece)
-    e o motivo fica em `payload_enviado`, visível na tela da fila.
-    """
-    invalido = PayloadInvalido(mensagem, codigo)
-    return Preparo(payload_enviado={"erro": invalido.mensagem}, chamar=lambda: invalido)
-
-
-def so_digitos(valor: Any) -> str:
-    """Forma canônica do documento, a mesma que o PageFlow usa nas chaves de
-    bloqueio e de idempotência (`services/Bremen/bremenClienteFilaService.js`)."""
-    return "".join(caractere for caractere in str(valor or "") if caractere.isdigit())
-
-
-def documento_do_payload(payload: dict) -> str:
-    """CNPJ ou CPF, na ordem em que o PageFlow os escolhe. O produtor já manda
-    `documento` pronto; os outros dois caminhos existem para o item montado à
-    mão pela tela de reprocesso."""
-    payload = payload or {}
-    cliente = payload.get("cliente") or {}
-    for bruto in (payload.get("documento"), cliente.get("cnpj"), cliente.get("cpf"),
-                  payload.get("cnpj"), payload.get("cpf"), payload.get("cpfcnpj")):
-        documento = so_digitos(bruto)
-        if documento:
-            return documento
-    return ""
 
 
 def envelope_json(resposta: httpx.Response) -> Optional[dict]:
@@ -161,19 +115,6 @@ def consultar_por_documento(erp, documento: str) -> Optional[dict]:
             return registro
     # Sem filtro batendo: o ERP respondeu a busca e não devolveu o documento.
     return None
-
-
-def inteiro_positivo(valor: Any) -> Optional[int]:
-    """Inteiro > 0, ou `None`. Aceita o número como texto, que é como ele chega
-    do JSONB do payload em boa parte dos produtores."""
-    try:
-        numero = int(valor)
-    except (TypeError, ValueError):
-        try:
-            numero = int(str(valor).strip())
-        except (TypeError, ValueError):
-            return None
-    return numero if numero > 0 else None
 
 
 def id_cliente_de(registro: Any) -> Optional[int]:

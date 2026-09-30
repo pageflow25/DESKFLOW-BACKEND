@@ -23,17 +23,17 @@ Contrato do resultado, lido por `services/fila/projetores/cliente.criar.js`:
 
 from typing import Any, Optional
 
-from ..clientes.erp import ErroErp, sucesso_erp
-from ..fila.modelos import Desfecho, ItemReivindicado, Preparo
-from .comum import (
-    PayloadInvalido,
+from ...integracoes.erp import ErroErp, sucesso_erp
+from ...fila.modelos import Desfecho, ItemReivindicado, Preparo
+from ..comum import (
     classificar_falha,
     clientes_do_envelope,
     consultar_por_documento,
-    documento_do_payload,
     envelope_json,
     id_cliente_de,
 )
+from ...validadores import clientes as validadores
+from ...validadores.comum import PayloadInvalido
 
 TIPO = "cliente.criar"
 
@@ -46,14 +46,10 @@ class HandlerClienteCriar:
 
     def preparar(self, conn, item: ItemReivindicado) -> Preparo:
         payload = item.payload or {}
-        cliente = payload.get("cliente")
-        if not isinstance(cliente, dict) or not cliente:
-            invalido = PayloadInvalido("cliente.criar exige `payload.cliente` com o cadastro a enviar.")
-            return Preparo(payload_enviado={"erro": invalido.mensagem}, chamar=lambda: invalido)
-        if not documento_do_payload(payload):
-            invalido = PayloadInvalido(
-                "cliente.criar exige CNPJ ou CPF: sem documento não há como verificar um resultado incerto.")
-            return Preparo(payload_enviado={"erro": invalido.mensagem}, chamar=lambda: invalido)
+
+        cliente, invalido = validadores.validar_criar(payload)
+        if invalido is not None:
+            return invalido.preparo()
 
         return Preparo(
             payload_enviado={"metodo": "POST", "caminho": "/api/v1/cliente", "data": cliente},
@@ -79,7 +75,7 @@ class HandlerClienteCriar:
         return Desfecho.concluido({"id_cliente": id_cliente, "resposta": dados})
 
     def verificar(self, conn, item: ItemReivindicado) -> Optional[Desfecho]:
-        documento = documento_do_payload(item.payload)
+        documento = validadores.documento_do_payload(item.payload)
         if not documento:
             return None
 

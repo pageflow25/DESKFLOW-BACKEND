@@ -22,7 +22,7 @@ from types import SimpleNamespace
 
 import httpx
 
-from deskflow2.clientes.erp import ErpClient
+from deskflow2.integracoes.erp import ErpClient
 from deskflow2.fila.catalogo import CODIGOS_OBRIGATORIOS, Catalogo, Tipo
 from deskflow2.fila.modelos import Desfecho, Estado, ItemReivindicado
 from deskflow2.fila.motor import Motor
@@ -32,7 +32,7 @@ from deskflow2.handlers import (
     HandlerPcpDownloadArquivos,
     HandlerPcpOrcamentoEnviar,
 )
-from deskflow2.servicos.payload import _consulta
+from deskflow2.servicos.pcp.payload import _consulta
 from tests.apoio import MotorFalso, configuracao
 
 # --- Dublês ------------------------------------------------------------------

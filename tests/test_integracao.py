@@ -16,9 +16,9 @@ from deskflow2.repositorios.fila import (
     ORIGEM_INTEGRACAO,
     OrcamentoReivindicado,
 )
-from deskflow2.servicos import payload as modulo_payload
-from deskflow2.servicos.download_arquivos import baixar_arquivos_das_ops, chave_arquivo
-from deskflow2.servicos.payload import (
+from deskflow2.servicos.pcp import payload as modulo_payload
+from deskflow2.servicos.pcp.download_arquivos import baixar_arquivos_das_ops, chave_arquivo
+from deskflow2.servicos.pcp.payload import (
     ARQUIVO_INTEGRACAO,
     PARAMETRO_IDS_ESCOLA,
     PARAMETRO_IDS_INTEGRACAO,

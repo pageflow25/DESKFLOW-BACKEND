@@ -24,14 +24,15 @@ import logging
 import time
 from typing import Any, Callable, Optional
 
-from ..fila.modelos import Desfecho, ItemReivindicado, Preparo
-from ..repositorios import fila
-from ..servicos.download_arquivos import (
+from ...fila.modelos import Desfecho, ItemReivindicado, Preparo
+from ...repositorios import fila
+from ...servicos.pcp.download_arquivos import (
     MENSAGEM_SEM_ARQUIVOS,
     BaixadorArquivos,
     baixar_arquivos_das_ops,
 )
-from .comum import PayloadInvalido, inteiro_positivo, preparo_invalido
+from ...validadores import pcp as validadores
+from ...validadores.comum import PayloadInvalido
 
 logger = logging.getLogger(__name__)
 
@@ -69,9 +70,9 @@ class HandlerPcpDownloadArquivos:
         self._dormir = dormir
 
     def preparar(self, conn, item: ItemReivindicado) -> Preparo:
-        aprovacao_id = inteiro_positivo((item.payload or {}).get("aprovacao_id"))
-        if aprovacao_id is None:
-            return preparo_invalido("pcp.download_arquivos exige `aprovacao_id` inteiro e maior que zero.")
+        aprovacao_id, invalido = validadores.download_do_payload(item.payload)
+        if invalido is not None:
+            return invalido.preparo()
 
         # Leitura na transação curta do preparo; os bytes só começam a andar
         # dentro do `chamar`, fora de qualquer transação.

@@ -25,25 +25,20 @@ Formato do resultado, lido por `services/fila/projetores/cliente.sincronizar_pag
 
 from typing import Any, Optional
 
-from ..clientes.erp import sucesso_erp
-from ..fila.modelos import Desfecho, ItemReivindicado, Preparo
-from .comum import (
-    PayloadInvalido,
+from ...integracoes.erp import sucesso_erp
+from ...fila.modelos import Desfecho, ItemReivindicado, Preparo
+from ..comum import (
     classificar_falha,
     clientes_do_envelope,
     envelope_json,
-    inteiro_positivo,
     total_paginas_de,
 )
+from ...validadores import clientes as validadores
+from ...validadores.comum import PayloadInvalido
 
 TIPO = "cliente.sincronizar_pagina"
 
 PRIMEIRA_PAGINA = 1
-
-
-def pagina_do_payload(payload: Optional[dict]) -> Optional[int]:
-    payload = payload or {}
-    return inteiro_positivo(payload.get("pagina", payload.get("page")))
 
 
 class HandlerClienteSincronizarPagina:
@@ -53,11 +48,9 @@ class HandlerClienteSincronizarPagina:
         self._erp = erp
 
     def preparar(self, conn, item: ItemReivindicado) -> Preparo:
-        pagina = pagina_do_payload(item.payload)
-        if pagina is None:
-            invalido = PayloadInvalido(
-                "cliente.sincronizar_pagina exige `pagina` inteira e maior que zero.")
-            return Preparo(payload_enviado={"erro": invalido.mensagem}, chamar=lambda: invalido)
+        pagina, invalido = validadores.validar_sincronizar_pagina(item.payload)
+        if invalido is not None:
+            return invalido.preparo()
 
         return Preparo(
             payload_enviado={"metodo": "GET", "caminho": "/api/v1/cliente", "params": {"page": pagina}},
@@ -72,7 +65,7 @@ class HandlerClienteSincronizarPagina:
         if bruto.status_code >= 400 or not sucesso_erp(dados):
             return classificar_falha(bruto, dados, mutacao=False)
 
-        pagina = pagina_do_payload(item.payload)
+        pagina = validadores.pagina_do_payload(item.payload)
         total_paginas = total_paginas_de(dados)
         if pagina == PRIMEIRA_PAGINA and total_paginas is None:
             return Desfecho.falhou(

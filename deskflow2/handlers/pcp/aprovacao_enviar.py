@@ -34,17 +34,13 @@ grava é o retorno do orçamento.
 
 from typing import Any, Optional
 
-from ..clientes.erp import ErroErp, extrair_id_requisicao, sucesso_erp
-from ..fila.modelos import Desfecho, ItemReivindicado, Preparo
-from ..servicos.comum import com_modo_assincrono, corpo_para_auditoria
-from .comum import (
-    PayloadInvalido,
-    classificar_falha,
-    envelope_json,
-    inteiro_positivo,
-    preparo_invalido,
-)
-from .pcp_comum import desfecho_do_ack, modo_envio_de, url_webhook_de
+from ...integracoes.erp import ErroErp, extrair_id_requisicao, sucesso_erp
+from ...fila.modelos import Desfecho, ItemReivindicado, Preparo
+from ...servicos.pcp.comum import com_modo_assincrono, corpo_para_auditoria
+from ...validadores import pcp as validadores
+from ...validadores.comum import PayloadInvalido
+from ..comum import classificar_falha, envelope_json
+from .comum import desfecho_do_ack
 
 TIPO = "pcp.aprovacao.enviar"
 
@@ -97,13 +93,6 @@ class Aprovada:
         self.consulta = consulta
 
 
-def _itens_do_payload(payload: dict) -> Optional[list]:
-    itens = payload.get("itens_aprovados")
-    if not isinstance(itens, list) or not itens:
-        return None
-    return [item for item in itens if isinstance(item, dict)] or None
-
-
 class HandlerPcpAprovacaoEnviar:
     tipo = TIPO
 
@@ -113,20 +102,10 @@ class HandlerPcpAprovacaoEnviar:
     def preparar(self, conn, item: ItemReivindicado) -> Preparo:
         payload = item.payload or {}
 
-        if inteiro_positivo(payload.get("aprovacao_id")) is None:
-            return preparo_invalido("pcp.aprovacao.enviar exige `aprovacao_id` inteiro e maior que zero.")
-
-        id_orcamento = inteiro_positivo(payload.get("id_orcamento"))
-        if id_orcamento is None:
-            return preparo_invalido(
-                "Orçamento sem id_orcamento: não há o que aprovar no ERP.", "SEM_ID_ORCAMENTO")
-
-        itens = _itens_do_payload(payload)
-        if itens is None:
-            return preparo_invalido(
-                "pcp.aprovacao.enviar exige `itens_aprovados` com pelo menos um item.",
-                "SEM_ITENS_APROVADOS",
-            )
+        campos, invalido = validadores.aprovacao_do_payload(payload)
+        if invalido is not None:
+            return invalido.preparo()
+        id_orcamento, itens = campos["id_orcamento"], campos["itens"]
 
         corpo = {
             "identifier": self._erp.identifier,
@@ -136,7 +115,8 @@ class HandlerPcpAprovacaoEnviar:
                 "itens": itens,
             },
         }
-        corpo = com_modo_assincrono(corpo, modo_envio_de(payload), url_webhook_de(payload))
+        corpo = com_modo_assincrono(
+            corpo, validadores.modo_envio_de(payload), validadores.url_webhook_de(payload))
         return Preparo(
             payload_enviado=corpo_para_auditoria(corpo),
             chamar=lambda: self._chamar(id_orcamento, itens, corpo),
@@ -161,7 +141,7 @@ class HandlerPcpAprovacaoEnviar:
         if isinstance(bruto, PayloadInvalido):
             return bruto.desfecho()
 
-        modo = modo_envio_de(item.payload)
+        modo = validadores.modo_envio_de(item.payload)
 
         if isinstance(bruto, ConsultaIndisponivel):
             return Desfecho.retentar(

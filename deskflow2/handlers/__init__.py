@@ -18,15 +18,15 @@ espera.
 
 import logging
 
-from .cliente_atualizar import HandlerClienteAtualizar
-from .cliente_consultar import HandlerClienteConsultar
-from .cliente_criar import HandlerClienteCriar
-from .cliente_planilha import HandlerClientePlanilhaLinha
-from .cliente_sincronizar_pagina import HandlerClienteSincronizarPagina
-from .pcp_aprovacao_enviar import HandlerPcpAprovacaoEnviar
-from .pcp_download_arquivos import HandlerPcpDownloadArquivos
-from .pcp_orcamento_enviar import HandlerPcpOrcamentoEnviar
-from .produto_importar import HandlerProdutoImportar
+from .clientes.atualizar import HandlerClienteAtualizar
+from .clientes.consultar import HandlerClienteConsultar
+from .clientes.criar import HandlerClienteCriar
+from .clientes.planilha import HandlerClientePlanilhaLinha
+from .clientes.sincronizar_pagina import HandlerClienteSincronizarPagina
+from .pcp.aprovacao_enviar import HandlerPcpAprovacaoEnviar
+from .pcp.download_arquivos import HandlerPcpDownloadArquivos
+from .pcp.orcamento_enviar import HandlerPcpOrcamentoEnviar
+from .produtos.importar import HandlerProdutoImportar
 
 logger = logging.getLogger(__name__)
 

@@ -19,9 +19,11 @@ from pathlib import Path
 from sqlalchemy import Integer, bindparam, text
 from sqlalchemy.dialects.postgresql import ARRAY
 
-from ..repositorios.fila import ORIGEM_INTEGRACAO, OrcamentoReivindicado
+from ...repositorios.fila import ORIGEM_INTEGRACAO, OrcamentoReivindicado
 
-PASTA_SQL = Path(__file__).resolve().parent.parent / "sql"
+# `deskflow2/sql/`, a partir de `deskflow2/servicos/pcp/`: tres niveis acima
+# do arquivo. Era dois antes de este modulo descer para `servicos/pcp/`.
+PASTA_SQL = Path(__file__).resolve().parents[2] / "sql"
 ARQUIVO_POR_MODO = {
     "unidade": "orcamento_unidade.sql",
     "escola": "orcamento_escola.sql",

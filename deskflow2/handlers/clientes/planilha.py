@@ -28,10 +28,10 @@ hoje; aqui não há nada a fazer por isso, é o motor que a aplica.
 
 from typing import Any, Optional
 
-from ..fila.modelos import Desfecho, Estado, ItemReivindicado, Preparo
-from .cliente_atualizar import HandlerClienteAtualizar
-from .cliente_criar import HandlerClienteCriar
-from .comum import PayloadInvalido
+from ...fila.modelos import Desfecho, Estado, ItemReivindicado, Preparo
+from .atualizar import HandlerClienteAtualizar
+from .criar import HandlerClienteCriar
+from ...validadores.comum import PayloadInvalido
 
 TIPO = "cliente.planilha_linha"
 

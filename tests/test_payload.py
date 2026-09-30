@@ -2,8 +2,8 @@ import unittest
 from types import SimpleNamespace
 
 from deskflow2.repositorios.fila import OrcamentoReivindicado
-from deskflow2.servicos import payload as modulo_payload
-from deskflow2.servicos.payload import (
+from deskflow2.servicos.pcp import payload as modulo_payload
+from deskflow2.servicos.pcp.payload import (
     ARQUIVO_POR_MODO,
     PayloadIncompleto,
     ids_do_codigo_externo,

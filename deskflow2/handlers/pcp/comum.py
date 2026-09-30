@@ -19,22 +19,9 @@ POST é o resultado.
 
 from typing import Optional
 
-from ..clientes.erp import extrair_id_requisicao
-from ..fila.modelos import Desfecho
-
-MODO_SINCRONO = "sincrono"
-MODO_ASSINCRONO = "assincrono"
-
-
-def url_webhook_de(payload: Optional[dict]) -> Optional[str]:
-    url = (payload or {}).get("url_webhook")
-    return url if isinstance(url, str) and url.strip() else None
-
-
-def modo_envio_de(payload: Optional[dict]) -> str:
-    """`assincrono` só quando existe webhook para o ERP devolver o resultado."""
-    return MODO_ASSINCRONO if url_webhook_de(payload) else MODO_SINCRONO
-
+from ...integracoes.erp import extrair_id_requisicao
+from ...fila.modelos import Desfecho
+from ...validadores.pcp import MODO_ASSINCRONO
 
 def desfecho_do_ack(dados: dict, modo: str, tem_resultado_final: bool,
                     resultado: dict) -> Optional[Desfecho]:

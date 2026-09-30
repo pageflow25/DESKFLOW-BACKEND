@@ -21,15 +21,15 @@ definitiva e sem consumir tentativa.
 
 from typing import Any, Optional
 
-from ..clientes.erp import ORIGEM_MODELO_DE_PRODUTO, sucesso_erp
-from ..fila.modelos import Desfecho, ItemReivindicado, Preparo
-from .comum import (
-    PayloadInvalido,
+from ...integracoes.erp import ORIGEM_MODELO_DE_PRODUTO, sucesso_erp
+from ...fila.modelos import Desfecho, ItemReivindicado, Preparo
+from ..comum import (
     classificar_falha,
     envelope_json,
-    inteiro_positivo,
     registros_do_envelope,
 )
+from ...validadores import produtos as validadores
+from ...validadores.comum import PayloadInvalido, inteiro_positivo
 
 TIPO = "produto.importar"
 
@@ -48,15 +48,11 @@ class HandlerProdutoImportar:
 
     def preparar(self, conn, item: ItemReivindicado) -> Preparo:
         payload = item.payload or {}
-        id_produto = inteiro_positivo(payload.get("id_produto"))
-        if id_produto is None:
-            invalido = PayloadInvalido("produto.importar exige `id_produto` inteiro e maior que zero.")
-            return Preparo(payload_enviado={"erro": invalido.mensagem}, chamar=lambda: invalido)
-        if inteiro_positivo(payload.get("id_categoria")) is None:
-            invalido = PayloadInvalido(
-                "produto.importar exige `id_categoria` inteiro e maior que zero: sem ela o "
-                "projetor do PageFlow não tem onde gravar o produto importado.")
-            return Preparo(payload_enviado={"erro": invalido.mensagem}, chamar=lambda: invalido)
+
+        campos, invalido = validadores.validar_importar(payload)
+        if invalido is not None:
+            return invalido.preparo()
+        id_produto = campos["id_produto"]
 
         origem = origem_do_payload(payload)
         return Preparo(

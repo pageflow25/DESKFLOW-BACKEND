@@ -167,29 +167,47 @@ deskflow2/
 ├── app.py                 # monta as peças a partir da configuração
 ├── config.py              # Settings (pydantic-settings, lê o .env)
 ├── db.py                  # engine SQLAlchemy do Postgres do PageFlow
-├── jobs.py                # agendamento dos ciclos (APScheduler)
+├── jobs.py                # agendamento dos quatro ciclos da fila (APScheduler)
 ├── logging_config.py      # log em console e arquivo com rotação diária
-├── clientes/
-│   ├── erp.py             # cliente do Wingraph: login, retry de 503
-│   └── pageflow.py        # repasse dos resultados ao PageFlow
+├── fila/                  # o MOTOR, agnóstico de domínio
+│   ├── motor.py           # executa um item: preparar -> chamar -> interpretar
+│   ├── escalonador.py     # os dois pools (síncrono 1 / assíncrono 4)
+│   ├── repositorio.py     # claim SKIP LOCKED, lease, reaper, heartbeat
+│   ├── catalogo.py        # status e tipos lidos do banco
+│   ├── registry.py        # tipo_codigo -> handler
+│   └── modelos.py         # Preparo, Desfecho, Estado, ItemReivindicado
+├── handlers/              # um módulo por tipo, SEPARADO POR DOMÍNIO
+│   ├── comum.py           # leitura da RESPOSTA do ERP (envelope, baldes de falha)
+│   ├── clientes/          # consultar, criar, atualizar, planilha, sincronizar_pagina
+│   ├── pcp/               # orcamento_enviar, aprovacao_enviar, download_arquivos
+│   └── produtos/          # importar
+├── validadores/           # regras do PAYLOAD que entrou; função pura, sem I/O
+│   ├── comum.py           # PayloadInvalido, inteiro_positivo, so_digitos
+│   ├── clientes.py
+│   ├── pcp.py
+│   └── produtos.py
+├── integracoes/
+│   └── erp.py             # cliente do Wingraph: login, retry de 503
 ├── repositorios/
-│   ├── fila.py            # leitura e claim das filas orcamento_api_*
+│   ├── fila.py            # leituras de domínio do PCP (arquivos da aprovação)
 │   └── status.py          # catálogo de status do PCP
-├── servicos/
-│   ├── despacho_orcamento.py
-│   ├── despacho_aprovacao.py
-│   ├── download_arquivos.py
-│   ├── reconciliacao.py
-│   ├── repasse.py         # guarda e reenvia repasses não entregues
+├── servicos/pcp/          # tudo aqui é do PCP; outro domínio nasce ao lado
 │   ├── payload.py         # monta o corpo do orçamento com os SQLs
+│   ├── download_arquivos.py
 │   └── comum.py
 └── sql/
     ├── orcamento_unidade.sql
     ├── orcamento_escola.sql
     └── orcamento_integracao.sql
 docs/legado/               # SQLs do DESKFLOW antigo, só para referência
-tests/                     # unittest, sem banco e sem rede
+tests/                     # unittest; tests/integracao/ fala com o Postgres
 ```
+
+A fronteira que separa `handlers/comum.py` de `validadores/` é a **direção do
+dado**: validador olha o payload que ENTROU, antes de qualquer chamada sair;
+`handlers/comum.py` olha a resposta que CHEGOU. Por isso `PayloadInvalido` não é
+exceção — exceção no preparo é retentável por construção no motor, e payload
+inválido não melhora na terceira tentativa.
 
 ## Requisitos
 

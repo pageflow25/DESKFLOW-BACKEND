@@ -21,7 +21,7 @@ def _dry_run(app, orcamento_id: int) -> int:
     `orcamento_api_orcamentos`. Só leitura, e sem passar pela fila: serve para
     conferir o payload de um orçamento real antes de enfileirá-lo."""
     from .repositorios.fila import carregar_orcamento
-    from .servicos.payload import PayloadIncompleto, montar_payload_orcamento
+    from .servicos.pcp.payload import PayloadIncompleto, montar_payload_orcamento
 
     with app.engine.connect() as conn:
         orcamento = carregar_orcamento(conn, orcamento_id)

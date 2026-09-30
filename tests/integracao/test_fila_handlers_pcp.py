@@ -21,7 +21,7 @@ from types import SimpleNamespace
 
 import httpx
 
-from deskflow2.clientes.erp import ErpClient
+from deskflow2.integracoes.erp import ErpClient
 from deskflow2.fila.catalogo import carregar_catalogo
 from deskflow2.fila.motor import Motor
 from deskflow2.fila.registry import Registry
