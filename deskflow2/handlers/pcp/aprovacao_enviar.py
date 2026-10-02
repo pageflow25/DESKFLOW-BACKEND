@@ -54,14 +54,29 @@ def itens_ja_aprovados(consulta: dict, itens_aprovados: list) -> bool:
     Vinha de `servicos/despacho_aprovacao.py` e foi trazida para cá quando o
     despacho antigo saiu: é a única proteção contra aprovar duas vezes (OP e PV
     duplicados na produção), e este handler é seu único chamador.
+
+    `data` só é lista de propostas no sucesso. Quando o orçamento não tem
+    proposta, o ERP responde HTTP 400 com `data` OBJETO
+    (`{"error": "Proposta não encontrada"}`) — percorrer isso como lista dava
+    `'str' object has no attribute 'get'` e o item ia para `incerto` sem o POST
+    ter saído. Formato inesperado conta como "nada confirmado": o POST segue e
+    a resposta dele é que decide (o handler já classifica a recusa).
     """
     ids = {int(item["id"]) for item in itens_aprovados if isinstance(item, dict) and item.get("id") is not None}
     if not ids or not isinstance(consulta, dict):
         return False
+    propostas = consulta.get("data")
+    if isinstance(propostas, dict):
+        propostas = [propostas]
+    if not isinstance(propostas, list):
+        return False
     confirmados = set()
-    for proposta in consulta.get("data") or []:
-        for item in (proposta or {}).get("itens") or []:
-            if str(item.get("status", "")).strip().lower() == STATUS_ITEM_APROVADO and item.get("id") is not None:
+    for proposta in propostas:
+        itens = proposta.get("itens") if isinstance(proposta, dict) else None
+        for item in itens if isinstance(itens, list) else []:
+            if not isinstance(item, dict) or item.get("id") is None:
+                continue
+            if str(item.get("status", "")).strip().lower() == STATUS_ITEM_APROVADO:
                 confirmados.add(int(item["id"]))
     return ids <= confirmados
 

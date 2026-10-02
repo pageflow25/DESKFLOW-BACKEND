@@ -413,6 +413,29 @@ class TestAprovacao(unittest.TestCase):
         self.assertEqual(desfecho.resultado["modo_envio"], "sincrono")
         self.assertIsNotNone(desfecho.resultado["consulta_previa"])
 
+    def test_proposta_nao_encontrada_segue_para_o_post(self):
+        # Resposta real do ERP (orçamentos 19458/19459, 2026-10-02): HTTP 400 com
+        # `data` objeto. Antes estourava AttributeError e o item ia a `incerto`.
+        nao_encontrada = {"sucess": False, "code": 400, "message": "Solicitação inválida",
+                          "data": {"error": "Proposta não encontrada"}}
+        desfecho, vistos, _ = self._executar(
+            _payload_aprovacao(),
+            get=httpx.Response(400, json=nao_encontrada),
+            post=httpx.Response(200, json={"success": True, "data": {"id_requisicao": 78}}))
+
+        self.assertIs(desfecho.estado, Estado.AGUARDANDO_CALLBACK)
+        self.assertFalse(desfecho.resultado["ja_aprovada"])
+        self.assertEqual(desfecho.resultado["consulta_previa"], nao_encontrada)
+        self.assertEqual([requisicao.method for requisicao in vistos], ["GET", "POST"])
+
+    def test_proposta_unica_como_objeto_ainda_detecta_aprovacao(self):
+        proposta = _proposta({1: "Confirmada", 2: "Confirmada"})
+        proposta["data"] = proposta["data"][0]
+        desfecho, vistos, _ = self._executar(_payload_aprovacao(), get=httpx.Response(200, json=proposta))
+
+        self.assertTrue(desfecho.resultado["ja_aprovada"])
+        self.assertEqual([requisicao.method for requisicao in vistos], ["GET"])
+
     def test_consulta_previa_indisponivel_e_retentavel_sem_enviar_nada(self):
         def cai(request):
             raise httpx.ConnectError("sem rota", request=request)
