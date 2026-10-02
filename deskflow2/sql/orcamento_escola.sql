@@ -19,8 +19,8 @@
 --   - Componentes POR ESPECIFICAÇÃO (2026-10-02): sem cenários miolo/capa/
 --     outros — cada componente, com ou sem arquivo, vira um objeto montado da
 --     própria especificação. Mesma mudança e mesmo motivo do
---     orcamento_unidade.sql. A capa continua indo 4x0 (agora nos dois SQLs,
---     unidade inclusive).
+--     orcamento_unidade.sql. A capa deixou de ir com cor fixa 4/0: a cor dela
+--     não vai, e o Bremen usa a do modelo.
 --   - `tarefas_gerais` sai como { id, descricao } (formato do Wingraph).
 --   - Campos internos (ids_distribuicao, id_escola) não vão mais no corpo.
 --
@@ -298,14 +298,14 @@ SELECT json_strip_nulls(json_build_object(
                                 'quantidade_paginas', mat.paginas,
                                 'idgruposubstratoimpressao', mat.idgruposubstratoimpressao,
                                 'gramaturasubstratoimpressao', mat.gramatura,
-                                -- Única exceção por tipo: CAPA vai sempre 4x0 (colorida só
-                                -- frente), regra do negócio. O papel é resolvido por
-                                -- componente, mas a cor gravada na capa é a do PDF/item
-                                -- (capa colorida de miolo PB sai 1/1). Vale para todo
-                                -- `is_capa`, folha de rosto inclusive. "Capa + Miolo"
-                                -- (is_capa E is_miolo) é o PDF inteiro: vai a cor dele.
-                                'corfrente', CASE WHEN mat.is_capa AND NOT mat.is_miolo THEN 4 ELSE mat.corfrente END,
-                                'corverso', CASE WHEN mat.is_capa AND NOT mat.is_miolo THEN 0 ELSE mat.corverso END,
+                                -- Única exceção por tipo: a cor da CAPA não vai. O
+                                -- papel é resolvido por componente, mas a cor gravada
+                                -- na capa é a do PDF/item (capa colorida de miolo PB
+                                -- sai 1/1), então o Bremen usa a do modelo. Sai daqui
+                                -- quando o PageFlow resolver a cor por componente. "Capa + Miolo"
+                                -- (is_capa E is_miolo) é o PDF inteiro: a cor dele vai.
+                                'corfrente', CASE WHEN mat.is_miolo OR NOT mat.is_capa THEN mat.corfrente END,
+                                'corverso', CASE WHEN mat.is_miolo OR NOT mat.is_capa THEN mat.corverso END,
                                 'perguntas_componente', COALESCE((
                                     SELECT json_agg(
                                         json_build_object(

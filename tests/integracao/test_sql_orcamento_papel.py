@@ -6,7 +6,7 @@ papel dela, folha de rosto herdando do miolo, dobra aplicada no substrato — e,
 desde 2026-09-24, também os componentes SEM arquivo (papelão, guarda), marcados
 com `metadados.sem_arquivo = true`. O orçamento monta cada componente da
 própria especificação, sem cenário por tipo nem regra por categoria de produto.
-A única exceção é a cor da capa: vai sempre 4x0 (a gravada é a do PDF/item).
+A única exceção é a cor da capa, que não vai (a gravada é a do PDF/item).
 
 Os casos espelham BACKEND_PAGEFLOW/docs/papel-tres-eixos-casos-de-teste.md e o
 pedido 13340 do testing (apostila capa dura, item 107).
@@ -159,10 +159,10 @@ class TestComponentesPorEspecificacaoNoOrcamento(TesteDeFila):
             self.assertEqual(r[7][275]["quantidade_paginas"], 4)
         with self.subTest(arquivo=arquivo, caso="especificação órfã do carrinho não substitui a com arquivo"):
             self.assertEqual(_papel(r[7][274]), (124, 170.0))
-        with self.subTest(arquivo=arquivo, caso="capa vai 4x0, mesmo gravada 4/4; miolo leva a dele"):
-            self.assertEqual(_cor(r[7][274]), (4, 0))
+        with self.subTest(arquivo=arquivo, caso="capa não leva cor; miolo leva a dele"):
+            self.assertEqual(_cor(r[7][274]), (None, None))
             self.assertEqual(_cor(r[7][275]), (4, 4))
-            self.assertEqual(_cor(r[3][259]), (4, 0))
+            self.assertEqual(_cor(r[3][259]), (None, None))
         with self.subTest(arquivo=arquivo, caso="'Capa + Miolo' leva a cor (é o PDF inteiro)"):
             self.assertEqual(_cor(r[8][320]), (4, 4))
 
