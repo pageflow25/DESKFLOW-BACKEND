@@ -13,8 +13,20 @@
 --     `integra_pedido_produtos.catalogo_bremen_modelo_snapshot_id` existe no
 --     banco mas está vazio e não é lido aqui: mudar o modelo no catálogo muda
 --     o que se manda ao ERP nos envios seguintes. Decisão do usuário (2026-09-22).
---   - Não há três eixos de papel nem gramatura por pedido: o que existe é o
---     que o modelo do catálogo define.
+--   - Papel: o pedido de integração não tem especificação própria. O catálogo
+--     já guarda o papel em três eixos por componente (id_tipo_papel_padrao,
+--     id_gramatura_padrao, id_substrato), mas este SQL NÃO o manda ao ERP, de
+--     propósito: o Bremen completa pela estrutura do modelo de produto
+--     (`manter_estrutura_mod_produto`), e o catálogo ainda grava papel
+--     HERDADO do miolo em componente que não é impresso (Papelão e Guarda dos
+--     Uma Penca saem como Offset A4 Branco 75 g — o Papelão já tem vínculo
+--     próprio no cadastro, mas os modelos foram salvos antes). Mandar isso
+--     trocaria o material de verdade do componente. Antes de mandar, revisar
+--     esses modelos em /admin/catalogos-bremen; o recorte pronto está em
+--     BACKEND_PAGEFLOW/docs/papel-tres-eixos-deskflow.md, seção 6.
+--     (Diferente dos SQLs de escola: lá cada componente, papelão e guarda
+--     inclusive, tem especificação própria resolvida pelo cadastro NO MOMENTO
+--     do pedido — o papelão de um pedido novo sai como Papelão Imune.)
 --
 -- Base: o SQL manual que o usuário já rodava para estes pedidos, com as
 -- correções pedidas:
@@ -31,11 +43,14 @@
 --       não por LIKE na descrição;
 --   (e) `altura`/`largura` vão como estão em
 --       `catalogo_bremen_modelo_componentes.altura_padrao/largura_padrao`, que
---       já estão em CENTÍMETROS (ao contrário dos SQLs de escola, que leem
---       milímetros de bremen_formato_papel e por isso dividem
---       por 10). Ver o relatório: 86 das 89 linhas do catálogo em testing
---       estão em cm; 3 linhas antigas (210, 230, 146) parecem mm e sairiam
---       10x maiores — corrigir esses 3 cadastros, não o SQL;
+--       estão em CENTÍMETROS (ao contrário dos SQLs de escola, que leem
+--       milímetros de bremen_formato_papel e por isso dividem por 10). Com o
+--       papel em três eixos o PageFlow calcula essas medidas do formato do
+--       modelo (`catalogo_bremen_modelos.id_formato`), sempre em cm e iguais
+--       em todos os componentes; os modelos antigos que estavam em mm (1, 2
+--       e 3) foram convertidos. Modelo sem formato (4, 6, 15) segue com as
+--       medidas digitadas de antes — e o 4 e o 6 ainda estão em mm (230×146,
+--       210×197), sairiam 10x maiores: corrigir o cadastro, não o SQL;
 --   (f) sem `identifier` e sem cabeçalho fixo: `identifier` é posto pelo
 --       payload.py e cliente/vendedor/forma vêm da requisição do PCP.
 --

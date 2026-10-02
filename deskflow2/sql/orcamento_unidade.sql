@@ -20,6 +20,18 @@
 --     esperando para acontecer. Pedido antigo sem os três eixos resolvidos
 --     cai no texto livre de ef.altura/ef.largura, como já caía.
 --     (BACKEND_PAGEFLOW/docs/papel-tres-eixos-deskflow.md).
+--   - Componentes POR ESPECIFICAÇÃO (2026-10-02): o PageFlow grava uma
+--     especificação por componente, com o papel resolvido (capa com o papel
+--     dela, componente sem vínculo herdando do miolo, dobra no substrato) —
+--     inclusive dos componentes SEM arquivo (papelão, guarda). Então não há
+--     mais cenários miolo/capa/outros: cada componente vira um objeto montado
+--     da própria especificação, e os sem arquivo entram junto (ver
+--     `componentes_distribuicao`). Saíram a regra da capa por
+--     `categoria_Prod = 'LIVRETO'` (não pegava "Livreto - Grupo Salta"/"GOA"),
+--     o `LIKE '%folha%rosto%'` (a folha de rosto é `is_capa`) e o cenário
+--     "outros" sem papel. Sobra uma exceção: a CAPA vai sempre 4x0 (ver o
+--     comentário no objeto do componente). Chave sem valor é omitida e o
+--     Bremen completa pela estrutura do modelo (`manter_estrutura_mod_produto`).
 --   - `tarefas_gerais` sai como { id, descricao } (formato do Wingraph).
 --   - Campos internos (id_distribuicao, nome_unidade) não vão mais no corpo.
 --
@@ -64,39 +76,83 @@ distribuicoes AS (
       AND dm.quantidade > 0
 ),
 
--- Materiais (arquivos) de cada distribuição — 1 linha por pedido_distribuicao_arquivos,
--- já com o componente Bremen resolvido de forma determinística.
-materiais AS (
+-- Componentes de cada distribuição: 1 linha por componente, cada um com a SUA
+-- especificação (papel, cor, perguntas, tarefas). Duas fontes:
+--   1. os arquivos distribuídos (pedido_distribuicao_arquivos): o que tem PDF
+--      — capa, miolo, folha de rosto;
+--   2. os componentes SEM arquivo do mesmo item de carrinho (papelão, guarda),
+--      que o PageFlow grava desde 2026-09-24 com papel próprio, cor 0/0, as
+--      perguntas deles e `metadados.sem_arquivo = true`
+--      (especificacaoPedidoService.criarEspecificacoesDeComponentesSemArquivo).
+-- O critério da fonte 2 é a marca `sem_arquivo`, e não "está no carrinho e não
+-- tem arquivo": pedidos de jun–ago têm especificações repetidas no carrinho
+-- que nunca foram componente de nada. O CASE garante que o cast para jsonb só
+-- roda em texto que contém a marca — um `metadados` malformado em qualquer
+-- outra linha da tabela não derruba o orçamento.
+componentes_distribuicao AS (
     SELECT
         pda.distribuicao_material_id AS distribuicao_id,
-        pda.arquivo_pdf_id,
         pda.especificacao_form_id,
-        pda.id_componente,
+        pda.arquivo_pdf_id,
+        pda.id_componente
+    FROM pedido_distribuicao_arquivos pda
+    WHERE pda.distribuicao_material_id IN (SELECT distribuicao_id FROM distribuicoes)
+
+    UNION ALL
+
+    SELECT
+        d.distribuicao_id,
+        ef.id,
+        NULL,
+        ef.id_componente
+    FROM distribuicoes d
+    JOIN pedido_especificacoes ef ON ef.pedido_item_carrinho_id = d.pedido_item_carrinho_id
+    WHERE CASE
+              WHEN ef.metadados LIKE '%sem_arquivo%'
+              THEN (ef.metadados::jsonb ->> 'sem_arquivo') = 'true'
+              ELSE FALSE
+          END
+),
+
+-- 1 linha por (distribuição, componente). Se o mesmo componente vier pelas
+-- duas fontes, fica a que tem arquivo.
+materiais AS (
+    SELECT DISTINCT ON (cd.distribuicao_id, COALESCE(cd.id_componente, ef.id_componente))
+        cd.distribuicao_id,
+        cd.arquivo_pdf_id,
+        cd.especificacao_form_id,
+        COALESCE(cd.id_componente, ef.id_componente) AS id_componente,
         ef.id_produto,
         ef.corfrente,
         ef.corverso,
-        ef.gramatura_miolo,
         ap.nome AS arquivo_nome,
         ap.paginas,
-        bg.gramatura AS gramatura_catalogo,
+        -- Papel DESTE componente (três eixos). `gramatura_miolo` é o texto da
+        -- gramatura do componente, apesar do nome (ver a doc do PageFlow);
+        -- serve só de reserva quando a especificação não aponta para
+        -- bremen_gramatura.
+        COALESCE(
+            bg.gramatura,
+            NULLIF(replace(regexp_replace(ef.gramatura_miolo::text, '[^0-9.,]', '', 'g'), ',', '.'), '')::numeric
+        ) AS gramatura,
         ef.id_substrato AS idgruposubstratoimpressao,
         COALESCE(bf.altura, NULLIF(ef.altura, '')::numeric) AS altura_mm,
         COALESCE(bf.largura, NULLIF(ef.largura, '')::numeric) AS largura_mm,
-        bi.descricao AS produto_descricao,
-        bi.sub_grupo,
-        bi.frente_verso,
-        bi."categoria_Prod",
         bc.descricao AS componente_descricao,
         COALESCE(bc.is_capa, FALSE) AS is_capa,
         COALESCE(bc.is_miolo, FALSE) AS is_miolo
-    FROM pedido_distribuicao_arquivos pda
-    JOIN pedido_especificacoes ef ON ef.id = pda.especificacao_form_id
-    JOIN pedido_arquivos_pdf ap ON ap.id = pda.arquivo_pdf_id
+    FROM componentes_distribuicao cd
+    JOIN pedido_especificacoes ef ON ef.id = cd.especificacao_form_id
+    LEFT JOIN pedido_arquivos_pdf ap ON ap.id = cd.arquivo_pdf_id
     JOIN bremen_itens bi ON bi.id_produto = ef.id_produto
-    LEFT JOIN bremen_componentes bc ON bc.id_componente = pda.id_componente
+    LEFT JOIN bremen_componentes bc ON bc.id_componente = COALESCE(cd.id_componente, ef.id_componente)
     LEFT JOIN bremen_gramatura bg ON bg.id = ef.id_gramatura
     LEFT JOIN bremen_formato_papel bf ON bf.id = ef.id_formato
-    WHERE pda.distribuicao_material_id IN (SELECT distribuicao_id FROM distribuicoes)
+    ORDER BY
+        cd.distribuicao_id,
+        COALESCE(cd.id_componente, ef.id_componente),
+        (cd.arquivo_pdf_id IS NULL),
+        cd.arquivo_pdf_id
 ),
 
 -- Agrega os metadados do item comercial a partir dos seus materiais.
@@ -115,8 +171,11 @@ itens_produto AS (
         d.area_turma,
         MAX(mat.id_produto) AS id_produto,
         -- Prefere a especificação do miolo pra perguntas/tarefas de escopo geral do item.
+        -- Depois do miolo, uma especificação COM arquivo: as perguntas gerais
+        -- ficam nelas, não nas de papelão/guarda (que o PageFlow grava sem).
         COALESCE(
             MAX(CASE WHEN mat.is_miolo THEN mat.especificacao_form_id END),
+            MAX(CASE WHEN mat.arquivo_pdf_id IS NOT NULL THEN mat.especificacao_form_id END),
             MAX(mat.especificacao_form_id)
         ) AS especificacao_id_geral,
         (
@@ -255,165 +314,57 @@ SELECT json_strip_nulls(json_build_object(
                     'manter_estrutura_mod_produto', 1,
                     'componentes', COALESCE((
                         SELECT json_agg(
-                            CASE
-                                -- ==========================================================
-                                -- CENÁRIO 1: MIOLO
-                                -- ==========================================================
-                                WHEN mat.is_miolo THEN
-                                    json_strip_nulls(json_build_object(
-                                        'id', mat.id_componente,
-                                        'descricao', mat.componente_descricao,
-                                        'altura', ROUND(mat.altura_mm::numeric / 10, 2),
-                                        'largura', ROUND(mat.largura_mm::numeric / 10, 2),
-                                        'quantidade_paginas', COALESCE(mat.paginas, 0),
-                                        'idgruposubstratoimpressao', mat.idgruposubstratoimpressao,
-                                        'gramaturasubstratoimpressao', COALESCE(
-                                            mat.gramatura_catalogo,
-                                            NULLIF(replace(regexp_replace(mat.gramatura_miolo::text, '[^0-9.,]', '', 'g'), ',', '.'), '')::numeric
-                                        ),
-                                        'corfrente', mat.corfrente,
-                                        'corverso', mat.corverso,
-                                        'perguntas_componente', COALESCE((
-                                            SELECT json_agg(
-                                                json_build_object(
-                                                    'id_pergunta', bp.id_pergunta,
-                                                    'pergunta', bp.nome,
-                                                    'tipo', bp.tipo,
-                                                    'resposta', rc.resposta
-                                                )
-                                                ORDER BY bp.id_pergunta
-                                            )
-                                            FROM bremen_perguntas bp
-                                            INNER JOIN respostas_componentes rc
-                                                ON rc.pergunta_id = bp.id
-                                                AND rc.distribuicao_id = mat.distribuicao_id
-                                                AND rc.id_componente = mat.id_componente
-                                            WHERE bp.id_componente = mat.id_componente
-                                        ), '[]'::json),
-                                        'tarefas_componente', COALESCE((
-                                            SELECT json_agg(
-                                                json_build_object(
-                                                    'id', tc.id_tarefa,
-                                                    'descricao', tc.descricao
-                                                )
-                                                ORDER BY tc.id_tarefa
-                                            )
-                                            FROM tarefas_componentes tc
-                                            WHERE tc.especificacao_id = mat.especificacao_form_id
-                                        ), '[]'::json)
-                                    ))
-
-                                -- ==========================================================
-                                -- CENÁRIO 2: CAPA
-                                -- ==========================================================
-                                WHEN mat.is_capa THEN
-                                    json_strip_nulls(
+                            -- Um componente, um objeto: medida, páginas, papel, cor,
+                            -- perguntas e tarefas vêm da especificação DELE, que o
+                            -- PageFlow já grava resolvida por componente. Chave nula
+                            -- some no json_strip_nulls de fora e o Bremen completa
+                            -- pelo modelo (`manter_estrutura_mod_produto`) — é o caso
+                            -- de `quantidade_paginas` em componente sem arquivo.
+                            json_build_object(
+                                'id', mat.id_componente,
+                                'descricao', mat.componente_descricao,
+                                'altura', ROUND(mat.altura_mm::numeric / 10, 2),
+                                'largura', ROUND(mat.largura_mm::numeric / 10, 2),
+                                'quantidade_paginas', mat.paginas,
+                                'idgruposubstratoimpressao', mat.idgruposubstratoimpressao,
+                                'gramaturasubstratoimpressao', mat.gramatura,
+                                -- Única exceção por tipo: CAPA vai sempre 4x0 (colorida só
+                                -- frente), regra do negócio. O papel é resolvido por
+                                -- componente, mas a cor gravada na capa é a do PDF/item
+                                -- (capa colorida de miolo PB sai 1/1). Vale para todo
+                                -- `is_capa`, folha de rosto inclusive. "Capa + Miolo"
+                                -- (is_capa E is_miolo) é o PDF inteiro: vai a cor dele.
+                                'corfrente', CASE WHEN mat.is_capa AND NOT mat.is_miolo THEN 4 ELSE mat.corfrente END,
+                                'corverso', CASE WHEN mat.is_capa AND NOT mat.is_miolo THEN 0 ELSE mat.corverso END,
+                                'perguntas_componente', COALESCE((
+                                    SELECT json_agg(
                                         json_build_object(
-                                            'id', mat.id_componente,
-                                            'descricao', mat.componente_descricao,
-                                            'altura', ROUND(mat.altura_mm::numeric / 10, 2),
-                                            'largura', ROUND(mat.largura_mm::numeric / 10, 2),
-                                            'quantidade_paginas', mat.paginas,
-                                            'idgruposubstratoimpressao',
-                                                CASE
-                                                    WHEN UPPER(mat."categoria_Prod") = 'LIVRETO'
-                                                         AND EXISTS (
-                                                             SELECT 1 FROM materiais c_miolo
-                                                             WHERE c_miolo.distribuicao_id = mat.distribuicao_id
-                                                               AND c_miolo.is_miolo
-                                                         )
-                                                    THEN mat.idgruposubstratoimpressao
-                                                    ELSE NULL
-                                                END,
-                                            'gramaturasubstratoimpressao',
-                                                CASE
-                                                    WHEN UPPER(mat."categoria_Prod") = 'LIVRETO'
-                                                         AND EXISTS (
-                                                             SELECT 1 FROM materiais c_miolo
-                                                             WHERE c_miolo.distribuicao_id = mat.distribuicao_id
-                                                               AND c_miolo.is_miolo
-                                                         )
-                                                    THEN
-                                                        COALESCE(
-                                                            mat.gramatura_catalogo,
-                                                            NULLIF(replace(regexp_replace(mat.gramatura_miolo::text, '[^0-9.,]', '', 'g'), ',', '.'), '')::numeric
-                                                        )
-                                                    ELSE NULL
-                                                END,
-                                            'perguntas_componente', COALESCE((
-                                                SELECT json_agg(
-                                                    json_build_object(
-                                                        'id_pergunta', bp.id_pergunta,
-                                                        'pergunta', bp.nome,
-                                                        'tipo', bp.tipo,
-                                                        'resposta', rc.resposta
-                                                    )
-                                                    ORDER BY bp.id_pergunta
-                                                )
-                                                FROM bremen_perguntas bp
-                                                INNER JOIN respostas_componentes rc
-                                                    ON rc.pergunta_id = bp.id
-                                                    AND rc.distribuicao_id = mat.distribuicao_id
-                                                    AND rc.id_componente = mat.id_componente
-                                                WHERE bp.id_componente = mat.id_componente
-                                            ), '[]'::json),
-                                            'tarefas_componente', COALESCE((
-                                                SELECT json_agg(
-                                                    json_build_object(
-                                                        'id', tc.id_tarefa,
-                                                        'descricao', tc.descricao
-                                                    )
-                                                    ORDER BY tc.id_tarefa
-                                                )
-                                                FROM tarefas_componentes tc
-                                                WHERE tc.especificacao_id = mat.especificacao_form_id
-                                            ), '[]'::json)
+                                            'id_pergunta', bp.id_pergunta,
+                                            'pergunta', bp.nome,
+                                            'tipo', bp.tipo,
+                                            'resposta', rc.resposta
                                         )
+                                        ORDER BY bp.id_pergunta
                                     )
-
-                                -- ==========================================================
-                                -- CENÁRIO 3: OUTROS
-                                -- ==========================================================
-                                ELSE
-                                    json_build_object(
-                                        'id', mat.id_componente,
-                                        'descricao', mat.componente_descricao,
-                                        'altura', ROUND(mat.altura_mm::numeric / 10, 2),
-                                        'largura', ROUND(mat.largura_mm::numeric / 10, 2),
-                                        'gramaturasubstratoimpressao',
-                                            CASE WHEN LOWER(mat.componente_descricao) LIKE '%folha%rosto%'
-                                            THEN COALESCE(mat.gramatura_catalogo, NULLIF(replace(regexp_replace(mat.gramatura_miolo::text, '[^0-9.,]', '', 'g'), ',', '.'), '')::numeric)
-                                            ELSE NULL END,
-                                        'perguntas_componente', COALESCE((
-                                            SELECT json_agg(
-                                                json_build_object(
-                                                    'id_pergunta', bp.id_pergunta,
-                                                    'pergunta', bp.nome,
-                                                    'tipo', bp.tipo,
-                                                    'resposta', rc.resposta
-                                                )
-                                                ORDER BY bp.id_pergunta
-                                            )
-                                            FROM bremen_perguntas bp
-                                            INNER JOIN respostas_componentes rc
-                                                ON rc.pergunta_id = bp.id
-                                                AND rc.distribuicao_id = mat.distribuicao_id
-                                                AND rc.id_componente = mat.id_componente
-                                            WHERE bp.id_componente = mat.id_componente
-                                        ), '[]'::json),
-                                        'tarefas_componente', COALESCE((
-                                            SELECT json_agg(
-                                                json_build_object(
-                                                    'id', tc.id_tarefa,
-                                                    'descricao', tc.descricao
-                                                )
-                                                ORDER BY tc.id_tarefa
-                                            )
-                                            FROM tarefas_componentes tc
-                                            WHERE tc.especificacao_id = mat.especificacao_form_id
-                                        ), '[]'::json)
+                                    FROM bremen_perguntas bp
+                                    INNER JOIN respostas_componentes rc
+                                        ON rc.pergunta_id = bp.id
+                                        AND rc.distribuicao_id = mat.distribuicao_id
+                                        AND rc.id_componente = mat.id_componente
+                                    WHERE bp.id_componente = mat.id_componente
+                                ), '[]'::json),
+                                'tarefas_componente', COALESCE((
+                                    SELECT json_agg(
+                                        json_build_object(
+                                            'id', tc.id_tarefa,
+                                            'descricao', tc.descricao
+                                        )
+                                        ORDER BY tc.id_tarefa
                                     )
-                            END
+                                    FROM tarefas_componentes tc
+                                    WHERE tc.especificacao_id = mat.especificacao_form_id
+                                ), '[]'::json)
+                            )
                             -- Ordem estável: componentes que não são miolo antes do miolo.
                             ORDER BY mat.is_miolo, mat.id_componente, mat.arquivo_pdf_id
                         )
