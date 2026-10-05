@@ -113,39 +113,52 @@ def orcamento_do_payload(
 
 def aprovacao_do_payload(
     payload: Optional[dict],
-) -> Tuple[Optional[dict], Optional[PayloadInvalido]]:
-    """Os campos que `pcp.aprovacao.enviar` precisa para montar o POST.
+) -> Tuple[Optional[int], Optional[PayloadInvalido]]:
+    """O `aprovacao_id` de `pcp.aprovacao.enviar`.
 
-    Devolve `{id_orcamento, itens, gerar_op}`. `gerar_op` não é validado: ausente
-    significa `false`, que é o padrão correto — gerar OP é uma escolha explícita
-    do lote, e tratar a ausência como erro impediria a aprovação simples.
+    É só dele que o handler precisa: o corpo da aprovação sai de
+    `sql/aprovacao.sql`, que lê o orçamento, o `id_orcamento`, o `gerar_op` e
+    os itens a partir da aprovação. `id_orcamento` e `itens_aprovados` ainda
+    vêm no payload (o PageFlow os manda para a tela da fila), mas não são lidos
+    — quem é conferido é o resultado do SQL, em `aprovacao_dos_dados`.
     """
-    payload = payload or {}
-
-    if inteiro_positivo(payload.get("aprovacao_id")) is None:
+    aprovacao_id = inteiro_positivo((payload or {}).get("aprovacao_id"))
+    if aprovacao_id is None:
         return None, PayloadInvalido(
             "pcp.aprovacao.enviar exige `aprovacao_id` inteiro e maior que zero.")
+    return aprovacao_id, None
 
-    id_orcamento = inteiro_positivo(payload.get("id_orcamento"))
+
+def aprovacao_dos_dados(
+    dados: Optional[dict], aprovacao_id: int,
+) -> Tuple[Optional[dict], Optional[PayloadInvalido]]:
+    """Confere o `data` montado por `sql/aprovacao.sql`.
+
+    Devolve `{id_orcamento, itens, gerar_op}`. As três recusas são definitivas:
+    aprovação inexistente, orçamento sem `id_orcamento` (quem o grava é o
+    retorno do orçamento, não aparece com o tempo) e nenhum item a aprovar.
+    """
+    if not isinstance(dados, dict):
+        return None, PayloadInvalido(
+            f"Aprovação {aprovacao_id} não encontrada no banco.", "APROVACAO_NAO_ENCONTRADA")
+
+    id_orcamento = inteiro_positivo(dados.get("id_orcamento"))
     if id_orcamento is None:
         return None, PayloadInvalido(
             "Orçamento sem id_orcamento: não há o que aprovar no ERP.", "SEM_ID_ORCAMENTO")
 
-    itens = payload.get("itens_aprovados")
-    if not isinstance(itens, list) or not itens:
-        itens = None
-    else:
-        itens = [item for item in itens if isinstance(item, dict)] or None
-    if itens is None:
+    itens = dados.get("itens")
+    itens = [item for item in itens if isinstance(item, dict)] if isinstance(itens, list) else []
+    if not itens:
         return None, PayloadInvalido(
-            "pcp.aprovacao.enviar exige `itens_aprovados` com pelo menos um item.",
+            "Nenhum item a aprovar: o retorno do orçamento não trouxe itens do ERP.",
             "SEM_ITENS_APROVADOS",
         )
 
     return {
         "id_orcamento": id_orcamento,
         "itens": itens,
-        "gerar_op": bool(payload.get("gerar_op")),
+        "gerar_op": bool(dados.get("gerar_op")),
     }, None
 
 

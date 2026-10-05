@@ -197,7 +197,7 @@ itens AS (
         json_strip_nulls(
             json_build_object(
                 'id_produto', pr.id_produto,
-                'titulo', 'INTEGRA-' || ip.id || ' | ' || ipp.nome || ' | ' || cbm.nome,
+                'titulo', 'INTEGRA-' || pr.pedido_id || ' | ' || pr.produto_nome || ' | ' || pr.modelo_nome,
                 -- (a) É por este campo que o retorno do ERP volta a cada produto.
                 'codigo_externo', pr.produto_id::text,
                 'usar_listapreco', 1,

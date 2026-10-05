@@ -22,20 +22,24 @@ Diferenças em relação ao caminho antigo:
   em `fila_processamento.resultado`.
 
 Payload: `{aprovacao_id, orcamento_id, id_orcamento, gerar_op, itens_aprovados,
-url_webhook}`.
+url_webhook}`. Só `aprovacao_id` e `url_webhook` são lidos: o `data` do POST
+(`id_orcamento`, `gerar_op`, `itens` com datas e entregas) sai de
+`sql/aprovacao.sql`, a partir da aprovação — para ser ajustado ali, junto dos
+SQLs de orçamento, em vez de vir pronto do PageFlow.
 
 Resultado: `{id_requisicao, modo_envio, resposta}`, mais `consulta_previa` e
 `ja_aprovada` quando a consulta aconteceu.
 
-`id_orcamento` ausente é `PayloadInvalido` — falha DEFINITIVA que não gasta
-tentativa. Sem ele não há o que aprovar, e ele não aparece com o tempo: quem o
-grava é o retorno do orçamento.
+`id_orcamento` ausente (no orçamento lido pelo SQL) é `PayloadInvalido` — falha
+DEFINITIVA que não gasta tentativa. Sem ele não há o que aprovar, e ele não
+aparece com o tempo: quem o grava é o retorno do orçamento.
 """
 
 from typing import Any, Optional
 
 from ...integracoes.erp import ErroErp, extrair_id_requisicao, sucesso_erp
 from ...fila.modelos import Desfecho, ItemReivindicado, Preparo
+from ...servicos.pcp.aprovacao import montar_dados_aprovacao
 from ...servicos.pcp.comum import com_modo_assincrono, corpo_para_auditoria
 from ...validadores import pcp as validadores
 from ...validadores.comum import PayloadInvalido
@@ -117,7 +121,14 @@ class HandlerPcpAprovacaoEnviar:
     def preparar(self, conn, item: ItemReivindicado) -> Preparo:
         payload = item.payload or {}
 
-        campos, invalido = validadores.aprovacao_do_payload(payload)
+        aprovacao_id, invalido = validadores.aprovacao_do_payload(payload)
+        if invalido is not None:
+            return invalido.preparo()
+
+        # SELECT em `sql/aprovacao.sql`, na transação curta do preparo — sem
+        # I/O externa, como o SQL do orçamento.
+        campos, invalido = validadores.aprovacao_dos_dados(
+            montar_dados_aprovacao(conn, aprovacao_id), aprovacao_id)
         if invalido is not None:
             return invalido.preparo()
         id_orcamento, itens = campos["id_orcamento"], campos["itens"]
@@ -126,7 +137,7 @@ class HandlerPcpAprovacaoEnviar:
             "identifier": self._erp.identifier,
             "data": {
                 "id_orcamento": id_orcamento,
-                "gerar_op": bool(payload.get("gerar_op")),
+                "gerar_op": campos["gerar_op"],
                 "itens": itens,
             },
         }

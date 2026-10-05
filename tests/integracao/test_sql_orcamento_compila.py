@@ -36,7 +36,13 @@ TIPOS_DE_PARAMETRO = {
     "unidade_escolar_id": "int",
     "integracao_id": "int",
     "integra_pedido_id": "int",
+    "aprovacao_id": "int",
 }
+
+# Os SQLs conferidos: todo `orcamento_*.sql` e o da aprovação.
+def _sqls():
+    return sorted(SQL_DIR.glob("orcamento_*.sql")) + [SQL_DIR / "aprovacao.sql"]
+
 
 # `:nome` de parâmetro, nunca o `::tipo` de um cast nem o segundo colon dele.
 PARAMETRO = re.compile(r"(?<![:\w]):([a-z_][a-z0-9_]*)")
@@ -58,11 +64,11 @@ def _para_posicionais(sql: str):
 class TestSqlDeOrcamentoCompila(TesteDeFila):
     def test_existem_sqls_de_orcamento_para_conferir(self):
         # Sem isto, renomear a pasta faria a suíte passar sem conferir nada.
-        arquivos = sorted(SQL_DIR.glob("orcamento_*.sql"))
-        self.assertGreaterEqual(len(arquivos), 3, f"esperados ao menos 3 SQLs em {SQL_DIR}")
+        arquivos = [arquivo for arquivo in _sqls() if arquivo.exists()]
+        self.assertGreaterEqual(len(arquivos), 4, f"esperados ao menos 3 SQLs em {SQL_DIR}")
 
     def test_o_postgres_aceita_cada_sql_de_orcamento(self):
-        arquivos = sorted(SQL_DIR.glob("orcamento_*.sql"))
+        arquivos = _sqls()
         falhas = []
 
         for arquivo in arquivos:

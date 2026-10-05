@@ -13,11 +13,15 @@ O que só o banco responde:
 O ERP é um `httpx.MockTransport` — nenhuma chamada real. Os tipos são sorteados
 por teste e apagados no fim; nenhum dos 10 tipos reais é tocado nem ativado.
 Nenhuma tabela de domínio é escrita: o único SQL de domínio que roda aqui é o
-SELECT dos três orçamentos, com ids que não existem.
+SELECT dos três orçamentos, com ids que não existem. O `sql/aprovacao.sql` é
+substituído pelo que ele devolveria (`DADOS_APROVACAO`): exercitá-lo exigiria
+criar aprovação, orçamento e retorno de verdade. Quem confere que ele compila
+é `test_sql_orcamento_compila.py`.
 """
 
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
 import httpx
 
@@ -39,6 +43,13 @@ PAYLOAD_APROVACAO = {
     "itens_aprovados": [{"id": 1}],
     "url_webhook": WEBHOOK,
 }
+
+DADOS_APROVACAO = {"id_orcamento": 555, "gerar_op": True, "itens": [{"id": 1}]}
+
+
+def _sql_da_aprovacao(dados=DADOS_APROVACAO):
+    return mock.patch("deskflow2.handlers.pcp.aprovacao_enviar.montar_dados_aprovacao",
+                      return_value=dados)
 
 # Orçamento com a origem que o produtor não deveria mandar. Este payload para
 # ANTES de tocar o banco, e é de propósito: os três SQLs de orçamento não podem
@@ -109,8 +120,9 @@ class TestHandlersDePcpNoCicloCompleto(TesteDeFila):
         })
         tipo = self.criar_tipo(idempotente=False, max_tentativas=5)
 
-        item_id, estado = self._processar(tipo, HandlerPcpAprovacaoEnviar(erp), PAYLOAD_APROVACAO,
-                                          max_tentativas=5)
+        with _sql_da_aprovacao():
+            item_id, estado = self._processar(tipo, HandlerPcpAprovacaoEnviar(erp), PAYLOAD_APROVACAO,
+                                              max_tentativas=5)
 
         self.assertEqual(estado, "aguardando_callback")
         self.assertEqual(self.status_de(item_id), "aguardando_callback")
@@ -132,8 +144,9 @@ class TestHandlersDePcpNoCicloCompleto(TesteDeFila):
         })
         tipo = self.criar_tipo(idempotente=False, max_tentativas=5)
 
-        item_id, estado = self._processar(tipo, HandlerPcpAprovacaoEnviar(erp), PAYLOAD_APROVACAO,
-                                          max_tentativas=5)
+        with _sql_da_aprovacao():
+            item_id, estado = self._processar(tipo, HandlerPcpAprovacaoEnviar(erp), PAYLOAD_APROVACAO,
+                                              max_tentativas=5)
 
         self.assertEqual(estado, "incerto")
         self.assertEqual(self.status_de(item_id), "incerto")
@@ -145,10 +158,9 @@ class TestHandlersDePcpNoCicloCompleto(TesteDeFila):
     def test_aprovacao_sem_id_orcamento_falha_sem_gastar_tentativa(self):
         erp = self._erp({})
         tipo = self.criar_tipo(idempotente=False, max_tentativas=5)
-        payload = {**PAYLOAD_APROVACAO, "id_orcamento": None}
-
-        item_id, estado = self._processar(tipo, HandlerPcpAprovacaoEnviar(erp), payload,
-                                          max_tentativas=5)
+        with _sql_da_aprovacao({**DADOS_APROVACAO, "id_orcamento": None}):
+            item_id, estado = self._processar(tipo, HandlerPcpAprovacaoEnviar(erp), PAYLOAD_APROVACAO,
+                                              max_tentativas=5)
 
         self.assertEqual(estado, "falhou")
         linha = self.linha(item_id)

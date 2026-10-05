@@ -362,13 +362,25 @@ def _payload_aprovacao(**sobrescritas):
     return payload
 
 
+# O que `sql/aprovacao.sql` devolve: o `data` do POST, montado pela aprovação.
+DADOS_APROVACAO = {
+    "id_orcamento": 555,
+    "gerar_op": True,
+    "itens": [{"id": 1, "data_entrega": "2026-10-20T18:00:00.000-03:00"}, {"id": 2}],
+}
+
+
+def _conexao_aprovacao(**sobrescritas):
+    return ConexaoFalsa(linhas=[{**DADOS_APROVACAO, **sobrescritas}])
+
+
 def _proposta(status_por_item):
     return {"success": True, "data": [{"itens": [
         {"id": id_item, "status": status} for id_item, status in status_por_item.items()]}]}
 
 
 class TestAprovacao(unittest.TestCase):
-    def _executar(self, payload, *, get=None, post=None):
+    def _executar(self, payload, *, get=None, post=None, conexao=None):
         por_metodo = {}
         if get is not None:
             por_metodo["GET"] = get
@@ -377,7 +389,7 @@ class TestAprovacao(unittest.TestCase):
         roteador, vistos = _roteador(**por_metodo)
         handler = HandlerPcpAprovacaoEnviar(_erp(roteador))
         item = _item(payload, tipo="pcp.aprovacao.enviar")
-        preparo = handler.preparar(ConexaoFalsa(), item)
+        preparo = handler.preparar(conexao or _conexao_aprovacao(), item)
         return handler.interpretar(item, preparo.chamar()), vistos, preparo
 
     def test_proposta_ja_aprovada_no_erp_nao_gera_novo_post(self):
@@ -444,7 +456,7 @@ class TestAprovacao(unittest.TestCase):
         handler = HandlerPcpAprovacaoEnviar(_erp(roteador))
         item = _item(_payload_aprovacao(), tipo="pcp.aprovacao.enviar")
 
-        preparo = handler.preparar(ConexaoFalsa(), item)
+        preparo = handler.preparar(_conexao_aprovacao(), item)
         desfecho = handler.interpretar(item, preparo.chamar())
 
         self.assertIs(desfecho.estado, Estado.RETENTAR)
@@ -454,9 +466,9 @@ class TestAprovacao(unittest.TestCase):
     def test_sem_id_orcamento_e_falha_definitiva(self):
         roteador, vistos = _roteador()
         handler = HandlerPcpAprovacaoEnviar(_erp(roteador))
-        item = _item(_payload_aprovacao(id_orcamento=None), tipo="pcp.aprovacao.enviar")
+        item = _item(_payload_aprovacao(), tipo="pcp.aprovacao.enviar")
 
-        preparo = handler.preparar(ConexaoFalsa(), item)
+        preparo = handler.preparar(_conexao_aprovacao(id_orcamento=None), item)
         desfecho = handler.interpretar(item, preparo.chamar())
 
         self.assertIs(desfecho.estado, Estado.FALHOU)
@@ -466,13 +478,45 @@ class TestAprovacao(unittest.TestCase):
     def test_sem_itens_aprovados_e_falha_definitiva(self):
         roteador, vistos = _roteador()
         handler = HandlerPcpAprovacaoEnviar(_erp(roteador))
-        item = _item(_payload_aprovacao(itens_aprovados=[]), tipo="pcp.aprovacao.enviar")
+        item = _item(_payload_aprovacao(), tipo="pcp.aprovacao.enviar")
 
-        desfecho = handler.interpretar(item, handler.preparar(ConexaoFalsa(), item).chamar())
+        desfecho = handler.interpretar(
+            item, handler.preparar(_conexao_aprovacao(itens=[]), item).chamar())
 
         self.assertIs(desfecho.estado, Estado.FALHOU)
         self.assertEqual(desfecho.erro_codigo, "SEM_ITENS_APROVADOS")
         self.assertEqual(vistos, [])
+
+    def test_aprovacao_inexistente_no_banco_e_falha_definitiva(self):
+        roteador, vistos = _roteador()
+        handler = HandlerPcpAprovacaoEnviar(_erp(roteador))
+        item = _item(_payload_aprovacao(), tipo="pcp.aprovacao.enviar")
+
+        desfecho = handler.interpretar(item, handler.preparar(ConexaoFalsa(), item).chamar())
+
+        self.assertIs(desfecho.estado, Estado.FALHOU)
+        self.assertEqual(desfecho.erro_codigo, "APROVACAO_NAO_ENCONTRADA")
+        self.assertEqual(vistos, [])
+
+    def test_corpo_sai_do_sql_e_nao_do_payload(self):
+        # O payload ainda traz `itens_aprovados`/`gerar_op`/`id_orcamento` do
+        # PageFlow, mas quem manda é o SQL, consultado pela aprovação.
+        conexao = _conexao_aprovacao(
+            id_orcamento=999, gerar_op=False,
+            itens=[{"id": 7, "data_entrega": "2026-11-01T18:00:00.000-03:00",
+                    "entregas": [{"quantidade": 3, "id_cliente": 1}]}])
+        _, vistos, preparo = self._executar(
+            _payload_aprovacao(),
+            get=httpx.Response(200, json=_proposta({7: "Aberta"})),
+            post=httpx.Response(200, json={"success": True, "data": {"id_requisicao": 80}}),
+            conexao=conexao)
+
+        self.assertEqual(conexao.executados[0][1], {"aprovacao_id": 900})
+        dados = preparo.payload_enviado["data"]
+        self.assertEqual(dados["id_orcamento"], 999)
+        self.assertFalse(dados["gerar_op"])
+        self.assertEqual(dados["itens"][0]["entregas"], [{"quantidade": 3, "id_cliente": 1}])
+        self.assertIn("/proposta/aprovar", str(vistos[-1].url))
 
     def test_erp_recusa_a_aprovacao(self):
         desfecho, _, _ = self._executar(
