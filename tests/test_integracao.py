@@ -41,7 +41,7 @@ def orcamento_integracao(**campos):
     return OrcamentoReivindicado(**base)
 
 
-def orcamento_escola(**campos):
+def orcamento_agrupado(**campos):
     base = dict(
         id=700, requisicao_id=300, lote_id=5, modo_envio="assincrono", url_webhook="https://pf/x",
         modo_agrupamento="unidade", cliente_id=501, vendedor_id=7, forma_pagamento=11,
@@ -74,12 +74,12 @@ def corpo_sql(*codigos):
 class TestOrcamentoReivindicado(unittest.TestCase):
     def test_ids_origem_segue_a_origem_do_lote(self):
         self.assertEqual(orcamento_integracao().ids_origem, [9001, 9002])
-        self.assertEqual(orcamento_escola().ids_origem, [1, 2])
+        self.assertEqual(orcamento_agrupado().ids_origem, [1, 2])
 
     def test_origem_padrao_e_escola(self):
         # Compatibilidade: código antigo que constrói sem `origem`.
-        self.assertEqual(orcamento_escola().origem, ORIGEM_ESCOLA)
-        self.assertEqual(orcamento_escola().integra_pedido_produto_ids, [])
+        self.assertEqual(orcamento_agrupado().origem, ORIGEM_ESCOLA)
+        self.assertEqual(orcamento_agrupado().integra_pedido_produto_ids, [])
 
 
 class TestEscolhaDoSql(unittest.TestCase):
@@ -91,17 +91,17 @@ class TestEscolhaDoSql(unittest.TestCase):
 
     def test_escola_continua_escolhendo_pelo_modo(self):
         self.assertEqual(
-            _arquivo_e_parametro(orcamento_escola(modo_agrupamento="unidade")),
+            _arquivo_e_parametro(orcamento_agrupado(modo_agrupamento="unidade")),
             ("orcamento_unidade.sql", PARAMETRO_IDS_ESCOLA),
         )
         self.assertEqual(
-            _arquivo_e_parametro(orcamento_escola(modo_agrupamento="escola")),
-            ("orcamento_escola.sql", PARAMETRO_IDS_ESCOLA),
+            _arquivo_e_parametro(orcamento_agrupado(modo_agrupamento="escola")),
+            ("orcamento_agrupado.sql", PARAMETRO_IDS_ESCOLA),
         )
 
     def test_modo_desconhecido_na_escola_bloqueia(self):
         with self.assertRaises(PayloadIncompleto):
-            _arquivo_e_parametro(orcamento_escola(modo_agrupamento="turma"))
+            _arquivo_e_parametro(orcamento_agrupado(modo_agrupamento="turma"))
 
     def test_integracao_nao_precisa_de_modo_de_agrupamento(self):
         # modo_agrupamento é NULL no lote de integração (CHECK do banco).
@@ -122,7 +122,7 @@ class TestEscolhaDoSql(unittest.TestCase):
                           ":id_forma_pagamento", ":data_entrega"):
             self.assertIn(parametro, corpo)
         # obs_producao = descrição do pedido do parceiro + a data de entrega do
-        # orçamento, no mesmo formato do orcamento_escola.sql. A descrição NÃO
+        # orçamento, no mesmo formato do orcamento_agrupado.sql. A descrição NÃO
         # pode se perder no caminho.
         self.assertIn("'Data de Entrega: '", corpo)
         self.assertIn("ip.descricao", corpo)
@@ -160,7 +160,7 @@ class TestPayloadIntegracao(unittest.TestCase):
         # os três SQLs declaram :data_entrega e o parâmetro vai sempre.
         conn = ConexaoFalsa([corpo_sql("1", "2")])
 
-        montar_payload_orcamento(conn, orcamento_escola(data_entrega="01/12/2026"), "PageFlow")
+        montar_payload_orcamento(conn, orcamento_agrupado(data_entrega="01/12/2026"), "PageFlow")
 
         self.assertEqual(conn.parametros["data_entrega"], "01/12/2026")
 
@@ -169,7 +169,7 @@ class TestPayloadIntegracao(unittest.TestCase):
         # o COALESCE do SQL volta para form.data_entrega, sem quebrar o envio.
         conn = ConexaoFalsa([corpo_sql("1", "2")])
 
-        montar_payload_orcamento(conn, orcamento_escola(), "PageFlow")
+        montar_payload_orcamento(conn, orcamento_agrupado(), "PageFlow")
 
         self.assertIsNone(conn.parametros["data_entrega"])
 

@@ -3,7 +3,7 @@
 O SQL é escolhido pela ORIGEM do lote e, na origem escola, pelo modo de
 agrupamento:
   - escola + modo 'unidade'  -> `sql/orcamento_unidade.sql`;
-  - escola + modo 'escola'   -> `sql/orcamento_escola.sql`;
+  - escola + modo 'escola'   -> `sql/orcamento_agrupado.sql`;
   - integração               -> `sql/orcamento_integracao.sql`.
 
 Ele roda só com os ids daquele orçamento e o resultado é conferido antes de ir
@@ -26,7 +26,7 @@ from ...repositorios.fila import ORIGEM_INTEGRACAO, OrcamentoReivindicado
 PASTA_SQL = Path(__file__).resolve().parents[2] / "sql"
 ARQUIVO_POR_MODO = {
     "unidade": "orcamento_unidade.sql",
-    "escola": "orcamento_escola.sql",
+    "escola": "orcamento_agrupado.sql",
 }
 ARQUIVO_INTEGRACAO = "orcamento_integracao.sql"
 

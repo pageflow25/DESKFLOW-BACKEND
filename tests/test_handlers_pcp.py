@@ -164,7 +164,7 @@ class TestOrcamentoPreparo(unittest.TestCase):
             conexao, _item(_payload_orcamento(modo_agrupamento="escola")))
 
         self.assertEqual(str(conexao.executados[0][0]),
-                         str(_consulta("orcamento_escola.sql", "pedido_distribuicao_ids")))
+                         str(_consulta("orcamento_agrupado.sql", "pedido_distribuicao_ids")))
 
     def test_origem_integracao_usa_o_sql_de_integracao_e_o_outro_parametro(self):
         roteador, _ = _roteador(POST=httpx.Response(200, json=_envelope_orcamento(id_requisicao=9)))

@@ -3,7 +3,7 @@
 -- Monta o corpo de UM POST /api/v1/orcamento para UM orcamento_api_orcamentos
 -- do PCP — que o PageFlow já criou com os produtos de UM integra_pedidos
 -- (1 orçamento por pedido do parceiro). Irmão de orcamento_unidade.sql /
--- orcamento_escola.sql, que fazem o mesmo para pedidos de escola.
+-- orcamento_agrupado.sql, que fazem o mesmo para pedidos de escola.
 --
 -- Diferenças para os SQLs de escola:
 --   - A origem do item é `integra_pedido_produtos`, não `pedido_distribuicoes`.
@@ -55,7 +55,7 @@
 --       payload.py e cliente/vendedor/forma vêm da requisição do PCP.
 --
 -- `obs_producao` do item: a descrição do pedido do parceiro MAIS a data de
--- entrega do orçamento, no mesmo formato do orcamento_escola.sql
+-- entrega do orçamento, no mesmo formato do orcamento_agrupado.sql
 -- ('Data de Entrega: DD/MM/YYYY', separada por linha em branco). Atenção: essa
 -- data é INFORMATIVA — a data que vai ao ERP como data do item é a
 -- `orcamento_api_orcamentos.data_saida`, e ela vai na APROVAÇÃO, montada pelo
@@ -84,7 +84,7 @@ produtos AS (
         ip.id AS pedido_id,
         ip.numero_pedido,
         -- Descrição do pedido do parceiro + a data de entrega do orçamento,
-        -- no formato do orcamento_escola.sql. CONCAT_WS ignora NULL, então
+        -- no formato do orcamento_agrupado.sql. CONCAT_WS ignora NULL, então
         -- pedido sem descrição sai só com a data e vice-versa.
         CONCAT_WS(
             CHR(10) || CHR(10),

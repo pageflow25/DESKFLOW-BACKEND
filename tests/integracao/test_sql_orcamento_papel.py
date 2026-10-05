@@ -169,5 +169,5 @@ class TestComponentesPorEspecificacaoNoOrcamento(TesteDeFila):
     def test_orcamento_unidade(self):
         self._conferir("orcamento_unidade.sql")
 
-    def test_orcamento_escola(self):
-        self._conferir("orcamento_escola.sql")
+    def test_orcamento_agrupado(self):
+        self._conferir("orcamento_agrupado.sql")

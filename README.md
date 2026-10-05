@@ -49,7 +49,7 @@ na origem escola, pelo modo de agrupamento:
 | Origem / modo | SQL | Orçamentos | Itens |
 |---|---|---|---|
 | escola, `unidade` (normal) | `sql/orcamento_unidade.sql` | 1 por unidade escolar | 1 por pedido (`codigo_externo` = id do `pedido_distribuicoes`) |
-| escola, `escola` | `sql/orcamento_escola.sql` | 1 por turma (pedidos sem turma formam um) | soma as unidades do mesmo item (`codigo_externo` = ids separados por vírgula) |
+| escola, `escola` | `sql/orcamento_agrupado.sql` | 1 por turma (pedidos sem turma formam um) | soma as unidades do mesmo item (`codigo_externo` = ids separados por vírgula) |
 | **integração** | `sql/orcamento_integracao.sql` | 1 por pedido do parceiro (`integra_pedidos`) | 1 por produto (`codigo_externo` = id do `integra_pedido_produtos`) |
 
 Quem divide o lote em orçamentos é o PageFlow, no clique "Enviar". O
@@ -197,7 +197,7 @@ deskflow2/
 │   └── comum.py
 └── sql/
     ├── orcamento_unidade.sql
-    ├── orcamento_escola.sql
+    ├── orcamento_agrupado.sql
     └── orcamento_integracao.sql
 docs/legado/               # SQLs do DESKFLOW antigo, só para referência
 tests/                     # unittest; tests/integracao/ fala com o Postgres

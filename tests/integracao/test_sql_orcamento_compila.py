@@ -2,7 +2,7 @@
 
 Por que este arquivo existe: a migration 20260923110000-contract-papel-antigo do
 PageFlow dropou `pedido_especificacoes.id_papel` e moveu `bremen_tamanho_papel`
-para o schema `contract_backup`. Os SQLs de `orcamento_escola` e
+para o schema `contract_backup`. Os SQLs de `orcamento_agrupado` e
 `orcamento_unidade` ainda traziam um `LEFT JOIN bremen_tamanho_papel` como
 reserva para pedidos antigos — e um LEFT JOIN não fica "vazio" quando a tabela
 não existe, ele derruba a query inteira com `relation does not exist`. O ciclo
