@@ -157,13 +157,20 @@ app/
 │   ├── catalogo.py           # status e tipos lidos do banco
 │   ├── registry.py           # tipo_codigo -> handler
 │   └── modelos.py            # Preparo, Desfecho, Estado, ItemReivindicado
-├── controllers/              # ENTRADA: um handler por tipo_codigo, por domínio
+├── controllers/              # ENTRADA: um handler por tipo_codigo, por módulo
 │   ├── __init__.py           # registrar_erp_wingraph (registra todos no registry)
+│   ├── payload_invalido.py   # PayloadInvalido: a recusa que os validators devolvem
 │   ├── resposta_erp.py       # classifica a falha do ERP nos três baldes
 │   ├── clientes/             # consultar, criar, atualizar, planilha, sincronizar_pagina
+│   │   └── validators/
+│   │       └── cliente_validator.py
 │   ├── pcp/                  # orcamento_enviar, aprovacao_enviar, download_arquivos
-│   │   └── resposta_assincrona.py  # ack assíncrono -> aguardando_callback
+│   │   ├── resposta_assincrona.py  # ack assíncrono -> aguardando_callback
+│   │   └── validators/
+│   │       └── pcp_validator.py
 │   └── produtos/             # importar
+│       └── validators/
+│           └── produto_validator.py
 ├── servicos/                 # REGRAS DE NEGÓCIO, um subpacote por domínio
 │   ├── clientes/
 │   │   └── verificacao.py    # cliente existe? ERP já reflete a alteração?
@@ -174,11 +181,6 @@ app/
 │       └── download_arquivos.py
 ├── repositorios/             # LEITURAS de domínio no banco
 │   └── pcp.py                # orçamento e arquivos da aprovação
-├── validadores/              # regras do PAYLOAD que entrou; função pura, sem I/O
-│   ├── comum.py              # PayloadInvalido, preparo_invalido
-│   ├── clientes.py
-│   ├── pcp.py
-│   └── produtos.py
 ├── integracoes/
 │   └── erp.py                # cliente do Wingraph: login, retry de 503, leitura do envelope
 ├── utils/
@@ -190,19 +192,22 @@ tests/                        # unittest; tests/integracao/ fala com o Postgres
 O caminho de um item da fila, camada por camada:
 
 ```
-fila/motor  ──▶  controllers/<domínio>/<tipo>.py
-                   ├─ validadores/<domínio>.py     o payload é aceitável?
-                   ├─ servicos/<domínio>/...        regra de negócio (usa repositorios/ e sql/)
-                   ├─ integracoes/erp.py            chamada ao Wingraph
-                   └─ controllers/resposta_erp.py   resposta -> Desfecho
+fila/motor  ──▶  controllers/<módulo>/<tipo>.py
+                   ├─ controllers/<módulo>/validators/   o payload é aceitável?
+                   ├─ servicos/<módulo>/...              regra de negócio (usa repositorios/ e sql/)
+                   ├─ integracoes/erp.py                 chamada ao Wingraph
+                   └─ controllers/resposta_erp.py        resposta -> Desfecho
 ```
 
-Regras de dependência: `controllers` usam `servicos`, `validadores`,
+Cada módulo tem o seu `validators/`, com as regras do PAYLOAD que entrou
+(função pura, sem I/O); não há validador global.
+
+Regras de dependência: `controllers` usam `servicos`, os próprios `validators`,
 `integracoes` e `utils`; `servicos` nunca importam um controller; `utils` não
 importa nada do projeto; `fila/` não conhece nenhum controller (o encontro dos
 dois é só no `registry`).
 
-A fronteira que separa `controllers/resposta_erp.py` de `validadores/` é a
+A fronteira que separa `controllers/resposta_erp.py` dos `validators/` é a
 **direção do dado**: validador olha o payload que ENTROU, antes de qualquer
 chamada sair; `resposta_erp.py` olha a resposta que CHEGOU. Por isso
 `PayloadInvalido` não é exceção — exceção no preparo é retentável por construção
