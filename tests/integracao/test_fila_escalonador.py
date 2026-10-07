@@ -8,9 +8,9 @@ import time
 import unittest
 from types import SimpleNamespace
 
-from deskflow2.fila.escalonador import Escalonador
-from deskflow2.fila.modelos import Desfecho, Preparo
-from deskflow2.fila.registry import Registry
+from app.fila.escalonador import Escalonador
+from app.fila.modelos import Desfecho, Preparo
+from app.fila.registry import Registry
 from tests.integracao.apoio_banco import TesteDeFila
 
 DURACAO_CHAMADA = 0.35
@@ -95,7 +95,7 @@ class TestEscalonador(TesteDeFila):
         # ele não está nesta lista. `vendedor.listar_pagina`, cujo endpoint no
         # ERP ainda não foi confirmado com a Bremen, continua sem handler — e
         # sem handler o motor devolve o item em vez de o perder.
-        from deskflow2.fila.registry import registry_padrao
+        from app.fila.registry import registry_padrao
 
         registry = registry_padrao(object())
 

@@ -24,7 +24,7 @@ from sqlalchemy import text
 
 from .apoio_banco import TesteDeFila
 
-SQL_DIR = pathlib.Path(__file__).resolve().parents[2] / "deskflow2" / "sql"
+SQL_DIR = pathlib.Path(__file__).resolve().parents[2] / "app" / "sql"
 
 TABELAS_TEMP = """
 CREATE TEMP TABLE pedido_formularios (id int, observacoes text, data_entrega date, titulo text,

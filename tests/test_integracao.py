@@ -11,14 +11,14 @@ import tempfile
 import unittest
 from types import SimpleNamespace
 
-from deskflow2.repositorios.fila import (
+from app.repositorios.pcp import (
     ORIGEM_ESCOLA,
     ORIGEM_INTEGRACAO,
     OrcamentoReivindicado,
 )
-from deskflow2.servicos.pcp import payload as modulo_payload
-from deskflow2.servicos.pcp.download_arquivos import baixar_arquivos_das_ops, chave_arquivo
-from deskflow2.servicos.pcp.payload import (
+from app.servicos.pcp import payload as modulo_payload
+from app.servicos.pcp.download_arquivos import baixar_arquivos_das_ops, chave_arquivo
+from app.servicos.pcp.payload import (
     ARQUIVO_INTEGRACAO,
     PARAMETRO_IDS_ESCOLA,
     PARAMETRO_IDS_INTEGRACAO,
@@ -26,7 +26,6 @@ from deskflow2.servicos.pcp.payload import (
     _arquivo_e_parametro,
     montar_payload_orcamento,
 )
-from tests.apoio import configuracao  # noqa: F401 - usado por outros casos do arquivo
 
 
 def orcamento_integracao(**campos):

@@ -4,13 +4,13 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
-from .integracoes.erp import ErpClient
+from ..integracoes.erp import ErpClient
 from .config import Settings, get_settings
-from .db import get_engine
-from .fila.catalogo import carregar_catalogo
-from .fila.escalonador import Escalonador
-from .fila.registry import registry_padrao
-from .servicos.pcp.download_arquivos import BaixadorArquivos
+from .database import get_engine
+from ..fila.catalogo import carregar_catalogo
+from ..fila.escalonador import Escalonador
+from ..fila.registry import registry_padrao
+from ..servicos.pcp.download_arquivos import BaixadorArquivos
 
 logger = logging.getLogger(__name__)
 

@@ -18,8 +18,8 @@ Sob a fila (`modo_fila()`), duas coisas mudam e SÓ ali:
 - a espera do 503 sai da thread: `ErpIndisponivel` na primeira ocorrência, e
   quem devolve a linha para `pendente` com `disponivel_em` futuro é o motor.
 
-Fora do `modo_fila()` — que é o caso dos quatro ciclos antigos — nada disso
-entra em cena e o comportamento é exatamente o de antes.
+Fora do `modo_fila()` (hoje só o comando `verificar`) nada disso entra em
+cena: o 503 é esperado na própria thread, dentro de `ERP_503_MAX_WAIT_SECONDS`.
 """
 
 import contextlib
@@ -31,6 +31,8 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 import httpx
+
+from ..utils.conversao import inteiro_positivo
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +138,47 @@ def sucesso_erp(corpo: Any) -> bool:
     valor = corpo.get("success", corpo.get("sucess"))
     codigo = corpo.get("code")
     return valor is True and not (isinstance(codigo, int) and codigo >= 400)
+
+
+def envelope_json(resposta: httpx.Response) -> Optional[dict]:
+    dados = ler_json(resposta)
+    return dados if isinstance(dados, dict) else None
+
+
+def registros_do_envelope(dados: Optional[dict]) -> list:
+    """`data` de qualquer envelope do Wingraph, sempre como lista.
+
+    A API devolve lista nas buscas e já devolveu objeto único em resposta de
+    escrita — os dois viram lista aqui. Serve a `/api/v1/cliente` e a
+    `/api/v1/caracteristicasproduto`, que compartilham o mesmo envelope.
+    """
+    if not isinstance(dados, dict):
+        return []
+    interno = dados.get("data")
+    if isinstance(interno, list):
+        return [linha for linha in interno if isinstance(linha, dict)]
+    if isinstance(interno, dict):
+        return [interno]
+    return []
+
+
+def clientes_do_envelope(dados: Optional[dict]) -> list:
+    """`data` do GET /api/v1/cliente. Nome de domínio para o mesmo envelope."""
+    return registros_do_envelope(dados)
+
+
+def total_paginas_de(dados: Optional[dict]) -> Optional[int]:
+    """`metadata.pages` do envelope paginado.
+
+    `None` quando o ERP não informou — quem depende disso (a sincronização
+    paginada) precisa tratar a ausência, nunca presumir uma página só.
+    """
+    if not isinstance(dados, dict):
+        return None
+    metadata = dados.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+    return inteiro_positivo(metadata.get("pages"))
 
 
 class ErpClient:
@@ -344,7 +387,7 @@ class ErpClient:
         """O `identifier` que todo corpo de escrita do Wingraph carrega.
 
         Público porque o corpo do orçamento do PCP não é montado aqui: ele sai
-        pronto do SQL (`servicos/payload.py`), e o handler só precisa saber qual
+        pronto do SQL (`servicos/pcp/payload.py`), e o handler só precisa saber qual
         identifier prefixar — sem alcançar `_settings` de fora."""
         return self._settings.ERP_IDENTIFIER
 

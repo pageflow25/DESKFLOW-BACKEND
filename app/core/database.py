@@ -13,11 +13,7 @@ from sqlalchemy.engine import Engine
 from .config import get_settings
 
 
-# Conexões que os ciclos antigos (orçamentos, aprovações, downloads e
-# reconciliação) podem querer ao mesmo tempo: cada um roda uma instância por
-# vez, mas os quatro rodam em paralelo.
-CONEXOES_JOBS_ANTIGOS = 4
-# Os quatro ciclos novos da fila que abrem transação própria: despachante
+# Os quatro ciclos da fila que abrem transação própria: despachante
 # síncrono, despachante assíncrono, reaper e heartbeat.
 CONEXOES_CICLOS_FILA = 4
 
@@ -32,9 +28,10 @@ def dimensionar_pool(settings) -> int:
     if settings.DB_POOL_SIZE > 0:
         return settings.DB_POOL_SIZE
     if not settings.FILA_ATIVA:
-        return CONEXOES_JOBS_ANTIGOS + 1
+        # Sem fila não há ciclo: só `verificar` e `dry-run`, uma conexão cada.
+        return 1
     slots = max(1, settings.FILA_POOL_SINCRONO) + max(1, settings.FILA_POOL_ASSINCRONO)
-    return CONEXOES_JOBS_ANTIGOS + CONEXOES_CICLOS_FILA + slots * 2
+    return CONEXOES_CICLOS_FILA + slots * 2
 
 
 @lru_cache

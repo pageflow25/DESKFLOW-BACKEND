@@ -76,9 +76,9 @@ def registry_padrao(erp, *, baixador=None, pasta_download: str = "") -> Registry
 
     `baixador` e `pasta_download` são a segunda borda, do único handler que
     escreve arquivo em disco em vez de falar com o ERP
-    (`pcp.download_arquivos`); ver `handlers/registrar_erp_wingraph`.
+    (`pcp.download_arquivos`); ver `controllers/registrar_erp_wingraph`.
     """
-    from ..handlers import registrar_erp_wingraph
+    from ..controllers import registrar_erp_wingraph
 
     registry = Registry()
     registrar_erp_wingraph(registry, erp, baixador=baixador, pasta_download=pasta_download)

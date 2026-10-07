@@ -21,23 +21,16 @@ definitiva e sem consumir tentativa.
 
 from typing import Any, Optional
 
-from ...integracoes.erp import ORIGEM_MODELO_DE_PRODUTO, sucesso_erp
 from ...fila.modelos import Desfecho, ItemReivindicado, Preparo
-from ..comum import (
-    classificar_falha,
-    envelope_json,
-    registros_do_envelope,
-)
-from ...validadores import produtos as validadores
-from ...validadores.comum import PayloadInvalido, inteiro_positivo
+from ...integracoes.erp import envelope_json, registros_do_envelope, sucesso_erp
+from ...utils.conversao import inteiro_positivo
+from ..payload_invalido import PayloadInvalido
+from ..resposta_erp import classificar_falha
+from .validators import produto_validator
+from .validators.produto_validator import origem_do_payload
 
 TIPO = "produto.importar"
 
-
-def origem_do_payload(payload: Optional[dict]) -> int:
-    """`origem_erp` do payload, com 2 (modelo de produto) como padrão — o mesmo
-    default de `buscarCaracteristicasProduto` no PageFlow."""
-    return inteiro_positivo((payload or {}).get("origem_erp")) or ORIGEM_MODELO_DE_PRODUTO
 
 
 class HandlerProdutoImportar:
@@ -49,7 +42,7 @@ class HandlerProdutoImportar:
     def preparar(self, conn, item: ItemReivindicado) -> Preparo:
         payload = item.payload or {}
 
-        campos, invalido = validadores.validar_importar(payload)
+        campos, invalido = produto_validator.validar_importar(payload)
         if invalido is not None:
             return invalido.preparo()
         id_produto = campos["id_produto"]

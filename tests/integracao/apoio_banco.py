@@ -32,7 +32,7 @@ def _obter_engine():
     if _engine is not None or _motivo_skip is not None:
         return _engine
     try:
-        from deskflow2.db import get_engine
+        from app.core.database import get_engine
 
         engine = get_engine()
         with engine.connect() as conn:
@@ -53,7 +53,7 @@ class TesteDeFila(unittest.TestCase):
         cls.engine = _obter_engine()
         if cls.engine is None:
             raise unittest.SkipTest(_motivo_skip)
-        from deskflow2.fila.catalogo import carregar_catalogo
+        from app.fila.catalogo import carregar_catalogo
 
         with cls.engine.connect() as conn:
             cls.catalogo = carregar_catalogo(conn)
@@ -113,7 +113,7 @@ class TesteDeFila(unittest.TestCase):
                    claim_por=None, destino=None, payload=None) -> int:
         import json
 
-        from deskflow2.fila.catalogo import EXECUTANDO, RESERVADO
+        from app.fila.catalogo import EXECUTANDO, RESERVADO
 
         destino = destino or self.destino
 
@@ -172,7 +172,7 @@ class TesteDeFila(unittest.TestCase):
 
     def reivindicar(self, classe="assincrono", worker="worker-a", lote=10, margem=30,
                     destino=None):
-        from deskflow2.fila import repositorio
+        from app.fila import repositorio
 
         with self.engine.begin() as conn:
             return repositorio.reivindicar(

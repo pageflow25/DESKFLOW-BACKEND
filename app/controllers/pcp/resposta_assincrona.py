@@ -1,4 +1,5 @@
-"""Peças comuns aos dois handlers de ESCRITA do PCP (orçamento e aprovação).
+"""Resposta ASSÍNCRONA do ERP nos dois controllers de escrita do PCP (orçamento e
+aprovação). Era `handlers/pcp/comum.py`.
 
 Os dois mandam um POST não idempotente ao ERP e os dois podem receber, em vez
 do resultado, um *ack* de que a chamada foi aceita e o resultado virá depois
@@ -11,9 +12,9 @@ webhook do ERP, que chega no PageFlow — nunca neste worker. O desfecho certo �
 fica esperando o retorno, em vez de virar `concluido` com um resultado que
 ainda não existe.
 
-A escolha entre síncrono e assíncrono é a MESMA de hoje
-(`repositorios/fila.py::_modo_efetivo`): sem `url_webhook` não há para onde o
-ERP devolver o resultado, então a chamada vai síncrona e a resposta do próprio
+A escolha entre síncrono e assíncrono é a MESMA dos ciclos antigos
+(`_modo_efetivo`, removido com eles): sem `url_webhook` não há para onde o ERP
+devolver o resultado, então a chamada vai síncrona e a resposta do próprio
 POST é o resultado.
 """
 
@@ -21,7 +22,7 @@ from typing import Optional
 
 from ...integracoes.erp import extrair_id_requisicao
 from ...fila.modelos import Desfecho
-from ...validadores.pcp import MODO_ASSINCRONO
+from .validators.pcp_validator import MODO_ASSINCRONO
 
 def desfecho_do_ack(dados: dict, modo: str, tem_resultado_final: bool,
                     resultado: dict) -> Optional[Desfecho]:

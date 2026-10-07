@@ -1,4 +1,9 @@
-"""Handlers da fila: um módulo por `tipo_codigo`.
+"""Controllers da fila: um handler por `tipo_codigo`, separados por domínio.
+
+São a porta de entrada de cada item (o papel de um controller): recebem o item,
+validam o payload com o `validators/` do próprio módulo, chamam `servicos/` e `integracoes/`, e
+traduzem a resposta num `Desfecho`. A classe de cada um continua se chamando
+`Handler...` porque é esse o nome do protocolo em `fila/registry.py`.
 
 Cada handler implementa o protocolo de `fila/registry.py` (`preparar`,
 `interpretar`, `verificar`) e é a ÚNICA peça que conhece o formato do payload,

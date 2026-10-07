@@ -1,15 +1,15 @@
 import unittest
 from types import SimpleNamespace
 
-from deskflow2.repositorios.fila import OrcamentoReivindicado
-from deskflow2.servicos.pcp import payload as modulo_payload
-from deskflow2.servicos.pcp.payload import (
+from app.repositorios.pcp import OrcamentoReivindicado
+from app.servicos.pcp import payload as modulo_payload
+from app.servicos.pcp.payload import (
     ARQUIVO_POR_MODO,
     PayloadIncompleto,
     ids_do_codigo_externo,
     montar_payload_orcamento,
-    remover_nulos,
 )
+from app.utils.conversao import remover_nulos
 
 
 def orcamento(**campos):

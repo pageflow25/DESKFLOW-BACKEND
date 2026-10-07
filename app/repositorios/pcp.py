@@ -1,4 +1,7 @@
-"""Leituras do PCP no banco, para os handlers `pcp.*` da fila.
+"""Leituras do PCP no banco, para os controllers `pcp.*` da fila.
+
+Era `repositorios/fila.py` — nome que se confundia com `fila/repositorio.py`,
+que é o SQL da própria fila.
 
 Só LEITURA. O claim e a gravação da execução acontecem em `fila_processamento`
 (`fila/repositorio.py`), e todo o resultado de domínio (resposta, erro, status
@@ -34,7 +37,7 @@ class OrcamentoReivindicado:
     Use `ids_origem` para não ramificar por origem em cada chamador.
 
     É a representação que os três SQLs de `sql/` e as validações de
-    `servicos/payload.py` enxergam. O handler `pcp.orcamento.enviar` a monta a
+    `servicos/pcp/payload.py` enxergam. O handler `pcp.orcamento.enviar` a monta a
     partir do payload do item da fila; o `dry-run` da linha de comando a lê do
     banco com `carregar_orcamento`.
     """

@@ -2,7 +2,7 @@
 de produto.
 
 Sem banco e sem rede: o ERP é um `httpx.MockTransport`, como em
-`test_handlers_cliente.py`, de onde vêm os dublês compartilhados (um ERP falso e
+`test_controllers_cliente.py`, de onde vêm os dublês compartilhados (um ERP falso e
 um `ItemReivindicado` de mentira) para não haver duas cópias deles.
 Nenhuma chamada real ao ERP em teste nenhum.
 """
@@ -12,15 +12,15 @@ import unittest
 
 import httpx
 
-from deskflow2.fila.modelos import Desfecho, Estado, Preparo
-from deskflow2.fila.registry import registry_padrao
-from deskflow2.handlers import (
+from app.fila.modelos import Desfecho, Estado, Preparo
+from app.fila.registry import registry_padrao
+from app.controllers import (
     HandlerClientePlanilhaLinha,
     HandlerClienteSincronizarPagina,
     HandlerProdutoImportar,
 )
-from deskflow2.validadores.comum import PayloadInvalido
-from tests.test_handlers_cliente import CLIENTE_ERP, DOCUMENTO, _erp, _executar, _item, _roteador
+from app.controllers.payload_invalido import PayloadInvalido
+from tests.test_controllers_cliente import CLIENTE_ERP, DOCUMENTO, _erp, _executar, _item, _roteador
 
 PRODUTO_ERP = {
     "id_produto": 815,

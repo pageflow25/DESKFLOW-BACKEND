@@ -10,7 +10,8 @@ nos dois.
 
 from typing import Any, Optional, Tuple
 
-from .comum import PayloadInvalido, inteiro_positivo, so_digitos
+from ....utils.conversao import inteiro_positivo, so_digitos
+from ...payload_invalido import PayloadInvalido
 
 
 def documento_do_payload(payload: dict) -> str:
@@ -131,3 +132,20 @@ def validar_sincronizar_pagina(
         return None, PayloadInvalido(
             "cliente.sincronizar_pagina exige `pagina` inteira e maior que zero.")
     return pagina, None
+
+
+# `cliente.planilha_linha`: a operacao e EXIGIDA, nunca deduzida de `id_cliente`
+# (ver `controllers/clientes/planilha.py`). Estava solta no controller.
+OPERACAO_CRIAR = "criar"
+OPERACAO_ATUALIZAR = "atualizar"
+OPERACOES = (OPERACAO_CRIAR, OPERACAO_ATUALIZAR)
+
+
+def operacao_do_payload(payload: Optional[dict]) -> Optional[str]:
+    """A operação declarada pelo produtor, ou `None` quando não é uma das duas
+    conhecidas. Nunca deduz a partir de `id_cliente`."""
+    bruto = (payload or {}).get("operacao")
+    if not isinstance(bruto, str):
+        return None
+    operacao = bruto.strip().lower()
+    return operacao if operacao in OPERACOES else None

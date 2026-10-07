@@ -13,7 +13,7 @@ por quem tem o catálogo, que é o Postgres. `PREPARE` faz exatamente essa
 conferência, e faz de graça — valida tabelas, colunas e tipos SEM executar a
 query, sem ler uma linha e sem abrir transação de escrita.
 
-O teste é genérico de propósito: pega todo `deskflow2/sql/orcamento_*.sql` que
+O teste é genérico de propósito: pega todo `app/sql/orcamento_*.sql` que
 existir. SQL novo entra coberto sem ninguém lembrar de acrescentá-lo aqui.
 """
 
@@ -22,7 +22,7 @@ import re
 
 from .apoio_banco import TesteDeFila
 
-SQL_DIR = pathlib.Path(__file__).resolve().parents[2] / "deskflow2" / "sql"
+SQL_DIR = pathlib.Path(__file__).resolve().parents[2] / "app" / "sql"
 
 # Tipo de cada parâmetro nomeado, porque PREPARE exige a assinatura. O que não
 # estiver aqui entra como `text`, que basta para a validação de nomes.

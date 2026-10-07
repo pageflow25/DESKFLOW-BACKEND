@@ -11,13 +11,13 @@ from types import SimpleNamespace
 
 import httpx
 
-from deskflow2.integracoes.erp import ErpClient
-from deskflow2.fila.catalogo import CODIGOS_OBRIGATORIOS, Catalogo, Tipo
-from deskflow2.fila.modelos import Desfecho, Estado, ItemReivindicado
-from deskflow2.fila.motor import Motor
-from deskflow2.fila.registry import Registry, registry_padrao
-from deskflow2.handlers import HandlerClienteAtualizar, HandlerClienteConsultar, HandlerClienteCriar
-from deskflow2.validadores.comum import PayloadInvalido
+from app.integracoes.erp import ErpClient
+from app.fila.catalogo import CODIGOS_OBRIGATORIOS, Catalogo, Tipo
+from app.fila.modelos import Desfecho, Estado, ItemReivindicado
+from app.fila.motor import Motor
+from app.fila.registry import Registry, registry_padrao
+from app.controllers import HandlerClienteAtualizar, HandlerClienteConsultar, HandlerClienteCriar
+from app.controllers.payload_invalido import PayloadInvalido
 from tests.apoio import MotorFalso, configuracao
 
 DOCUMENTO = "12345678000199"

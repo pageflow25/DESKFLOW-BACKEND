@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     DB_SSL: bool = True
     DB_STATEMENT_TIMEOUT_MS: int = 120_000
-    # 0 = dimensionar pelo que o processo realmente abre (ver `db.py`).
+    # 0 = dimensionar pelo que o processo realmente abre (ver `core/database.py`).
     DB_POOL_SIZE: int = 0
     DB_MAX_OVERFLOW: int = 5
 
@@ -93,10 +93,6 @@ class Settings(BaseSettings):
     DOWNLOAD_BASE_PATH: str = ""
     DOWNLOAD_TIMEOUT: float = 120.0
     DOWNLOAD_TENTATIVAS: int = 3
-
-    # Repasses ao PageFlow que não puderam ser entregues ficam guardados aqui
-    # e são reenviados pela reconciliação (o resultado do ERP não se perde).
-    DADOS_DIR: str = "dados"
 
     LOG_DIR: str = "logs"
     LOG_LEVEL: str = "INFO"

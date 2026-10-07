@@ -3,7 +3,7 @@
 Substitui o `DespachoOrcamentos` (`servicos/despacho_orcamento.py`) sem mudar a
 chamada que chega ao ERP: o corpo continua saindo dos MESMOS três SQLs, com a
 mesma escolha por origem e modo de agrupamento e a mesma conferência de
-`codigo_externo` (`servicos/payload.py`). O que muda é de onde vêm os
+`codigo_externo` (`servicos/pcp/payload.py`). O que muda é de onde vêm os
 parâmetros e para onde vai o resultado:
 
 - **antes**: o worker fazia claim em `orcamento_api_orcamentos`, lia
@@ -33,14 +33,15 @@ adiaria a mensagem.
 
 from typing import Any, Optional
 
-from ...integracoes.erp import extrair_id_requisicao, sucesso_erp
+from ...integracoes.erp import envelope_json, extrair_id_requisicao, sucesso_erp
 from ...fila.modelos import Desfecho, ItemReivindicado, Preparo
-from ...servicos.pcp.comum import com_modo_assincrono, corpo_para_auditoria
+from ...servicos.pcp.envio import com_modo_assincrono, corpo_para_auditoria
 from ...servicos.pcp.payload import PayloadIncompleto, montar_payload_orcamento
-from ...validadores import pcp as validadores
-from ...validadores.comum import PayloadInvalido, inteiro_positivo, preparo_invalido
-from ..comum import classificar_falha, envelope_json
-from .comum import desfecho_do_ack
+from ...utils.conversao import inteiro_positivo
+from ..payload_invalido import PayloadInvalido, preparo_invalido
+from ..resposta_erp import classificar_falha
+from .resposta_assincrona import desfecho_do_ack
+from .validators import pcp_validator
 
 TIPO = "pcp.orcamento.enviar"
 
@@ -59,7 +60,7 @@ class HandlerPcpOrcamentoEnviar:
         self._erp = erp
 
     def preparar(self, conn, item: ItemReivindicado) -> Preparo:
-        orcamento, invalido = validadores.orcamento_do_payload(item.payload)
+        orcamento, invalido = pcp_validator.orcamento_do_payload(item.payload)
         if invalido is not None:
             return invalido.preparo()
 
@@ -87,7 +88,7 @@ class HandlerPcpOrcamentoEnviar:
         if bruto.status_code >= 400 or not sucesso_erp(dados):
             return classificar_falha(bruto, dados, mutacao=True)
 
-        modo = validadores.modo_envio_de(item.payload)
+        modo = pcp_validator.modo_envio_de(item.payload)
         id_orcamento = id_orcamento_de(dados)
         resultado = {"id_orcamento": id_orcamento, "modo_envio": modo, "resposta": dados}
 

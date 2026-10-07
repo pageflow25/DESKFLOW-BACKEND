@@ -37,14 +37,14 @@ aparece com o tempo: quem o grava é o retorno do orçamento.
 
 from typing import Any, Optional
 
-from ...integracoes.erp import ErroErp, extrair_id_requisicao, sucesso_erp
+from ...integracoes.erp import ErroErp, envelope_json, extrair_id_requisicao, sucesso_erp
 from ...fila.modelos import Desfecho, ItemReivindicado, Preparo
 from ...servicos.pcp.aprovacao import montar_dados_aprovacao
-from ...servicos.pcp.comum import com_modo_assincrono, corpo_para_auditoria
-from ...validadores import pcp as validadores
-from ...validadores.comum import PayloadInvalido
-from ..comum import classificar_falha, envelope_json
-from .comum import desfecho_do_ack
+from ...servicos.pcp.envio import com_modo_assincrono, corpo_para_auditoria
+from ..payload_invalido import PayloadInvalido
+from ..resposta_erp import classificar_falha
+from .resposta_assincrona import desfecho_do_ack
+from .validators import pcp_validator
 
 TIPO = "pcp.aprovacao.enviar"
 
@@ -121,13 +121,13 @@ class HandlerPcpAprovacaoEnviar:
     def preparar(self, conn, item: ItemReivindicado) -> Preparo:
         payload = item.payload or {}
 
-        aprovacao_id, invalido = validadores.aprovacao_do_payload(payload)
+        aprovacao_id, invalido = pcp_validator.aprovacao_do_payload(payload)
         if invalido is not None:
             return invalido.preparo()
 
         # SELECT em `sql/aprovacao.sql`, na transação curta do preparo — sem
         # I/O externa, como o SQL do orçamento.
-        campos, invalido = validadores.aprovacao_dos_dados(
+        campos, invalido = pcp_validator.aprovacao_dos_dados(
             montar_dados_aprovacao(conn, aprovacao_id), aprovacao_id)
         if invalido is not None:
             return invalido.preparo()
@@ -142,7 +142,7 @@ class HandlerPcpAprovacaoEnviar:
             },
         }
         corpo = com_modo_assincrono(
-            corpo, validadores.modo_envio_de(payload), validadores.url_webhook_de(payload))
+            corpo, pcp_validator.modo_envio_de(payload), pcp_validator.url_webhook_de(payload))
         return Preparo(
             payload_enviado=corpo_para_auditoria(corpo),
             chamar=lambda: self._chamar(id_orcamento, itens, corpo),
@@ -167,7 +167,7 @@ class HandlerPcpAprovacaoEnviar:
         if isinstance(bruto, PayloadInvalido):
             return bruto.desfecho()
 
-        modo = validadores.modo_envio_de(item.payload)
+        modo = pcp_validator.modo_envio_de(item.payload)
 
         if isinstance(bruto, ConsultaIndisponivel):
             return Desfecho.retentar(

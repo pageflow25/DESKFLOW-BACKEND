@@ -1,8 +1,8 @@
 """Linha de comando do DESKFLOW2.0.
 
-    python -m deskflow2 worker                      # serviço: os ciclos da fila em loop
-    python -m deskflow2 verificar                   # testa banco e login no ERP
-    python -m deskflow2 dry-run --orcamento 123     # mostra o corpo que iria ao ERP (não muda nada)
+    python -m app worker                      # serviço: os ciclos da fila em loop
+    python -m app verificar                   # testa banco e login no ERP
+    python -m app dry-run --orcamento 123     # mostra o corpo que iria ao ERP (não muda nada)
 """
 
 import argparse
@@ -10,17 +10,17 @@ import json
 import logging
 import sys
 
-from .config import get_settings
-from .logging_config import configurar_logging
+from .core.config import get_settings
+from .core.logging_config import configurar_logging
 
-logger = logging.getLogger("deskflow2")
+logger = logging.getLogger("app")
 
 
 def _dry_run(app, orcamento_id: int) -> int:
     """Corpo que o SQL monta para um orçamento já gravado em
     `orcamento_api_orcamentos`. Só leitura, e sem passar pela fila: serve para
     conferir o payload de um orçamento real antes de enfileirá-lo."""
-    from .repositorios.fila import carregar_orcamento
+    from .repositorios.pcp import carregar_orcamento
     from .servicos.pcp.payload import PayloadIncompleto, montar_payload_orcamento
 
     with app.engine.connect() as conn:
@@ -40,12 +40,9 @@ def _dry_run(app, orcamento_id: int) -> int:
 def _verificar(app) -> int:
     from sqlalchemy import text
 
-    from .repositorios.status import carregar_catalogo
-
     with app.engine.connect() as conn:
         conn.execute(text("SELECT 1"))
-        carregar_catalogo(conn)
-    print("Banco: ok (catálogo de status do PCP encontrado)")
+    print("Banco: ok")
     if app.fila is None:
         print("Fila de processamento: desligada (FILA_ATIVA=false ou catálogo fila_* ausente)")
     else:
@@ -61,7 +58,7 @@ def _verificar(app) -> int:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(prog="deskflow2", description="Consumidor da fila do PCP (PageFlow -> Wingraph)")
+    parser = argparse.ArgumentParser(prog="app", description="Consumidor da fila do PCP (PageFlow -> Wingraph)")
     sub = parser.add_subparsers(dest="comando", required=True)
     sub.add_parser("worker", help="roda os ciclos da fila em loop")
     sub.add_parser("verificar", help="testa banco e login no ERP")
@@ -72,7 +69,7 @@ def main(argv=None) -> int:
     settings = get_settings()
     configurar_logging(settings.LOG_DIR, settings.LOG_LEVEL)
 
-    from .app import montar_aplicacao
+    from .core.app import montar_aplicacao
 
     app = montar_aplicacao(settings)
     try:
@@ -80,7 +77,7 @@ def main(argv=None) -> int:
             if app.fila is None:
                 logger.warning("Fila inativa (FILA_ATIVA=false ou catálogo fila_* ausente): worker não iniciado")
                 return 0
-            from .jobs import criar_agendador
+            from .core.agendador import criar_agendador
 
             logger.info(
                 "DESKFLOW2.0 iniciado: fila de processamento, poll sincrono %ss / assincrono %ss, download %s",

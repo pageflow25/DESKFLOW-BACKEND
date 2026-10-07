@@ -7,7 +7,7 @@ completa o que faltou sem sobrescrever o que já estava certo — é o que permi
 ao motor retentar sozinho.
 
 Este handler não fala com o ERP: as OPs e seus arquivos vêm do banco
-(`repositorios/fila.py::arquivos_da_aprovacao`, o mesmo SQL de antes, SELECT) e
+(`repositorios/pcp.py::arquivos_da_aprovacao`, o mesmo SQL de antes, SELECT) e
 os bytes vêm do Vercel Blob ou das URLs do produto de integração.
 
 O que muda em relação ao ciclo antigo (`servicos/download_arquivos.py`): o
@@ -25,14 +25,14 @@ import time
 from typing import Any, Callable, Optional
 
 from ...fila.modelos import Desfecho, ItemReivindicado, Preparo
-from ...repositorios import fila
+from ...repositorios import pcp as repositorio_pcp
 from ...servicos.pcp.download_arquivos import (
     MENSAGEM_SEM_ARQUIVOS,
     BaixadorArquivos,
     baixar_arquivos_das_ops,
 )
-from ...validadores import pcp as validadores
-from ...validadores.comum import PayloadInvalido
+from ..payload_invalido import PayloadInvalido
+from .validators import pcp_validator
 
 logger = logging.getLogger(__name__)
 
@@ -70,13 +70,13 @@ class HandlerPcpDownloadArquivos:
         self._dormir = dormir
 
     def preparar(self, conn, item: ItemReivindicado) -> Preparo:
-        aprovacao_id, invalido = validadores.download_do_payload(item.payload)
+        aprovacao_id, invalido = pcp_validator.download_do_payload(item.payload)
         if invalido is not None:
             return invalido.preparo()
 
         # Leitura na transação curta do preparo; os bytes só começam a andar
         # dentro do `chamar`, fora de qualquer transação.
-        arquivos = fila.arquivos_da_aprovacao(conn, aprovacao_id)
+        arquivos = repositorio_pcp.arquivos_da_aprovacao(conn, aprovacao_id)
         ops = sorted({linha["id_op"] for linha in arquivos})
         return Preparo(
             payload_enviado={

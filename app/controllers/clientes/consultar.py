@@ -12,15 +12,11 @@ aquele projetor lê: `{"clientes": [...]}`.
 
 from typing import Any, Optional
 
-from ...integracoes.erp import sucesso_erp
 from ...fila.modelos import Desfecho, ItemReivindicado, Preparo
-from ..comum import (
-    classificar_falha,
-    clientes_do_envelope,
-    envelope_json,
-)
-from ...validadores import clientes as validadores
-from ...validadores.comum import PayloadInvalido
+from ...integracoes.erp import clientes_do_envelope, envelope_json, sucesso_erp
+from ..payload_invalido import PayloadInvalido
+from ..resposta_erp import classificar_falha
+from .validators import cliente_validator
 
 TIPO = "cliente.consultar"
 
@@ -32,7 +28,7 @@ class HandlerClienteConsultar:
         self._erp = erp
 
     def preparar(self, conn, item: ItemReivindicado) -> Preparo:
-        consulta, invalido = validadores.validar_consultar(item.payload)
+        consulta, invalido = cliente_validator.validar_consultar(item.payload)
         if invalido is not None:
             return invalido.preparo()
 
@@ -54,7 +50,7 @@ class HandlerClienteConsultar:
         return Desfecho.concluido({
             "clientes": clientes,
             "total": len(clientes),
-            "consulta": validadores.montar_consulta(item.payload),
+            "consulta": cliente_validator.montar_consulta(item.payload),
             "metadata": metadata,
         })
 

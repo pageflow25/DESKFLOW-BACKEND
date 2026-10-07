@@ -3,7 +3,7 @@ import unittest
 
 import httpx
 
-from deskflow2.integracoes.erp import ErpClient, ErpIndisponivel, FalhaLogin, ResultadoIncerto, sucesso_erp
+from app.integracoes.erp import ErpClient, ErpIndisponivel, FalhaLogin, ResultadoIncerto, sucesso_erp
 from tests.apoio import configuracao
 
 

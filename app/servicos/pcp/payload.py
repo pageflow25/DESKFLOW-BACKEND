@@ -19,9 +19,10 @@ from pathlib import Path
 from sqlalchemy import Integer, bindparam, text
 from sqlalchemy.dialects.postgresql import ARRAY
 
-from ...repositorios.fila import ORIGEM_INTEGRACAO, OrcamentoReivindicado
+from ...repositorios.pcp import ORIGEM_INTEGRACAO, OrcamentoReivindicado
+from ...utils.conversao import remover_nulos
 
-# `deskflow2/sql/`, a partir de `deskflow2/servicos/pcp/`: tres niveis acima
+# `app/sql/`, a partir de `app/servicos/pcp/`: tres niveis acima
 # do arquivo. Era dois antes de este modulo descer para `servicos/pcp/`.
 PASTA_SQL = Path(__file__).resolve().parents[2] / "sql"
 ARQUIVO_POR_MODO = {
@@ -59,15 +60,6 @@ def ids_do_codigo_externo(codigo_externo) -> set:
     if codigo_externo is None:
         return set()
     return {int(parte) for parte in str(codigo_externo).split(",") if parte.strip().isdigit()}
-
-
-def remover_nulos(valor):
-    """O ERP converte `null` em 0 nos campos inteiros: chave sem valor não vai."""
-    if isinstance(valor, dict):
-        return {chave: remover_nulos(item) for chave, item in valor.items() if item is not None}
-    if isinstance(valor, list):
-        return [remover_nulos(item) for item in valor]
-    return valor
 
 
 def validar_cabecalho(orcamento: OrcamentoReivindicado) -> None:

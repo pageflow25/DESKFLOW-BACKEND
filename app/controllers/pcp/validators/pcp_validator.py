@@ -9,14 +9,15 @@ mensagem E o codigo, porque as recusas daqui nao sao todas iguais:
 `SEM_ID_ORCAMENTO` e `SEM_ITENS_APROVADOS` sao distinguiveis de um payload
 generico malformado, e o operador precisa dessa diferenca.
 
-`modo_envio_de` e `url_webhook_de` moram aqui, e nao em `handlers/pcp/comum.py`,
-porque leem o PAYLOAD. O que ficou la e `desfecho_do_ack`, que le a RESPOSTA.
+`modo_envio_de` e `url_webhook_de` moram aqui, e nao em
+`controllers/pcp/resposta_assincrona.py`, porque leem o PAYLOAD. O que ficou la e `desfecho_do_ack`, que le a RESPOSTA.
 """
 
 from typing import Any, Optional, Tuple
 
-from ..repositorios.fila import ORIGEM_ESCOLA, ORIGEM_INTEGRACAO, OrcamentoReivindicado
-from .comum import PayloadInvalido, inteiro_positivo
+from ....repositorios.pcp import ORIGEM_ESCOLA, ORIGEM_INTEGRACAO, OrcamentoReivindicado
+from ....utils.conversao import inteiro_positivo
+from ...payload_invalido import PayloadInvalido
 
 MODO_SINCRONO = "sincrono"
 MODO_ASSINCRONO = "assincrono"
@@ -56,7 +57,7 @@ def orcamento_do_payload(
 
     Valida E constrói no mesmo lugar, de propósito. Reaproveitar a dataclass do
     caminho antigo é o que mantém uma representação só: é ela que os três SQLs e
-    as duas validações de `servicos/payload.py` enxergam, e uma segunda cópia dos
+    as duas validações de `servicos/pcp/payload.py` enxergam, e uma segunda cópia dos
     mesmos campos seria a chance perfeita de os dois caminhos divergirem.
     """
     payload = payload or {}

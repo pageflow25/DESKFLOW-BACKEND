@@ -5,10 +5,10 @@ from types import SimpleNamespace
 
 from sqlalchemy import text
 
-from deskflow2.fila import repositorio
-from deskflow2.fila.motor import Motor, backoff_com_jitter
-from deskflow2.fila.modelos import Desfecho
-from deskflow2.fila.registry import Registry
+from app.fila import repositorio
+from app.fila.motor import Motor, backoff_com_jitter
+from app.fila.modelos import Desfecho
+from app.fila.registry import Registry
 from tests.integracao.apoio_banco import TesteDeFila
 
 ATOR = "deskflow:teste"

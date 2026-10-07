@@ -8,7 +8,7 @@ Camadas, na mesma separação que o pacote já usa:
 - `motor`        — o que fazer com um item: preparar, chamar, interpretar,
                    classificar a falha e agendar a próxima tentativa;
 - `registry`     — handlers por `tipo_codigo`. O motor não conhece nenhum
-                   handler: quem os implementa é `deskflow2/handlers/`, e o
+                   handler: quem os implementa é `app/controllers/`, e o
                    registry é o único ponto em que os dois se encontram;
 - `escalonador`  — dois pools (síncrono e assíncrono), dois despachantes,
                    reaper e heartbeat.

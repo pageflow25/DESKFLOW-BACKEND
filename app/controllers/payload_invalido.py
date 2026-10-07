@@ -1,11 +1,18 @@
-"""Primitivas de validacao de payload, comuns a todos os dominios.
+"""`PayloadInvalido`: a recusa que os validators de cada modulo devolvem.
 
-Estavam em `handlers/comum.py`, junto da leitura de envelope do ERP e da
-classificacao de falha. Sao coisas diferentes: aquelas olham a resposta que
-chegou, estas olham o payload que entrou. Ver o docstring do pacote.
+Nao e um validador: e o TIPO da recusa, o mesmo para todos os controllers, e por
+isso mora em `controllers/` e nao dentro do `validators/` de um modulo. As regras
+ficam em `controllers/<modulo>/validators/`.
+
+Todo validador devolve `PayloadInvalido` ou `None`, nunca levanta excecao. A
+diferenca importa: excecao no `preparar()` e RETENTAVEL por construcao no motor,
+e payload invalido nao melhora na terceira tentativa — ele e falha definitiva e
+nao deve gastar o orcamento de tentativas do item.
+
+A fronteira com `controllers/resposta_erp.py` e a direcao do dado: validator
+olha o payload que ENTROU, antes de qualquer chamada sair; `resposta_erp.py`
+olha a resposta que CHEGOU.
 """
-
-from typing import Any, Optional
 
 from ..fila.modelos import Desfecho, Preparo
 
@@ -44,22 +51,3 @@ def preparo_invalido(mensagem: str, codigo: str = "PAYLOAD_INVALIDO") -> Preparo
     e o motivo fica em `payload_enviado`, visível na tela da fila.
     """
     return PayloadInvalido(mensagem, codigo).preparo()
-
-
-def so_digitos(valor: Any) -> str:
-    """Forma canônica do documento, a mesma que o PageFlow usa nas chaves de
-    bloqueio e de idempotência (`services/Bremen/bremenClienteFilaService.js`)."""
-    return "".join(caractere for caractere in str(valor or "") if caractere.isdigit())
-
-
-def inteiro_positivo(valor: Any) -> Optional[int]:
-    """Inteiro > 0, ou `None`. Aceita o número como texto, que é como ele chega
-    do JSONB do payload em boa parte dos produtores."""
-    try:
-        numero = int(valor)
-    except (TypeError, ValueError):
-        try:
-            numero = int(str(valor).strip())
-        except (TypeError, ValueError):
-            return None
-    return numero if numero > 0 else None

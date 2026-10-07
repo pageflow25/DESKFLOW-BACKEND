@@ -15,11 +15,11 @@ from types import SimpleNamespace
 
 import httpx
 
-from deskflow2.integracoes.erp import ErpClient
-from deskflow2.fila.catalogo import carregar_catalogo
-from deskflow2.fila.motor import Motor
-from deskflow2.fila.registry import Registry
-from deskflow2.handlers import HandlerClienteConsultar, HandlerClienteCriar
+from app.integracoes.erp import ErpClient
+from app.fila.catalogo import carregar_catalogo
+from app.fila.motor import Motor
+from app.fila.registry import Registry
+from app.controllers import HandlerClienteConsultar, HandlerClienteCriar
 from tests.apoio import configuracao
 from tests.integracao.apoio_banco import TesteDeFila
 

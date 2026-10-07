@@ -1,7 +1,7 @@
 import unittest
 from types import SimpleNamespace
 
-from deskflow2.jobs import _protegido, criar_agendador
+from app.core.agendador import _protegido, criar_agendador
 from tests.apoio import configuracao
 
 
@@ -72,7 +72,7 @@ class TestJobs(unittest.TestCase):
         def quebra():
             raise RuntimeError("banco fora")
 
-        with self.assertLogs("deskflow2.jobs", level="ERROR"):
+        with self.assertLogs("app.core.agendador", level="ERROR"):
             _protegido("fila_sincrona", quebra)()
 
 

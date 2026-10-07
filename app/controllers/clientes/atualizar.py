@@ -21,65 +21,14 @@ mandamos?**:
 
 from typing import Any, Optional
 
-from ...integracoes.erp import ErroErp, sucesso_erp
 from ...fila.modelos import Desfecho, ItemReivindicado, Preparo
-from ..comum import (
-    classificar_falha,
-    consultar_por_documento,
-    envelope_json,
-    id_cliente_de,
-)
-from ...validadores import clientes as validadores
-from ...validadores.comum import PayloadInvalido, so_digitos
+from ...integracoes.erp import ErroErp, envelope_json, sucesso_erp
+from ...servicos.clientes.verificacao import consultar_por_documento, divergencias, id_cliente_de
+from ..payload_invalido import PayloadInvalido
+from ..resposta_erp import classificar_falha
+from .validators import cliente_validator
 
 TIPO = "cliente.atualizar"
-
-# Não entram na comparação: `id_cliente` é a chave, e contato/endereço são
-# listas aninhadas cuja identidade é por id — compará-las daria divergência
-# constante por ordenação e por campo que o ERP normaliza.
-CAMPOS_IGNORADOS = frozenset({"id_cliente", "contato", "endereco", "identifier"})
-
-
-def _normalizar(valor: Any) -> str:
-    if isinstance(valor, bool):
-        return "1" if valor else "0"
-    if isinstance(valor, (int, float)):
-        return str(int(valor)) if float(valor).is_integer() else str(float(valor))
-    texto = str(valor if valor is not None else "").strip()
-    if texto.lower() in ("true", "false"):
-        return "1" if texto.lower() == "true" else "0"
-    return texto
-
-
-def _iguais(enviado: Any, atual: Any) -> bool:
-    if _normalizar(enviado) == _normalizar(atual):
-        return True
-    # cnpj/cpf/cep/telefone vão formatados de um lado e crus do outro.
-    digitos_enviado, digitos_atual = so_digitos(enviado), so_digitos(atual)
-    return bool(digitos_enviado) and digitos_enviado == digitos_atual
-
-
-def divergencias(enviado: dict, registro: dict) -> list:
-    """Campos escalares enviados que o ERP não reflete.
-
-    Só compara o que foi enviado com valor e o que o ERP devolveu: campo ausente
-    da resposta não é divergência, porque o GET do ERP não devolve tudo o que o
-    PATCH aceita. Falso positivo aqui custa uma retentativa segura; falso
-    negativo fecharia uma edição que não aconteceu — por isso a assimetria é
-    deliberada.
-    """
-    fora = []
-    for chave, valor in (enviado or {}).items():
-        if chave in CAMPOS_IGNORADOS or isinstance(valor, (list, dict)):
-            continue
-        if _normalizar(valor) == "":
-            continue
-        if chave not in registro:
-            continue
-        if not _iguais(valor, registro.get(chave)):
-            fora.append(chave)
-    return fora
-
 
 class HandlerClienteAtualizar:
     tipo = TIPO
@@ -90,7 +39,7 @@ class HandlerClienteAtualizar:
     def preparar(self, conn, item: ItemReivindicado) -> Preparo:
         payload = item.payload or {}
 
-        corpo, invalido = validadores.validar_atualizar(payload)
+        corpo, invalido = cliente_validator.validar_atualizar(payload)
         if invalido is not None:
             return invalido.preparo()
         return Preparo(
@@ -114,7 +63,7 @@ class HandlerClienteAtualizar:
     def verificar(self, conn, item: ItemReivindicado) -> Optional[Desfecho]:
         payload = item.payload or {}
         cliente = payload.get("cliente") or {}
-        documento = validadores.documento_do_payload(payload)
+        documento = cliente_validator.documento_do_payload(payload)
         if not documento or not isinstance(cliente, dict):
             return None
 

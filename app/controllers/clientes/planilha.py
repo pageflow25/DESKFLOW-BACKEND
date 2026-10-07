@@ -29,25 +29,12 @@ hoje; aqui não há nada a fazer por isso, é o motor que a aplica.
 from typing import Any, Optional
 
 from ...fila.modelos import Desfecho, Estado, ItemReivindicado, Preparo
+from ..payload_invalido import PayloadInvalido
 from .atualizar import HandlerClienteAtualizar
 from .criar import HandlerClienteCriar
-from ...validadores.comum import PayloadInvalido
+from .validators.cliente_validator import OPERACAO_ATUALIZAR, OPERACAO_CRIAR, operacao_do_payload
 
 TIPO = "cliente.planilha_linha"
-
-OPERACAO_CRIAR = "criar"
-OPERACAO_ATUALIZAR = "atualizar"
-OPERACOES = (OPERACAO_CRIAR, OPERACAO_ATUALIZAR)
-
-
-def operacao_do_payload(payload: Optional[dict]) -> Optional[str]:
-    """A operação declarada pelo produtor, ou `None` quando não é uma das duas
-    conhecidas. Nunca deduz a partir de `id_cliente` (ver o módulo)."""
-    bruto = (payload or {}).get("operacao")
-    if not isinstance(bruto, str):
-        return None
-    operacao = bruto.strip().lower()
-    return operacao if operacao in OPERACOES else None
 
 
 def _linha_de(payload: Optional[dict]) -> Any:

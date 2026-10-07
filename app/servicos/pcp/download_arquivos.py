@@ -18,7 +18,7 @@ da OP" (decisão do clique "Enviar"). Para cada OP da aprovação:
     sai no resultado do item da fila — quem grava é o PageFlow.
 
 Quem orquestra é o handler `pcp.download_arquivos`
-(`handlers/pcp_download_arquivos.py`); aqui ficam só as peças que levam o
+(`controllers/pcp/download_arquivos.py`); aqui ficam só as peças que levam o
 arquivo até a pasta da OP.
 """
 

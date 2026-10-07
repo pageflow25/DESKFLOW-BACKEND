@@ -25,11 +25,11 @@ from unittest import mock
 
 import httpx
 
-from deskflow2.integracoes.erp import ErpClient
-from deskflow2.fila.catalogo import carregar_catalogo
-from deskflow2.fila.motor import Motor
-from deskflow2.fila.registry import Registry
-from deskflow2.handlers import HandlerPcpAprovacaoEnviar, HandlerPcpOrcamentoEnviar
+from app.integracoes.erp import ErpClient
+from app.fila.catalogo import carregar_catalogo
+from app.fila.motor import Motor
+from app.fila.registry import Registry
+from app.controllers import HandlerPcpAprovacaoEnviar, HandlerPcpOrcamentoEnviar
 from tests.apoio import configuracao
 from tests.integracao.apoio_banco import TesteDeFila
 
@@ -48,14 +48,14 @@ DADOS_APROVACAO = {"id_orcamento": 555, "gerar_op": True, "itens": [{"id": 1}]}
 
 
 def _sql_da_aprovacao(dados=DADOS_APROVACAO):
-    return mock.patch("deskflow2.handlers.pcp.aprovacao_enviar.montar_dados_aprovacao",
+    return mock.patch("app.controllers.pcp.aprovacao_enviar.montar_dados_aprovacao",
                       return_value=dados)
 
 # Orçamento com a origem que o produtor não deveria mandar. Este payload para
 # ANTES de tocar o banco, e é de propósito: os três SQLs de orçamento não podem
 # ser exercitados aqui sem criar pedido, arquivo e catálogo Bremen de verdade —
 # tabela de domínio, que estes testes não escrevem. Quem cobre a escolha do SQL
-# é `tests/test_handlers_pcp.py`, com a conexão dublada.
+# é `tests/test_controllers_pcp.py`, com a conexão dublada.
 PAYLOAD_ORCAMENTO_ORIGEM_INVALIDA = {
     "orcamento_id": 700,
     "lote_id": 12,

@@ -2,7 +2,9 @@
 
 from typing import Optional, Tuple
 
-from .comum import PayloadInvalido, inteiro_positivo
+from ....integracoes.erp import ORIGEM_MODELO_DE_PRODUTO
+from ....utils.conversao import inteiro_positivo
+from ...payload_invalido import PayloadInvalido
 
 
 def validar_importar(payload: Optional[dict]) -> Tuple[Optional[dict], Optional[PayloadInvalido]]:
@@ -26,3 +28,9 @@ def validar_importar(payload: Optional[dict]) -> Tuple[Optional[dict], Optional[
             "projetor do PageFlow não tem onde gravar o produto importado.")
 
     return {"id_produto": id_produto, "id_categoria": id_categoria}, None
+
+
+def origem_do_payload(payload: Optional[dict]) -> int:
+    """`origem_erp` do payload, com 2 (modelo de produto) como padrão — o mesmo
+    default de `buscarCaracteristicasProduto` no PageFlow."""
+    return inteiro_positivo((payload or {}).get("origem_erp")) or ORIGEM_MODELO_DE_PRODUTO

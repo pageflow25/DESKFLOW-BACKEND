@@ -23,17 +23,12 @@ Contrato do resultado, lido por `services/fila/projetores/cliente.criar.js`:
 
 from typing import Any, Optional
 
-from ...integracoes.erp import ErroErp, sucesso_erp
 from ...fila.modelos import Desfecho, ItemReivindicado, Preparo
-from ..comum import (
-    classificar_falha,
-    clientes_do_envelope,
-    consultar_por_documento,
-    envelope_json,
-    id_cliente_de,
-)
-from ...validadores import clientes as validadores
-from ...validadores.comum import PayloadInvalido
+from ...integracoes.erp import ErroErp, clientes_do_envelope, envelope_json, sucesso_erp
+from ...servicos.clientes.verificacao import consultar_por_documento, id_cliente_de
+from ..payload_invalido import PayloadInvalido
+from ..resposta_erp import classificar_falha
+from .validators import cliente_validator
 
 TIPO = "cliente.criar"
 
@@ -47,7 +42,7 @@ class HandlerClienteCriar:
     def preparar(self, conn, item: ItemReivindicado) -> Preparo:
         payload = item.payload or {}
 
-        cliente, invalido = validadores.validar_criar(payload)
+        cliente, invalido = cliente_validator.validar_criar(payload)
         if invalido is not None:
             return invalido.preparo()
 
@@ -75,7 +70,7 @@ class HandlerClienteCriar:
         return Desfecho.concluido({"id_cliente": id_cliente, "resposta": dados})
 
     def verificar(self, conn, item: ItemReivindicado) -> Optional[Desfecho]:
-        documento = validadores.documento_do_payload(item.payload)
+        documento = cliente_validator.documento_do_payload(item.payload)
         if not documento:
             return None
 

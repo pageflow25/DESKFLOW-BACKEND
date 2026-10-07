@@ -25,16 +25,11 @@ Formato do resultado, lido por `services/fila/projetores/cliente.sincronizar_pag
 
 from typing import Any, Optional
 
-from ...integracoes.erp import sucesso_erp
 from ...fila.modelos import Desfecho, ItemReivindicado, Preparo
-from ..comum import (
-    classificar_falha,
-    clientes_do_envelope,
-    envelope_json,
-    total_paginas_de,
-)
-from ...validadores import clientes as validadores
-from ...validadores.comum import PayloadInvalido
+from ...integracoes.erp import clientes_do_envelope, envelope_json, sucesso_erp, total_paginas_de
+from ..payload_invalido import PayloadInvalido
+from ..resposta_erp import classificar_falha
+from .validators import cliente_validator
 
 TIPO = "cliente.sincronizar_pagina"
 
@@ -48,7 +43,7 @@ class HandlerClienteSincronizarPagina:
         self._erp = erp
 
     def preparar(self, conn, item: ItemReivindicado) -> Preparo:
-        pagina, invalido = validadores.validar_sincronizar_pagina(item.payload)
+        pagina, invalido = cliente_validator.validar_sincronizar_pagina(item.payload)
         if invalido is not None:
             return invalido.preparo()
 
@@ -65,7 +60,7 @@ class HandlerClienteSincronizarPagina:
         if bruto.status_code >= 400 or not sucesso_erp(dados):
             return classificar_falha(bruto, dados, mutacao=False)
 
-        pagina = validadores.pagina_do_payload(item.payload)
+        pagina = cliente_validator.pagina_do_payload(item.payload)
         total_paginas = total_paginas_de(dados)
         if pagina == PRIMEIRA_PAGINA and total_paginas is None:
             return Desfecho.falhou(

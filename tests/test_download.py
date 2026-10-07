@@ -4,7 +4,7 @@ import unittest
 
 import httpx
 
-from deskflow2.servicos.pcp.download_arquivos import (
+from app.servicos.pcp.download_arquivos import (
     BaixadorArquivos,
     dentro_da_base,
     nomes_unicos,

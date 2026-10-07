@@ -1,4 +1,5 @@
-"""Peças comuns aos dois handlers de ESCRITA do PCP (orçamento e aprovação).
+"""Corpo do ENVIO ao ERP nos dois controllers de escrita do PCP (orçamento e
+aprovação). Era `servicos/pcp/comum.py`.
 
 Nasceram nos despachos antigos e foram deliberadamente mantidas quando os
 handlers da fila os substituíram: uma decide o que entra na CHAMADA ao ERP
