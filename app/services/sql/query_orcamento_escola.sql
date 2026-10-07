@@ -153,8 +153,24 @@ itens_produto AS (
             MAX(mat.especificacao_form_id)
         ) AS especificacao_id_geral,
         COALESCE(
-            MAX(CASE WHEN mat.is_miolo THEN mat.arquivo_nome END),
-            MAX(mat.arquivo_nome)
+            CASE
+                WHEN ia.id_turma IS NOT NULL AND NULLIF(TRIM(t.nome), '') IS NOT NULL THEN
+                    '(#' || TRIM(t.nome) || ') - '
+                    || UPPER(TRIM(REGEXP_REPLACE(REGEXP_REPLACE(
+                        COALESCE(
+                            MAX(CASE WHEN mat.is_miolo THEN mat.arquivo_nome END),
+                            MAX(mat.arquivo_nome)
+                        ), '\.pdf$', '', 'i'), '[_-]+', ' ', 'g')))
+                    || ' - (#' || MAX(form.id) || ')'
+                ELSE
+                    UPPER(TRIM(REGEXP_REPLACE(REGEXP_REPLACE(
+                        COALESCE(
+                            MAX(CASE WHEN mat.is_miolo THEN mat.arquivo_nome END),
+                            MAX(mat.arquivo_nome)
+                        ), '\.pdf$', '', 'i'), '[_-]+', ' ', 'g')))
+                    || ' (#' || MAX(form.id) || ')'
+            END,
+            'Produto ' || MAX(mat.id_produto)
         ) AS nome_arquivo,
         MAX(mat.altura_mm) AS altura,
         MAX(mat.largura_mm) AS largura,

@@ -69,7 +69,8 @@ class OrcamentoService:
                 marcacoes.append('parcial: true')
             novo_nome = nomes.get(formulario_id)
             if novo_nome and novo_nome != item.get('titulo'):
-                item['titulo'] = novo_nome
+                titulo_original = item.get('titulo')
+                item['titulo'] = f'{titulo_original} - {novo_nome}' if titulo_original else novo_nome
                 # Aspas simples são escalares YAML seguros inclusive para ':' e '#'.
                 nome_yaml = "'" + novo_nome.replace("'", "''") + "'"
                 marcacoes.append(f'nome_pcp_alterado: {nome_yaml}')

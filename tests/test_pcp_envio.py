@@ -8,7 +8,10 @@ from app.schemas.orcamento import OrcamentoRequest, FluxoOrcamentoRequest, Gerar
 from app.services.orcamento_service import OrcamentoService
 
 
-def item(formulario, ids, titulo='arquivo_Original.pdf', obs=None, escola=False):
+TITULO_ORIGINAL = '(*Turma A) - ARQUIVO ORIGINAL - (#50)'
+
+
+def item(formulario, ids, titulo=TITULO_ORIGINAL, obs=None, escola=False):
     dados = {'_formulario_id': formulario, 'titulo': titulo, 'obs_producao': obs,
              'id_produto': 1, 'quantidade': 10}
     if escola:
@@ -31,7 +34,7 @@ class EnvioPCPTest(unittest.TestCase):
         db = self.aplicar([[a], [b]], [(50, 1), (50, 2)])
         self.assertIsNone(a['obs_producao'])
         self.assertIsNone(b['obs_producao'])
-        self.assertEqual(a['titulo'], 'arquivo_Original.pdf')
+        self.assertEqual(a['titulo'], TITULO_ORIGINAL)
         self.assertNotIn('_formulario_id', a)
         db.execute.assert_called_once()
 
@@ -39,19 +42,19 @@ class EnvioPCPTest(unittest.TestCase):
         a = item(50, [1], obs='Manter acabamento original')
         self.aplicar([[a]], [(50, 1), (50, 2)])
         self.assertEqual(a['obs_producao'], 'Manter acabamento original\nparcial: true')
-        self.assertEqual(a['titulo'], 'arquivo_Original.pdf')
+        self.assertEqual(a['titulo'], TITULO_ORIGINAL)
 
-    def test_parcial_renomeado_prioriza_nome_pcp(self):
+    def test_parcial_acrescenta_nome_pcp_sem_remover_titulo_original(self):
         a = item(50, [1])
         self.aplicar([[a]], [(50, 1), (50, 2)], {50: 'Apostila Ensino Médio - Turma A'})
-        self.assertEqual(a['titulo'], 'Apostila Ensino Médio - Turma A')
+        self.assertEqual(a['titulo'], f'{TITULO_ORIGINAL} - Apostila Ensino Médio - Turma A')
         self.assertEqual(a['obs_producao'],
                          "parcial: true\nnome_pcp_alterado: 'Apostila Ensino Médio - Turma A'")
 
     def test_total_renomeado_registra_alteracao(self):
         a = item(50, [1], escola=True)
         self.aplicar([[a]], [(50, 1)], {50: 'Nome PCP'})
-        self.assertEqual(a['titulo'], 'Nome PCP')
+        self.assertEqual(a['titulo'], f'{TITULO_ORIGINAL} - Nome PCP')
         self.assertEqual(a['obs_producao'], "nome_pcp_alterado: 'Nome PCP'")
 
     def test_lote_misto_isola_formularios_e_modos(self):
@@ -59,13 +62,13 @@ class EnvioPCPTest(unittest.TestCase):
         self.aplicar([[a, b]], [(50, 1), (50, 2), (60, 3)], {50: 'Novo'})
         self.assertIn('parcial: true', a['obs_producao'])
         self.assertIsNone(b['obs_producao'])
-        self.assertEqual(b['titulo'], 'arquivo_Original.pdf')
+        self.assertEqual(b['titulo'], TITULO_ORIGINAL)
 
     def test_nome_yaml_escapa_aspas_dois_pontos_e_hashtag(self):
         a = item(50, [1])
         self.aplicar([[a]], [(50, 1)], {50: "João's: turma #A"})
         self.assertEqual(a['obs_producao'], "nome_pcp_alterado: 'João''s: turma #A'")
-        self.assertEqual(a['titulo'], "João's: turma #A")
+        self.assertEqual(a['titulo'], f"{TITULO_ORIGINAL} - João's: turma #A")
 
     def test_nome_igual_ao_arquivo_nao_registra_alteracao(self):
         a = item(50, [1])
@@ -100,7 +103,7 @@ class EnvioPCPTest(unittest.TestCase):
                                            modo_agrupamento=modo, nomes_pcp_alterados={50: 'PCP'}, ids_distribuicoes=[1])
                 resposta = OrcamentoService.gerar_orcamento(db, request)
                 enviado = resposta.orcamentos[0].data.itens[0]
-                self.assertEqual(enviado.titulo, 'PCP')
+                self.assertEqual(enviado.titulo, f'{TITULO_ORIGINAL} - PCP')
                 self.assertIn('parcial: true', enviado.obs_producao)
                 self.assertNotIn('_formulario_id', enviado.model_dump())
                 self.assertEqual(db.execute.call_args_list[0].args[1]['ids_distribuicoes'], [1])
