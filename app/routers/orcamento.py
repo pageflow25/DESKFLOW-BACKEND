@@ -131,6 +131,8 @@ async def gerar_orcamento(
             ids_formularios=request.ids_formularios,
             status_ids=request.status_ids,
             nome_arquivo_filtro=request.nome_arquivo_filtro,
+            ids_distribuicoes=request.ids_distribuicoes,
+            nomes_pcp_alterados=request.nomes_pcp_alterados,
             grupo_lote_id=request.grupo_lote_id,
             aprovar_automaticamente=request.aprovar_automaticamente,
             data_entrega=data_entrega,

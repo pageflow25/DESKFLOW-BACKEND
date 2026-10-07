@@ -1,9 +1,29 @@
 from pydantic import BaseModel, Field, field_validator
-from typing import Annotated, List, Optional
+from typing import Annotated, Dict, List, Optional
 from datetime import date
 
 
-class OrcamentoRequest(BaseModel):
+class EnvioPCPRequest(BaseModel):
+    ids_distribuicoes: Optional[List[Annotated[int, Field(gt=0)]]] = Field(
+        None, min_length=1, description="IDs exatos das distribuições selecionadas no PCP"
+    )
+    nomes_pcp_alterados: Dict[Annotated[int, Field(gt=0)], str] = Field(
+        default_factory=dict, description="Novo nome por ID do formulário, somente neste envio"
+    )
+
+    @field_validator("nomes_pcp_alterados")
+    @classmethod
+    def validar_nomes_pcp(cls, nomes: Dict[int, str]) -> Dict[int, str]:
+        normalizados = {}
+        for formulario_id, nome in nomes.items():
+            nome = nome.strip()
+            if not nome or len(nome) > 255 or any(ord(c) < 32 or ord(c) == 127 for c in nome):
+                raise ValueError("O nome no PCP deve ter de 1 a 255 caracteres e uma única linha")
+            normalizados[formulario_id] = nome
+        return normalizados
+
+
+class OrcamentoRequest(EnvioPCPRequest):
     """Request para gerar orçamento"""
     escola_id: int = Field(..., gt=0, description="ID da escola")
     ids_produtos: List[int] = Field(..., min_length=1, description="Lista de IDs de produtos")
@@ -175,7 +195,7 @@ class ProcessamentoResultado(BaseModel):
     grupo_lote_id: Optional[int] = Field(None, description="ID sequencial do lote gerado automaticamente")
 
 
-class FluxoOrcamentoRequest(BaseModel):
+class FluxoOrcamentoRequest(EnvioPCPRequest):
     """Request para definir o fluxo de processamento"""
     tipo_fluxo: str = Field(..., description="Tipo do fluxo: 'com_distribuicao_sem_faturamento' ou 'outro'")
     escola_id: int = Field(..., gt=0, description="ID da escola")
@@ -200,7 +220,7 @@ class FluxoOrcamentoRequest(BaseModel):
     atualizar_status_fase01: bool = Field(True, description="Se false, salva orçamento sem alterar status/histórico na FASE 01")
 
 
-class GerarOrcamentoCompleto(BaseModel):
+class GerarOrcamentoCompleto(EnvioPCPRequest):
     """Request para gerar orçamento com fluxo completo"""
     escola_id: int = Field(..., gt=0, description="ID da escola")
     ids_produtos: List[int] = Field(..., min_length=1, description="Lista de IDs de produtos")

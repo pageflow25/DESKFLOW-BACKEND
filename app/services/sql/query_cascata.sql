@@ -32,6 +32,9 @@ dados_normalizados AS (
 
         -- ARQUIVO
         ar.id AS arquivo_id,
+        f.id AS formulario_id,
+        f.titulo AS formulario_titulo,
+        distri.id AS distribuicao_id,
         COALESCE(ar.nome, 'Sem arquivo vinculado') AS nome_arquivo,
         distri.quantidade as quantidade,
         ar.paginas as paginas
@@ -97,6 +100,9 @@ nivel_arquivos AS (
         JSONB_AGG(
             JSONB_BUILD_OBJECT(
                 'id', arquivo_id,
+                'formulario_id', formulario_id,
+                'formulario_titulo', formulario_titulo,
+                'distribuicao_id', distribuicao_id,
                 'arquivo', nome_arquivo,
                 'copias', quantidade,
                 'paginas', paginas

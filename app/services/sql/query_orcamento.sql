@@ -23,7 +23,8 @@ WITH parametros AS (
         CAST(:ids_formularios AS int[]) AS ids_formularios,
         CAST(:status_ids AS int[]) AS status_ids,
         CAST(:ids_unidades AS int[]) AS ids_unidades,
-        CAST(:ids_arquivos AS int[]) AS ids_arquivos
+        CAST(:ids_arquivos AS int[]) AS ids_arquivos,
+        CAST(:ids_distribuicoes AS int[]) AS ids_distribuicoes
 ),
 
 unidades_filtradas AS (
@@ -65,6 +66,7 @@ distribuicoes AS (
     LEFT JOIN escola_turmas t ON t.id = dm.id_turma
     WHERE dm.quantidade > 0
         AND dm.status_id = ANY(p.status_ids)
+        AND (p.ids_distribuicoes IS NULL OR dm.id = ANY(p.ids_distribuicoes))
         AND (
             p.datas_saida IS NULL
             OR dm.data_saida::date = ANY(p.datas_saida)
@@ -144,24 +146,9 @@ itens_produto AS (
             MAX(CASE WHEN mat.is_miolo THEN mat.especificacao_form_id END),
             MAX(mat.especificacao_form_id)
         ) AS especificacao_id_geral,
-        (
-            CASE
-                WHEN d.id_turma IS NOT NULL AND NULLIF(TRIM(d.nome_turma), '') IS NOT NULL THEN
-                    '(*' || TRIM(d.nome_turma) || ') - '
-                    || UPPER(TRIM(REGEXP_REPLACE(REGEXP_REPLACE(
-                        COALESCE(
-                            MAX(CASE WHEN mat.is_miolo THEN mat.arquivo_nome END),
-                            MAX(mat.arquivo_nome)
-                        ), '\.pdf$', '', 'i'), '[_-]+', ' ', 'g')))
-                    || ' - (#' || MAX(form.id) || ')'
-                ELSE
-                    UPPER(TRIM(REGEXP_REPLACE(REGEXP_REPLACE(
-                        COALESCE(
-                            MAX(CASE WHEN mat.is_miolo THEN mat.arquivo_nome END),
-                            MAX(mat.arquivo_nome)
-                        ), '\.pdf$', '', 'i'), '[_-]+', ' ', 'g')))
-                    || ' (#' || MAX(form.id) || ')'
-            END
+        COALESCE(
+            MAX(CASE WHEN mat.is_miolo THEN mat.arquivo_nome END),
+            MAX(mat.arquivo_nome)
         ) AS nome_arquivo,
         MAX(mat.altura_mm) AS altura,
         MAX(mat.largura_mm) AS largura,
@@ -255,6 +242,7 @@ SELECT json_strip_nulls(json_build_object(
                 json_build_object(
                     'id_produto', ip.id_produto,
                     'titulo', ip.nome_arquivo,
+                    '_formulario_id', ip.formulario_id,
                     'obs_producao', CASE
                         WHEN ip.cliente_id = 151 THEN
                             CONCAT_WS(

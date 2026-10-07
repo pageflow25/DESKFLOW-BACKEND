@@ -25,7 +25,8 @@ WITH parametros AS (
         CAST(:ids_formularios AS int[]) AS ids_formularios,
         CAST(:status_ids AS int[]) AS status_ids,
         CAST(:ids_unidades AS int[]) AS ids_unidades,
-        CAST(:ids_arquivos AS int[]) AS ids_arquivos
+        CAST(:ids_arquivos AS int[]) AS ids_arquivos,
+        CAST(:ids_distribuicoes AS int[]) AS ids_distribuicoes
 ),
 
 unidades_filtradas AS (
@@ -60,6 +61,7 @@ distribuicoes AS (
     JOIN pedido_distribuicoes dm ON dm.unidade_escolar_id = uf.id
     WHERE dm.quantidade > 0
         AND dm.status_id = ANY(p.status_ids)
+        AND (p.ids_distribuicoes IS NULL OR dm.id = ANY(p.ids_distribuicoes))
         AND (
             p.datas_saida IS NULL
             OR dm.data_saida::date = ANY(p.datas_saida)
@@ -128,7 +130,7 @@ itens_agrupados AS (
         -- entrar no GROUP BY do CTE seguinte (itens_produto).
         jsonb_agg(DISTINCT d.distribuicao_id) AS ids_distribuicao
     FROM distribuicoes d
-    GROUP BY d.pedido_item_carrinho_id, d.id_turma
+    GROUP BY d.formulario_id, d.pedido_item_carrinho_id, d.id_turma
 ),
 
 -- Agrega os metadados do item comercial a partir dos materiais da distribuição
@@ -151,24 +153,8 @@ itens_produto AS (
             MAX(mat.especificacao_form_id)
         ) AS especificacao_id_geral,
         COALESCE(
-            CASE
-                WHEN ia.id_turma IS NOT NULL AND NULLIF(TRIM(t.nome), '') IS NOT NULL THEN
-                    '(#' || TRIM(t.nome) || ') - '
-                    || UPPER(TRIM(REGEXP_REPLACE(REGEXP_REPLACE(
-                        COALESCE(
-                            MAX(CASE WHEN mat.is_miolo THEN mat.arquivo_nome END),
-                            MAX(mat.arquivo_nome)
-                        ), '\.pdf$', '', 'i'), '[_-]+', ' ', 'g')))
-                    || ' - (#' || MAX(form.id) || ')'
-                ELSE
-                    UPPER(TRIM(REGEXP_REPLACE(REGEXP_REPLACE(
-                        COALESCE(
-                            MAX(CASE WHEN mat.is_miolo THEN mat.arquivo_nome END),
-                            MAX(mat.arquivo_nome)
-                        ), '\.pdf$', '', 'i'), '[_-]+', ' ', 'g')))
-                    || ' (#' || MAX(form.id) || ')'
-            END,
-            'Produto ' || MAX(mat.id_produto)
+            MAX(CASE WHEN mat.is_miolo THEN mat.arquivo_nome END),
+            MAX(mat.arquivo_nome)
         ) AS nome_arquivo,
         MAX(mat.altura_mm) AS altura,
         MAX(mat.largura_mm) AS largura,
@@ -254,6 +240,7 @@ SELECT json_strip_nulls(json_build_object(
                 json_build_object(
                     'id_produto', ip.id_produto,
                     'titulo', ip.nome_arquivo,
+                    '_formulario_id', ip.formulario_id,
                     'obs_producao', CONCAT_WS(
                         CHR(10) || CHR(10),
                         ip.obs_producao,

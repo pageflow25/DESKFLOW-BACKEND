@@ -5,6 +5,9 @@ from typing import Optional, Any
 class ArquivoInfo(BaseModel):
     """Informações de arquivo individual"""
     id: Optional[int] = None
+    formulario_id: Optional[int] = None
+    formulario_titulo: Optional[str] = None
+    distribuicao_id: Optional[int] = None
     arquivo: str
     copias: int
     paginas: Optional[int] = None

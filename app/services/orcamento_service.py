@@ -37,6 +37,48 @@ def _carregar_query(nome_arquivo: str) -> str:
 class OrcamentoService:
     """Service para operações de orçamento"""
 
+    @staticmethod
+    def aplicar_observacoes_pcp(db: Session, orcamentos_raw, nomes: Dict[int, str]) -> None:
+        """Compara a seleção inteira com o pedido, identificado pelo formulário."""
+        itens = [item for row in orcamentos_raw for item in row[0]['data'].get('itens', [])]
+        selecionados: Dict[int, set] = {}
+        for item in itens:
+            formulario_id = item['_formulario_id']
+            ids = item.get('ids_distribuicao') or [
+                c['id_distribuicao'] for c in item.get('componentes', [])
+                if c.get('id_distribuicao') is not None
+            ]
+            selecionados.setdefault(formulario_id, set()).update(ids)
+
+        if not selecionados:
+            return
+
+        totais = {fid: set() for fid in selecionados}
+        distribuicoes = db.execute(
+            text("SELECT formulario_id, id FROM pedido_distribuicoes "
+                 "WHERE formulario_id = ANY(CAST(:ids_formularios AS int[])) AND quantidade > 0"),
+            {'ids_formularios': list(selecionados)},
+        ).all()
+        for formulario_id, distribuicao_id in distribuicoes:
+            totais[formulario_id].add(distribuicao_id)
+
+        for item in itens:
+            formulario_id = item.pop('_formulario_id')
+            marcacoes = []
+            if totais[formulario_id] - selecionados[formulario_id]:
+                marcacoes.append('parcial: true')
+            novo_nome = nomes.get(formulario_id)
+            if novo_nome and novo_nome != item.get('titulo'):
+                item['titulo'] = novo_nome
+                # Aspas simples são escalares YAML seguros inclusive para ':' e '#'.
+                nome_yaml = "'" + novo_nome.replace("'", "''") + "'"
+                marcacoes.append(f'nome_pcp_alterado: {nome_yaml}')
+            if marcacoes:
+                item['obs_producao'] = '\n'.join(
+                    [item['obs_producao']] + marcacoes
+                    if item.get('obs_producao') else marcacoes
+                )
+
     # ================================================================
     # CACHE DE STATUS — armazena apenas o ID (int) para evitar objetos
     # ORM detached entre sessões diferentes
@@ -281,6 +323,7 @@ class OrcamentoService:
                 'ids_unidades': getattr(request, 'ids_unidades', None),
                 'ids_arquivos': getattr(request, 'ids_arquivos', None),
                 'nome_arquivo_filtro': getattr(request, 'nome_arquivo_filtro', None),
+                'ids_distribuicoes': request.ids_distribuicoes,
             }
 
             logger.info(f"Parâmetros da query ({sql_filename}): {params}")
@@ -288,6 +331,7 @@ class OrcamentoService:
             # Executar query
             result = db.execute(text(query_sql), params)
             orcamentos_raw = result.fetchall()
+            OrcamentoService.aplicar_observacoes_pcp(db, orcamentos_raw, request.nomes_pcp_alterados)
 
             logger.info(f"Query retornou {len(orcamentos_raw)} linhas")
             
