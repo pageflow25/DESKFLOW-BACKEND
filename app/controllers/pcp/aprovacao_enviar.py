@@ -125,6 +125,11 @@ class HandlerPcpAprovacaoEnviar:
         if invalido is not None:
             return invalido.preparo()
 
+        # Classe do item e url_webhook têm que concordar (antes do SQL e da consulta prévia).
+        modo, invalido = pcp_validator.modo_da_chamada(item.classe, payload)
+        if invalido is not None:
+            return invalido.preparo()
+
         # SELECT em `sql/aprovacao.sql`, na transação curta do preparo — sem
         # I/O externa, como o SQL do orçamento.
         campos, invalido = pcp_validator.aprovacao_dos_dados(
@@ -141,8 +146,7 @@ class HandlerPcpAprovacaoEnviar:
                 "itens": itens,
             },
         }
-        corpo = com_modo_assincrono(
-            corpo, pcp_validator.modo_envio_de(payload), pcp_validator.url_webhook_de(payload))
+        corpo = com_modo_assincrono(corpo, modo, pcp_validator.url_webhook_de(payload))
         return Preparo(
             payload_enviado=corpo_para_auditoria(corpo),
             chamar=lambda: self._chamar(id_orcamento, itens, corpo),
@@ -167,7 +171,8 @@ class HandlerPcpAprovacaoEnviar:
         if isinstance(bruto, PayloadInvalido):
             return bruto.desfecho()
 
-        modo = pcp_validator.modo_envio_de(item.payload)
+        # Já conferido no preparo: chegar aqui significa classe e URL coerentes.
+        modo, _ = pcp_validator.modo_da_chamada(item.classe, item.payload)
 
         if isinstance(bruto, ConsultaIndisponivel):
             return Desfecho.retentar(

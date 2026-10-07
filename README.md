@@ -51,6 +51,7 @@ Cada `tipo_codigo` tem um controller em `app/controllers/`:
 | `produto.importar` | `GET /api/v1/caracteristicasproduto` | sim |
 | `pcp.orcamento.enviar` | `POST /api/v1/orcamento` | não |
 | `pcp.aprovacao.enviar` | `GET /api/v1/proposta` + `POST /api/v1/proposta/aprovar` | não |
+| `precificacao.custo.buscar` | `POST /api/v1/orcamento` — o mesmo handler de `pcp.orcamento.enviar`, classe síncrona (custo da Calculadora de Orçamento do PageFlow) | não |
 | `pcp.download_arquivos` | Vercel Blob → `DOWNLOAD_BASE_PATH` (só registrado com a pasta configurada) | sim |
 
 Cada execução termina num destes desfechos: `concluido`, `falhou` (o destino
@@ -108,9 +109,21 @@ de fora). A pasta de destino é
 escola, e a linha de `downloads_bremen` (que o PageFlow grava a partir do
 resultado) vai com `integra_pedido_produto_id` e `arquivo_pdf_id` NULL.
 
-**Síncrono ou assíncrono** é decidido pelo PageFlow ao enfileirar: com
-`url_webhook` no payload a chamada vai assíncrona e o item fica
-`aguardando_callback`; sem ela, vai síncrona e a resposta do POST é o resultado.
+**Síncrono ou assíncrono** segue a **classe do tipo** (a da tela de configuração da
+fila do PageFlow), e a `url_webhook` do payload tem que concordar com ela
+(`pcp_validator.modo_da_chamada`, 2026-10-07):
+
+| Classe | `url_webhook` | Resultado |
+|---|---|---|
+| `sincrono` | ausente | chamada síncrona: a resposta do POST é o resultado |
+| `sincrono` | presente | falha definitiva `WEBHOOK_EM_TIPO_SINCRONO`, nenhuma chamada sai |
+| `assincrono` | presente | chamada assíncrona: o item fica `aguardando_callback` |
+| `assincrono` | ausente | falha definitiva `ASSINCRONO_SEM_WEBHOOK`, nenhuma chamada sai |
+
+Vale para os tipos que podem usar webhook (`pcp.orcamento.enviar`,
+`pcp.aprovacao.enviar` e `precificacao.custo.buscar`). Os outros tipos
+assíncronos nunca mandam URL. Antes o modo saía só da URL, e um produtor que a
+mandasse ou esquecesse por engano trocava o modo sem ninguém ver.
 
 ## Ciclos do worker
 

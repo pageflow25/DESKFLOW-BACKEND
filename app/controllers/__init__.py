@@ -30,7 +30,7 @@ from .clientes.planilha import HandlerClientePlanilhaLinha
 from .clientes.sincronizar_pagina import HandlerClienteSincronizarPagina
 from .pcp.aprovacao_enviar import HandlerPcpAprovacaoEnviar
 from .pcp.download_arquivos import HandlerPcpDownloadArquivos
-from .pcp.orcamento_enviar import HandlerPcpOrcamentoEnviar
+from .pcp.orcamento_enviar import HandlerPcpOrcamentoEnviar, HandlerPrecificacaoCustoBuscar
 from .produtos.importar import HandlerProdutoImportar
 
 logger = logging.getLogger(__name__)
@@ -59,6 +59,8 @@ def registrar_erp_wingraph(registry, erp, *, baixador=None, pasta_download: str 
         HandlerProdutoImportar(erp),
         HandlerPcpOrcamentoEnviar(erp),
         HandlerPcpAprovacaoEnviar(erp),
+        # Mesmo POST de orçamento, tipo síncrono da Calculadora de Orçamento do PageFlow.
+        HandlerPrecificacaoCustoBuscar(erp),
     ]
     if baixador is not None and pasta_download:
         handlers.append(HandlerPcpDownloadArquivos(baixador, pasta_download))
@@ -80,6 +82,7 @@ __all__ = [
     "HandlerPcpAprovacaoEnviar",
     "HandlerPcpDownloadArquivos",
     "HandlerPcpOrcamentoEnviar",
+    "HandlerPrecificacaoCustoBuscar",
     "HandlerProdutoImportar",
     "registrar_erp_wingraph",
 ]

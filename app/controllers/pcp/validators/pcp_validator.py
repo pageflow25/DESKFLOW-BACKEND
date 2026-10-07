@@ -9,12 +9,14 @@ mensagem E o codigo, porque as recusas daqui nao sao todas iguais:
 `SEM_ID_ORCAMENTO` e `SEM_ITENS_APROVADOS` sao distinguiveis de um payload
 generico malformado, e o operador precisa dessa diferenca.
 
-`modo_envio_de` e `url_webhook_de` moram aqui, e nao em
-`controllers/pcp/resposta_assincrona.py`, porque leem o PAYLOAD. O que ficou la e `desfecho_do_ack`, que le a RESPOSTA.
+`modo_envio_de`, `url_webhook_de` e `modo_da_chamada` moram aqui, e nao em
+`controllers/pcp/resposta_assincrona.py`, porque leem o PAYLOAD (e a classe do item). O que ficou la e
+`desfecho_do_ack`, que le a RESPOSTA.
 """
 
 from typing import Any, Optional, Tuple
 
+from ....fila.catalogo import CLASSE_ASSINCRONO, CLASSE_SINCRONO
 from ....repositorios.pcp import ORIGEM_ESCOLA, ORIGEM_INTEGRACAO, OrcamentoReivindicado
 from ....utils.conversao import inteiro_positivo
 from ...payload_invalido import PayloadInvalido
@@ -33,6 +35,43 @@ def url_webhook_de(payload: Optional[dict]) -> Optional[str]:
 def modo_envio_de(payload: Optional[dict]) -> str:
     """`assincrono` só quando existe webhook para o ERP devolver o resultado."""
     return MODO_ASSINCRONO if url_webhook_de(payload) else MODO_SINCRONO
+
+
+def modo_da_chamada(classe: str, payload: Optional[dict]) -> Tuple[Optional[str], Optional[PayloadInvalido]]:
+    """O modo da chamada ao ERP, conferido nos DOIS sinais (2026-10-07).
+
+    A classe do tipo (a da tela de configuração da fila) diz o modo; a `url_webhook` do payload tem
+    que concordar com ela:
+
+    | classe     | url_webhook | resultado                                  |
+    |------------|-------------|--------------------------------------------|
+    | sincrono   | ausente     | síncrono                                   |
+    | sincrono   | presente    | recusa `WEBHOOK_EM_TIPO_SINCRONO`          |
+    | assincrono | presente    | assíncrono                                 |
+    | assincrono | ausente     | recusa `ASSINCRONO_SEM_WEBHOOK`            |
+
+    Antes o modo saía só da URL: um produtor que a mandasse (ou esquecesse) por engano trocava o modo
+    sem ninguém ver — e um envio assíncrono num tipo síncrono deixa o usuário da tela esperando um
+    webhook que pode levar horas. Divergência agora é falha DEFINITIVA, visível na tela da fila, e
+    nenhuma chamada sai. Só vale para os tipos que podem usar webhook (os POSTs do PCP); os demais
+    tipos assíncronos nunca mandam URL.
+    """
+    tem_url = url_webhook_de(payload) is not None
+    if classe == CLASSE_SINCRONO:
+        if tem_url:
+            return None, PayloadInvalido(
+                "Tipo de classe síncrona recebeu url_webhook: a tela está esperando o resultado na hora, "
+                "e o ERP o devolveria pelo webhook. Confira o produtor no PageFlow.",
+                "WEBHOOK_EM_TIPO_SINCRONO")
+        return MODO_SINCRONO, None
+    if classe == CLASSE_ASSINCRONO:
+        if not tem_url:
+            return None, PayloadInvalido(
+                "Tipo de classe assíncrona sem url_webhook: o ERP não teria para onde devolver o resultado. "
+                "Confira BACKEND_PUBLIC_BASE_URL no PageFlow.",
+                "ASSINCRONO_SEM_WEBHOOK")
+        return MODO_ASSINCRONO, None
+    return None, PayloadInvalido(f"Classe de fila desconhecida: {classe!r}.", "CLASSE_DESCONHECIDA")
 
 
 def _data_entrega_valida(valor: Any) -> bool:

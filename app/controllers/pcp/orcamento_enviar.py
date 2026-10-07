@@ -46,6 +46,7 @@ from .resposta_assincrona import desfecho_do_ack
 from .validators import pcp_validator
 
 TIPO = "pcp.orcamento.enviar"
+TIPO_PRECIFICACAO_CUSTO_BUSCAR = "precificacao.custo.buscar"
 
 
 def id_orcamento_de(dados: Optional[dict]) -> Optional[int]:
@@ -66,6 +67,11 @@ class HandlerPcpOrcamentoEnviar:
         if invalido is not None:
             return invalido.preparo()
 
+        # Classe do item e url_webhook têm que concordar (antes de qualquer SQL).
+        modo, invalido = pcp_validator.modo_da_chamada(item.classe, item.payload)
+        if invalido is not None:
+            return invalido.preparo()
+
         try:
             # Roda na transação curta do preparo, como o despacho antigo rodava
             # na sua: é SELECT no SQL da origem, sem I/O externa.
@@ -74,7 +80,7 @@ class HandlerPcpOrcamentoEnviar:
             # Cadastro incompleto ou item que o SQL descartou: definitivo.
             return preparo_invalido(str(exc), "ORCAMENTO_INCOMPLETO")
 
-        corpo = com_modo_assincrono(corpo, orcamento.modo_envio, orcamento.url_webhook)
+        corpo = com_modo_assincrono(corpo, modo, orcamento.url_webhook)
         return Preparo(
             # `corpo_para_auditoria` tira a url_webhook, que carrega o token do
             # webhook e apareceria na tela da fila.
@@ -90,7 +96,8 @@ class HandlerPcpOrcamentoEnviar:
         if bruto.status_code >= 400 or not sucesso_erp(dados):
             return classificar_falha(bruto, dados, mutacao=True)
 
-        modo = pcp_validator.modo_envio_de(item.payload)
+        # Já conferido no preparo: chegar aqui significa classe e URL coerentes.
+        modo, _ = pcp_validator.modo_da_chamada(item.classe, item.payload)
         id_orcamento = id_orcamento_de(dados)
         resultado = {"id_orcamento": id_orcamento, "modo_envio": modo, "resposta": dados}
 
@@ -123,3 +130,16 @@ class HandlerPcpOrcamentoEnviar:
         com o `payload_enviado` ao lado. Mesma situação de `vendedor.listar_pagina`.
         """
         return None
+
+
+class HandlerPrecificacaoCustoBuscar(HandlerPcpOrcamentoEnviar):
+    """`precificacao.custo.buscar` — o MESMO POST /api/v1/orcamento, para a Calculadora de Orçamento
+    do PageFlow buscar o custo dos itens (PageFlow: docs/calculadora-orcamento/14-tipo-custo-sincrono.md).
+
+    Herda tudo: payload, SQL, interpretação e a regra classe × url_webhook. A diferença está no
+    catálogo, não no código — o tipo é da classe SÍNCRONA (há alguém esperando na tela), então chega
+    sem url_webhook e a resposta do POST é o resultado. O código próprio é o que separa, nos logs e
+    na tela da fila, a cotação da Calculadora do envio de lote do PCP.
+    """
+
+    tipo = TIPO_PRECIFICACAO_CUSTO_BUSCAR

@@ -31,6 +31,7 @@ from app.controllers import (
     HandlerPcpAprovacaoEnviar,
     HandlerPcpDownloadArquivos,
     HandlerPcpOrcamentoEnviar,
+    HandlerPrecificacaoCustoBuscar,
 )
 from app.servicos.pcp.payload import _consulta
 from tests.apoio import MotorFalso, configuracao
@@ -88,9 +89,9 @@ class ConexaoFalsa:
         )
 
 
-def _item(payload, *, tipo="pcp.orcamento.enviar", tentativa=1, max_tentativas=5):
+def _item(payload, *, tipo="pcp.orcamento.enviar", classe="assincrono", tentativa=1, max_tentativas=5):
     return ItemReivindicado(
-        id=7, tipo_codigo=tipo, classe="assincrono", destino="erp_wingraph", prioridade=500,
+        id=7, tipo_codigo=tipo, classe=classe, destino="erp_wingraph", prioridade=500,
         origem="pcp", status_id=3, grupo_id=None, ordem_no_grupo=None,
         correlation_id=uuid.uuid4(), chave_bloqueio=None, chave_idempotencia=None,
         payload=payload, payload_enviado=None, tentativa=tentativa, max_tentativas=max_tentativas,
@@ -184,7 +185,7 @@ class TestOrcamentoPreparo(unittest.TestCase):
         conexao = ConexaoFalsa(linhas=[LINHA_SQL])
 
         preparo = HandlerPcpOrcamentoEnviar(_erp(roteador)).preparar(
-            conexao, _item(_payload_orcamento(url_webhook=None)))
+            conexao, _item(_payload_orcamento(url_webhook=None), classe="sincrono"))
 
         self.assertNotIn("assincrono", preparo.payload_enviado)
         self.assertNotIn("url_webhook", preparo.payload_enviado)
@@ -239,10 +240,10 @@ class TestOrcamentoPayloadInvalido(unittest.TestCase):
 
 
 class TestOrcamentoInterpretacao(unittest.TestCase):
-    def _desfecho(self, resposta, payload=None):
+    def _desfecho(self, resposta, payload=None, classe="assincrono"):
         roteador, vistos = _roteador(POST=resposta)
         handler = HandlerPcpOrcamentoEnviar(_erp(roteador))
-        item = _item(payload or _payload_orcamento())
+        item = _item(payload or _payload_orcamento(), classe=classe)
         preparo = handler.preparar(ConexaoFalsa(linhas=[LINHA_SQL]), item)
         return handler.interpretar(item, preparo.chamar()), vistos
 
@@ -265,7 +266,7 @@ class TestOrcamentoInterpretacao(unittest.TestCase):
     def test_resposta_sincrona_com_id_orcamento_conclui(self):
         desfecho, _ = self._desfecho(
             httpx.Response(200, json=_envelope_orcamento(id_orcamento=555)),
-            payload=_payload_orcamento(url_webhook=None))
+            payload=_payload_orcamento(url_webhook=None), classe="sincrono")
 
         self.assertIs(desfecho.estado, Estado.CONCLUIDO)
         self.assertEqual(desfecho.resultado["id_orcamento"], 555)
@@ -282,7 +283,7 @@ class TestOrcamentoInterpretacao(unittest.TestCase):
     def test_sucesso_sem_id_orcamento_e_incerto(self):
         desfecho, _ = self._desfecho(
             httpx.Response(200, json={"success": True, "data": {}}),
-            payload=_payload_orcamento(url_webhook=None))
+            payload=_payload_orcamento(url_webhook=None), classe="sincrono")
 
         self.assertIs(desfecho.estado, Estado.INCERTO)
         self.assertEqual(desfecho.erro_codigo, "ERP_SUCESSO_SEM_ID")
@@ -378,7 +379,7 @@ def _proposta(status_por_item):
 
 
 class TestAprovacao(unittest.TestCase):
-    def _executar(self, payload, *, get=None, post=None, conexao=None):
+    def _executar(self, payload, *, get=None, post=None, conexao=None, classe="assincrono"):
         por_metodo = {}
         if get is not None:
             por_metodo["GET"] = get
@@ -386,7 +387,7 @@ class TestAprovacao(unittest.TestCase):
             por_metodo["POST"] = post
         roteador, vistos = _roteador(**por_metodo)
         handler = HandlerPcpAprovacaoEnviar(_erp(roteador))
-        item = _item(payload, tipo="pcp.aprovacao.enviar")
+        item = _item(payload, tipo="pcp.aprovacao.enviar", classe=classe)
         preparo = handler.preparar(conexao or _conexao_aprovacao(), item)
         return handler.interpretar(item, preparo.chamar()), vistos, preparo
 
@@ -417,7 +418,8 @@ class TestAprovacao(unittest.TestCase):
         desfecho, _, _ = self._executar(
             _payload_aprovacao(url_webhook=None),
             get=httpx.Response(200, json=_proposta({1: "Aberta", 2: "Aberta"})),
-            post=httpx.Response(200, json={"success": True, "data": [{"id_proposta": 9, "ops": []}]}))
+            post=httpx.Response(200, json={"success": True, "data": [{"id_proposta": 9, "ops": []}]}),
+            classe="sincrono")
 
         self.assertIs(desfecho.estado, Estado.CONCLUIDO)
         self.assertEqual(desfecho.resultado["modo_envio"], "sincrono")
@@ -625,12 +627,89 @@ class TestDownloadArquivos(unittest.TestCase):
         self.assertEqual(conexao.executados, [], "sem aprovacao_id não se consulta nada")
 
 
+class TestModoDaChamada(unittest.TestCase):
+    """Classe do item x url_webhook (2026-10-07): os dois sinais têm que concordar. Divergência é
+    falha DEFINITIVA antes de qualquer SQL ou chamada — o modo nunca é escolhido em silêncio."""
+
+    def _orcamento(self, classe, url_webhook):
+        roteador, vistos = _roteador(POST=httpx.Response(200, json=_envelope_orcamento(id_orcamento=555)))
+        handler = HandlerPcpOrcamentoEnviar(_erp(roteador))
+        item = _item(_payload_orcamento(url_webhook=url_webhook), classe=classe)
+        conexao = ConexaoFalsa(linhas=[LINHA_SQL])
+        preparo = handler.preparar(conexao, item)
+        return handler.interpretar(item, preparo.chamar()), vistos, conexao, preparo
+
+    def test_sincrono_sem_url_chama_na_hora(self):
+        desfecho, vistos, _, preparo = self._orcamento("sincrono", None)
+
+        self.assertIs(desfecho.estado, Estado.CONCLUIDO)
+        self.assertEqual(desfecho.resultado["modo_envio"], "sincrono")
+        self.assertNotIn("assincrono", preparo.payload_enviado)
+        self.assertEqual(len(vistos), 1)
+
+    def test_sincrono_com_url_e_recusado_sem_sql_nem_chamada(self):
+        desfecho, vistos, conexao, _ = self._orcamento("sincrono", WEBHOOK)
+
+        self.assertIs(desfecho.estado, Estado.FALHOU)
+        self.assertEqual(desfecho.erro_codigo, "WEBHOOK_EM_TIPO_SINCRONO")
+        self.assertEqual(conexao.executados, [])
+        self.assertEqual(vistos, [])
+
+    def test_assincrono_com_url_manda_o_webhook(self):
+        _, _, _, preparo = self._orcamento("assincrono", WEBHOOK)
+
+        self.assertTrue(preparo.payload_enviado["assincrono"])
+        self.assertEqual(preparo.payload_enviado["url_webhook"], "[omitida]")
+
+    def test_assincrono_sem_url_e_recusado_sem_sql_nem_chamada(self):
+        desfecho, vistos, conexao, _ = self._orcamento("assincrono", None)
+
+        self.assertIs(desfecho.estado, Estado.FALHOU)
+        self.assertEqual(desfecho.erro_codigo, "ASSINCRONO_SEM_WEBHOOK")
+        self.assertEqual(conexao.executados, [])
+        self.assertEqual(vistos, [])
+
+    def test_aprovacao_aplica_a_mesma_regra(self):
+        for classe, url, codigo in (("sincrono", WEBHOOK, "WEBHOOK_EM_TIPO_SINCRONO"),
+                                    ("assincrono", None, "ASSINCRONO_SEM_WEBHOOK")):
+            with self.subTest(classe=classe):
+                roteador, vistos = _roteador()
+                handler = HandlerPcpAprovacaoEnviar(_erp(roteador))
+                item = _item(_payload_aprovacao(url_webhook=url), tipo="pcp.aprovacao.enviar", classe=classe)
+                conexao = _conexao_aprovacao()
+
+                desfecho = handler.interpretar(item, handler.preparar(conexao, item).chamar())
+
+                self.assertIs(desfecho.estado, Estado.FALHOU)
+                self.assertEqual(desfecho.erro_codigo, codigo)
+                self.assertEqual(conexao.executados, [])
+                self.assertEqual(vistos, [], "nem a consulta prévia pode sair")
+
+    def test_custo_da_calculadora_conclui_sincrono_com_o_mesmo_corpo(self):
+        roteador, vistos = _roteador(POST=httpx.Response(200, json=_envelope_orcamento(id_orcamento=19656)))
+        handler = HandlerPrecificacaoCustoBuscar(_erp(roteador))
+        item = _item(_payload_orcamento(url_webhook=None), tipo="precificacao.custo.buscar", classe="sincrono")
+
+        desfecho = handler.interpretar(item, handler.preparar(ConexaoFalsa(linhas=[LINHA_SQL]), item).chamar())
+
+        self.assertIs(desfecho.estado, Estado.CONCLUIDO)
+        self.assertEqual(desfecho.resultado["id_orcamento"], 19656)
+        self.assertEqual(desfecho.resultado["modo_envio"], "sincrono")
+        self.assertEqual(len(vistos), 1)
+
+
 class TestRegistroDosTiposDePcp(unittest.TestCase):
     def test_os_dois_tipos_de_escrita_sempre_entram(self):
         registry = registry_padrao(object())
 
         self.assertIsInstance(registry.obter("pcp.orcamento.enviar"), HandlerPcpOrcamentoEnviar)
         self.assertIsInstance(registry.obter("pcp.aprovacao.enviar"), HandlerPcpAprovacaoEnviar)
+
+    def test_custo_da_calculadora_usa_o_handler_de_orcamento_com_codigo_proprio(self):
+        handler = registry_padrao(object()).obter("precificacao.custo.buscar")
+
+        self.assertIsInstance(handler, HandlerPrecificacaoCustoBuscar)
+        self.assertIsInstance(handler, HandlerPcpOrcamentoEnviar)
 
     def test_download_entra_so_com_baixador_e_pasta(self):
         sem_pasta = registry_padrao(object(), baixador=BaixadorFalso(), pasta_download="")
