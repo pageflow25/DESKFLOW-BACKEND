@@ -30,13 +30,14 @@ class OrcamentoReivindicado:
     `origem` (orcamento_api_lotes.origem) diz de onde vêm os itens, e as duas
     listas são EXCLUSIVAS — o CHECK `ck_orcamento_api_itens_origem` garante
     isso no banco:
-      - 'escola'     -> `pedido_distribuicao_ids`, com `modo_agrupamento`;
-      - 'integracao' -> `integra_pedido_produto_ids`, sem modo (a divisão é
-        fixa: 1 orçamento por pedido do parceiro).
+      - 'escola'     -> `pedido_distribuicao_ids` (um orçamento por turma, o
+        agrupamento do SQL Agrupado);
+      - 'integracao' -> `integra_pedido_produto_ids` (1 orçamento por pedido
+        do parceiro).
 
     Use `ids_origem` para não ramificar por origem em cada chamador.
 
-    É a representação que os três SQLs de `sql/` e as validações de
+    É a representação que os dois SQLs de `sql/` e as validações de
     `servicos/pcp/payload.py` enxergam. O handler `pcp.orcamento.enviar` a monta a
     partir do payload do item da fila; o `dry-run` da linha de comando a lê do
     banco com `carregar_orcamento`.
@@ -47,7 +48,6 @@ class OrcamentoReivindicado:
     lote_id: int
     modo_envio: Optional[str]
     url_webhook: Optional[str]
-    modo_agrupamento: Optional[str]
     cliente_id: Optional[int]
     vendedor_id: Optional[int]
     forma_pagamento: Optional[int]
@@ -56,7 +56,7 @@ class OrcamentoReivindicado:
     integra_pedido_produto_ids: list = field(default_factory=list)
     # Nas DUAS origens desde 2026-09-24: a data de entrega que o usuário
     # escolheu no "Enviar", já como 'DD/MM/YYYY', para entrar no `obs_producao`
-    # do item (os três SQLs de orçamento). Na origem escola ela MANDA sobre a
+    # do item (os dois SQLs de orçamento). Na origem escola ela MANDA sobre a
     # `pedido_formularios.data_entrega`; vem None nos lotes de escola que já
     # estavam na fila, e aí o SQL cai de volta na data do formulário.
     # Não é a data que vai ao ERP como data do item — essa é a `data_saida`,
@@ -74,13 +74,12 @@ class OrcamentoReivindicado:
 # --- Orçamentos -----------------------------------------------------------------
 
 def carregar_orcamento(conn, orcamento_id: int) -> Optional[OrcamentoReivindicado]:
-    """Dados para montar a chamada: grupo (cliente/vendedor/forma), modo do
+    """Dados para montar a chamada: grupo (cliente/vendedor/forma), origem do
     lote e os pedidos do orçamento. Usado pelo `dry-run`, sem claim."""
     linha = conn.execute(text("""
         SELECT o.id, o.orcamento_api_requisicao_id, o.modo_envio::text AS modo_envio, o.url_webhook,
                r.orcamento_api_lote_id AS lote_id, r.cliente_id, r.vendedor_id, r.forma_pagamento,
                p.origem::text AS origem,
-               p.modo_agrupamento::text AS modo_agrupamento,
                to_char(o.data_entrega, 'DD/MM/YYYY') AS data_entrega
           FROM orcamento_api_orcamentos o
           JOIN orcamento_api_requisicoes r ON r.id = o.orcamento_api_requisicao_id
@@ -108,7 +107,6 @@ def carregar_orcamento(conn, orcamento_id: int) -> Optional[OrcamentoReivindicad
         lote_id=linha["lote_id"],
         modo_envio=linha["modo_envio"],
         url_webhook=linha["url_webhook"],
-        modo_agrupamento=linha["modo_agrupamento"],
         cliente_id=linha["cliente_id"],
         vendedor_id=linha["vendedor_id"],
         forma_pagamento=linha["forma_pagamento"],

@@ -2,8 +2,9 @@
 
 Por que este arquivo existe: a migration 20260923110000-contract-papel-antigo do
 PageFlow dropou `pedido_especificacoes.id_papel` e moveu `bremen_tamanho_papel`
-para o schema `contract_backup`. Os SQLs de `orcamento_agrupado` e
-`orcamento_unidade` ainda traziam um `LEFT JOIN bremen_tamanho_papel` como
+para o schema `contract_backup`. Os SQLs de `orcamento_agrupado` e do antigo
+`orcamento_unidade` (apagado em 2026-10-07) ainda traziam um
+`LEFT JOIN bremen_tamanho_papel` como
 reserva para pedidos antigos — e um LEFT JOIN não fica "vazio" quando a tabela
 não existe, ele derruba a query inteira com `relation does not exist`. O ciclo
 antigo do PCP já falhava assim, e a falha só aparecia no momento do envio.
@@ -65,7 +66,9 @@ class TestSqlDeOrcamentoCompila(TesteDeFila):
     def test_existem_sqls_de_orcamento_para_conferir(self):
         # Sem isto, renomear a pasta faria a suíte passar sem conferir nada.
         arquivos = [arquivo for arquivo in _sqls() if arquivo.exists()]
-        self.assertGreaterEqual(len(arquivos), 4, f"esperados ao menos 3 SQLs em {SQL_DIR}")
+        # Agrupado + integração + aprovação. Eram 4 até 2026-10-07, quando o
+        # orcamento_unidade.sql saiu junto com o modo de agrupamento.
+        self.assertGreaterEqual(len(arquivos), 3, f"esperados ao menos 3 SQLs em {SQL_DIR}")
 
     def test_o_postgres_aceita_cada_sql_de_orcamento(self):
         arquivos = _sqls()

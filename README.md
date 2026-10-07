@@ -61,14 +61,19 @@ assíncrono; o resultado vem pelo webhook).
 
 ### Orçamentos do PCP
 
-O SQL é escolhido pela **origem** do lote (`orcamento_api_lotes.origem`) e,
-na origem escola, pelo modo de agrupamento:
+O SQL é escolhido só pela **origem** do lote (`orcamento_api_lotes.origem`):
 
-| Origem / modo | SQL | Orçamentos | Itens |
+| Origem | SQL | Orçamentos | Itens |
 |---|---|---|---|
-| escola, `unidade` (normal) | `sql/orcamento_unidade.sql` | 1 por unidade escolar | 1 por pedido (`codigo_externo` = id do `pedido_distribuicoes`) |
-| escola, `escola` | `sql/orcamento_agrupado.sql` | 1 por turma (pedidos sem turma formam um) | soma as unidades do mesmo item (`codigo_externo` = ids separados por vírgula) |
+| escola | `sql/orcamento_agrupado.sql` (SQL Agrupado) | 1 por turma (pedidos sem turma formam um) | soma as unidades do mesmo item (`codigo_externo` = ids separados por vírgula) |
 | **integração** | `sql/orcamento_integracao.sql` | 1 por pedido do parceiro (`integra_pedidos`) | 1 por produto (`codigo_externo` = id do `integra_pedido_produtos`) |
+
+Até 2026-10-07 a origem escola tinha também o `sql/orcamento_unidade.sql` (1
+orçamento por unidade, 1 item por pedido), escolhido pelo modo de agrupamento
+marcado no "Enviar". O modo saiu do sistema — tela, payload e banco — e o
+Agrupado ficou como o único. Orçamento antigo do modo unidade com pedidos de
+mais de uma turma não é migrado: se reenviado, falha dizendo para reenviar os
+pedidos pelo PCP.
 
 Quem divide o lote em orçamentos é o PageFlow, no clique "Enviar". O
 DESKFLOW2.0 roda o SQL só com os ids daquele orçamento. Antes de mandar ao
@@ -86,14 +91,13 @@ vêm os itens. O consumidor não precisa saber mais que isso:
   lista certa (`pedido_distribuicao_ids` ou `integra_pedido_produto_ids`);
 - o cabeçalho (cliente/vendedor/forma) vem da requisição, como sempre — na
   integração o PageFlow o copiou do cadastro da integração, não da unidade;
-- `modo_agrupamento` é NULL num lote de integração (a divisão é fixa);
 - a estrutura do item (componentes, perguntas, tarefas) vem do **catálogo
   vivo** (`catalogo_bremen_modelos` e filhas), não de especificação de pedido.
   O snapshot do modelo existe no banco mas está vazio e não é lido: mudar o
   modelo no catálogo muda o que vai ao ERP nos envios seguintes;
 - `altura`/`largura` saem como estão em
   `catalogo_bremen_modelo_componentes` (já em **centímetros**) — ao contrário
-  dos SQLs de escola, que leem milímetros e dividem por 10;
+  do SQL de escola, que lê milímetros e divide por 10;
 - capa e miolo são decididos por `bremen_componentes.is_capa/is_miolo`.
 
 **Downloads de lote de integração**: os arquivos não estão em

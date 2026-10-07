@@ -1,4 +1,4 @@
-"""Componentes POR ESPECIFICAÇÃO nos SQLs de orçamento de escola (unidade e escola).
+"""Componentes POR ESPECIFICAÇÃO no SQL de orçamento de escola (o SQL Agrupado).
 
 O PageFlow grava uma especificação por componente, com o papel em três eixos já
 resolvido (ver BACKEND_PAGEFLOW/docs/papel-tres-eixos-deskflow.md): capa com o
@@ -165,9 +165,6 @@ class TestComponentesPorEspecificacaoNoOrcamento(TesteDeFila):
             self.assertEqual(_cor(r[3][259]), (None, None))
         with self.subTest(arquivo=arquivo, caso="'Capa + Miolo' leva a cor (é o PDF inteiro)"):
             self.assertEqual(_cor(r[8][320]), (4, 4))
-
-    def test_orcamento_unidade(self):
-        self._conferir("orcamento_unidade.sql")
 
     def test_orcamento_agrupado(self):
         self._conferir("orcamento_agrupado.sql")

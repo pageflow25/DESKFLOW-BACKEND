@@ -23,7 +23,6 @@ MODO_SINCRONO = "sincrono"
 MODO_ASSINCRONO = "assincrono"
 
 ORIGENS = (ORIGEM_ESCOLA, ORIGEM_INTEGRACAO)
-MODOS_AGRUPAMENTO = ("unidade", "escola")
 
 
 def url_webhook_de(payload: Optional[dict]) -> Optional[str]:
@@ -73,11 +72,9 @@ def orcamento_do_payload(
             f"Origem do orçamento desconhecida: {payload.get('origem')!r} "
             f"(esperado um de {list(ORIGENS)}).")
 
-    modo_agrupamento = payload.get("modo_agrupamento")
-    if origem == ORIGEM_ESCOLA and modo_agrupamento not in MODOS_AGRUPAMENTO:
-        return None, PayloadInvalido(
-            f"Origem escola exige `modo_agrupamento` em {list(MODOS_AGRUPAMENTO)}; "
-            f"veio {modo_agrupamento!r}.")
+    # `modo_agrupamento` NÃO é lido: saiu em 2026-10-07, e a origem escola tem
+    # um SQL só (o Agrupado). Item antigo da fila que ainda o carregue passa —
+    # recusá-lo seria falha DEFINITIVA para um envio que continua válido.
 
     brutos = payload.get("ids_origem")
     if not isinstance(brutos, list) or not brutos:
@@ -99,9 +96,6 @@ def orcamento_do_payload(
         lote_id=inteiro_positivo(payload.get("lote_id")),
         modo_envio=modo_envio_de(payload),
         url_webhook=url_webhook_de(payload),
-        # O modo só existe na origem escola; na integração a divisão é fixa
-        # (1 orçamento por pedido do parceiro) e o SQL é escolhido pela origem.
-        modo_agrupamento=None if de_integracao else modo_agrupamento,
         cliente_id=inteiro_positivo(payload.get("cliente_id")),
         vendedor_id=inteiro_positivo(payload.get("vendedor_id")),
         forma_pagamento=inteiro_positivo(payload.get("forma_pagamento")),

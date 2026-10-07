@@ -2,10 +2,10 @@
 --
 -- Monta o corpo de UM POST /api/v1/orcamento para UM orcamento_api_orcamentos
 -- do PCP — que o PageFlow já criou com os produtos de UM integra_pedidos
--- (1 orçamento por pedido do parceiro). Irmão de orcamento_unidade.sql /
--- orcamento_agrupado.sql, que fazem o mesmo para pedidos de escola.
+-- (1 orçamento por pedido do parceiro). Irmão de orcamento_agrupado.sql, o
+-- SQL Agrupado, que faz o mesmo para pedidos de escola.
 --
--- Diferenças para os SQLs de escola:
+-- Diferenças para o SQL de escola:
 --   - A origem do item é `integra_pedido_produtos`, não `pedido_distribuicoes`.
 --     Cada produto do pedido vira UM item do orçamento.
 --   - A estrutura (componentes, perguntas, tarefas) vem do CATÁLOGO VIVO
@@ -24,7 +24,7 @@
 --     trocaria o material de verdade do componente. Antes de mandar, revisar
 --     esses modelos em /admin/catalogos-bremen; o recorte pronto está em
 --     BACKEND_PAGEFLOW/docs/papel-tres-eixos-deskflow.md, seção 6.
---     (Diferente dos SQLs de escola: lá cada componente, papelão e guarda
+--     (Diferente do SQL de escola: lá cada componente, papelão e guarda
 --     inclusive, tem especificação própria resolvida pelo cadastro NO MOMENTO
 --     do pedido — o papelão de um pedido novo sai como Papelão Imune.)
 --
@@ -36,14 +36,14 @@
 --   (b) `pedido_ids` saiu: não faz parte do corpo que o Wingraph aceita;
 --   (c) `tarefas_componente` e `tarefas_gerais` saem como { id, descricao },
 --       com `bremen_tarefas.descricao` — o mesmo formato e a mesma coluna dos
---       SQLs de escola (a versão manual usava `descricao_pf`, que é o rótulo
+--       SQL de escola (a versão manual usava `descricao_pf`, que é o rótulo
 --       de tela do PageFlow, e `id_tarefa`/`descricao`/`descricao_pf` no
 --       componente);
 --   (d) capa e miolo são decididos por `bremen_componentes.is_capa/is_miolo`,
 --       não por LIKE na descrição;
 --   (e) `altura`/`largura` vão como estão em
 --       `catalogo_bremen_modelo_componentes.altura_padrao/largura_padrao`, que
---       estão em CENTÍMETROS (ao contrário dos SQLs de escola, que leem
+--       estão em CENTÍMETROS (ao contrário do SQL de escola, que lê
 --       milímetros de bremen_formato_papel e por isso dividem por 10). Com o
 --       papel em três eixos o PageFlow calcula essas medidas do formato do
 --       modelo (`catalogo_bremen_modelos.id_formato`), sempre em cm e iguais
@@ -237,7 +237,7 @@ itens AS (
                         'tarefas_componente', COALESCE(tc.tarefas, '[]'::json)
                     )
                 )
-                -- Miolo antes da capa, como nos SQLs de escola.
+                -- Miolo antes da capa, como no SQL de escola.
                 ORDER BY COALESCE(bc.is_capa, FALSE), cbmc.ordem, cbmc.id
             ) AS componentes
         FROM catalogo_bremen_modelo_componentes cbmc

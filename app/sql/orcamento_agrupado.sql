@@ -1,4 +1,10 @@
--- Orçamento no modo POR ESCOLA (orcamento_api_lotes.modo_agrupamento = 'escola').
+-- SQL Agrupado: o ÚNICO SQL de orçamento dos lotes de ESCOLA
+-- (orcamento_api_lotes.origem = 'escola').
+--
+-- Até 2026-10-07 havia dois, escolhidos pelo modo de agrupamento marcado no
+-- "Enviar": este (o antigo "modo escola") e o orcamento_unidade.sql (1
+-- orçamento por unidade, 1 item por pedido). O modo saiu do sistema e o
+-- orcamento_unidade.sql foi apagado; todo envio de escola sai daqui.
 --
 -- Base: docs/legado/query_orcamento_agrupado.sql. Monta o corpo de UM POST
 -- /api/v1/orcamento para UM orcamento_api_orcamentos do PCP — que o PageFlow
@@ -14,13 +20,17 @@
 --   - Cada item leva `codigo_externo` = ids dos pedidos agrupados, separados
 --     por vírgula ("12345683,12345687"); o PageFlow desmembra no retorno.
 --   - `materiais` lê o papel em três eixos (id_substrato /
---     bremen_formato_papel). A reserva por id_papel saiu com o contract do
---     PageFlow (ver orcamento_unidade.sql).
+--     bremen_formato_papel). A reserva por id_papel (bremen_tamanho_papel)
+--     saiu em 2026-09-30: a migration 20260923110000-contract-papel-antigo do
+--     PageFlow dropou pedido_especificacoes.id_papel e moveu a tabela para o
+--     schema contract_backup, e o LEFT JOIN quebrava a query inteira. Pedido
+--     antigo sem os três eixos cai no texto livre de ef.altura/ef.largura
+--     (BACKEND_PAGEFLOW/docs/papel-tres-eixos-deskflow.md).
 --   - Componentes POR ESPECIFICAÇÃO (2026-10-02): sem cenários miolo/capa/
---     outros — cada componente, com ou sem arquivo, vira um objeto montado da
---     própria especificação. Mesma mudança e mesmo motivo do
---     orcamento_unidade.sql. A capa deixou de ir com cor fixa 4/0: a cor dela
---     não vai, e o Bremen usa a do modelo.
+--     outros — o PageFlow grava uma especificação por componente, com o papel
+--     resolvido, inclusive dos componentes SEM arquivo (papelão, guarda), e
+--     cada um vira um objeto montado da própria especificação. A capa deixou
+--     de ir com cor fixa 4/0: a cor dela não vai, e o Bremen usa a do modelo.
 --   - `tarefas_gerais` sai como { id, descricao } (formato do Wingraph).
 --   - Campos internos (ids_distribuicao, id_escola) não vão mais no corpo.
 --

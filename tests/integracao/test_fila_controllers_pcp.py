@@ -52,7 +52,7 @@ def _sql_da_aprovacao(dados=DADOS_APROVACAO):
                       return_value=dados)
 
 # Orçamento com a origem que o produtor não deveria mandar. Este payload para
-# ANTES de tocar o banco, e é de propósito: os três SQLs de orçamento não podem
+# ANTES de tocar o banco, e é de propósito: os SQLs de orçamento não podem
 # ser exercitados aqui sem criar pedido, arquivo e catálogo Bremen de verdade —
 # tabela de domínio, que estes testes não escrevem. Quem cobre a escolha do SQL
 # é `tests/test_controllers_pcp.py`, com a conexão dublada.
@@ -61,7 +61,6 @@ PAYLOAD_ORCAMENTO_ORIGEM_INVALIDA = {
     "lote_id": 12,
     "requisicao_id": 40,
     "origem": "parceiro",
-    "modo_agrupamento": "unidade",
     "cliente_id": 10,
     "vendedor_id": 20,
     "forma_pagamento": 3,

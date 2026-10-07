@@ -1,10 +1,15 @@
 """Monta o corpo do POST /api/v1/orcamento de um orçamento do PCP.
 
-O SQL é escolhido pela ORIGEM do lote e, na origem escola, pelo modo de
-agrupamento:
-  - escola + modo 'unidade'  -> `sql/orcamento_unidade.sql`;
-  - escola + modo 'escola'   -> `sql/orcamento_agrupado.sql`;
-  - integração               -> `sql/orcamento_integracao.sql`.
+O SQL é escolhido só pela ORIGEM do lote:
+  - escola     -> `sql/orcamento_agrupado.sql` (o SQL Agrupado: um orçamento
+                  por turma, somando as unidades que pedem o mesmo item);
+  - integração -> `sql/orcamento_integracao.sql`.
+
+Até 2026-10-07 a origem escola tinha DOIS SQLs, escolhidos pelo modo de
+agrupamento que o usuário marcava no "Enviar" (`unidade` ou `escola`). O modo
+saiu do sistema inteiro — tela, payload e banco —, e o Agrupado (o antigo
+"modo escola") ficou como o único. O campo `modo_agrupamento` que um item
+antigo da fila ainda carregue no payload é ignorado.
 
 Ele roda só com os ids daquele orçamento e o resultado é conferido antes de ir
 ao ERP: um item que o SQL descarta (sem arquivo, sem especificação, produto
@@ -25,10 +30,7 @@ from ...utils.conversao import remover_nulos
 # `app/sql/`, a partir de `app/servicos/pcp/`: tres niveis acima
 # do arquivo. Era dois antes de este modulo descer para `servicos/pcp/`.
 PASTA_SQL = Path(__file__).resolve().parents[2] / "sql"
-ARQUIVO_POR_MODO = {
-    "unidade": "orcamento_unidade.sql",
-    "escola": "orcamento_agrupado.sql",
-}
+ARQUIVO_AGRUPADO = "orcamento_agrupado.sql"
 ARQUIVO_INTEGRACAO = "orcamento_integracao.sql"
 
 # Nome do parâmetro de lista em cada SQL (array de verdade no bind).
@@ -44,10 +46,7 @@ def _arquivo_e_parametro(orcamento: OrcamentoReivindicado):
     """(arquivo SQL, nome do parâmetro de ids) para a origem do orçamento."""
     if orcamento.origem == ORIGEM_INTEGRACAO:
         return ARQUIVO_INTEGRACAO, PARAMETRO_IDS_INTEGRACAO
-    arquivo = ARQUIVO_POR_MODO.get(orcamento.modo_agrupamento)
-    if not arquivo:
-        raise PayloadIncompleto(f"Modo de agrupamento desconhecido: {orcamento.modo_agrupamento!r}")
-    return arquivo, PARAMETRO_IDS_ESCOLA
+    return ARQUIVO_AGRUPADO, PARAMETRO_IDS_ESCOLA
 
 
 @lru_cache
@@ -117,6 +116,27 @@ def validar_itens(payload: dict, orcamento: OrcamentoReivindicado) -> None:
         raise PayloadIncompleto("Orçamento incompleto — " + "; ".join(partes))
 
 
+def _mensagem_divisao_divergente(orcamento: OrcamentoReivindicado, quantidade: int) -> str:
+    """Por que um orçamento do PageFlow virou mais de um no SQL.
+
+    Na origem escola isso tem uma causa conhecida e um remédio: o SQL Agrupado
+    devolve uma linha por TURMA, e só os orçamentos montados no antigo modo
+    `unidade` (anteriores a 2026-10-07) podem misturar pedidos de turmas
+    diferentes. Eles não foram migrados, por decisão do usuário; a mensagem diz
+    o que fazer, em vez de deixar o operador decifrar "divisão".
+    """
+    if orcamento.origem == ORIGEM_INTEGRACAO:
+        return (
+            f"Os itens do orçamento geraram {quantidade} orçamentos na divisão de integração "
+            "— a divisão do PageFlow e a do SQL não bateram"
+        )
+    return (
+        f"Este orçamento tem pedidos de {quantidade} turmas, e o envio agrupa um orçamento por "
+        "turma. Ele foi montado no antigo modo por unidade, que saiu do sistema: reenvie os "
+        "pedidos pelo PCP para que sejam reagrupados por turma."
+    )
+
+
 def montar_payload_orcamento(conn, orcamento: OrcamentoReivindicado, identifier: str) -> dict:
     ids = list(orcamento.ids_origem)
     if not ids:
@@ -143,11 +163,7 @@ def montar_payload_orcamento(conn, orcamento: OrcamentoReivindicado, identifier:
             "(sem arquivo/especificação ou produto fora do catálogo Bremen)"
         )
     if len(linhas) > 1:
-        divisao = "integração" if orcamento.origem == ORIGEM_INTEGRACAO else f"modo {orcamento.modo_agrupamento}"
-        raise PayloadIncompleto(
-            f"Os itens do orçamento geraram {len(linhas)} orçamentos na divisão de {divisao} "
-            "— a divisão do PageFlow e a do SQL não bateram"
-        )
+        raise PayloadIncompleto(_mensagem_divisao_divergente(orcamento, len(linhas)))
 
     payload = remover_nulos(linhas[0])
     validar_itens(payload, orcamento)

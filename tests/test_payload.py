@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from app.repositorios.pcp import OrcamentoReivindicado
 from app.servicos.pcp import payload as modulo_payload
 from app.servicos.pcp.payload import (
-    ARQUIVO_POR_MODO,
+    ARQUIVO_AGRUPADO,
     PayloadIncompleto,
     ids_do_codigo_externo,
     montar_payload_orcamento,
@@ -15,7 +15,7 @@ from app.utils.conversao import remover_nulos
 def orcamento(**campos):
     base = dict(
         id=700, requisicao_id=300, lote_id=5, modo_envio="assincrono", url_webhook="https://pf/x",
-        modo_agrupamento="escola", cliente_id=501, vendedor_id=7, forma_pagamento=11,
+        cliente_id=501, vendedor_id=7, forma_pagamento=11,
         pedido_distribuicao_ids=[1, 2, 3],
     )
     base.update(campos)
@@ -72,10 +72,16 @@ class TestPayload(unittest.TestCase):
             montar_payload_orcamento(ConexaoFalsa([corpo_sql("1,2,3,9")]), orcamento(), "PageFlow")
         self.assertIn("[9]", str(ctx.exception))
 
-    def test_mais_de_um_orcamento_no_sql_bloqueia(self):
+    def test_orcamento_de_varias_turmas_pede_para_reenviar_os_pedidos(self):
+        # O SQL Agrupado devolve uma linha por TURMA. Só orçamento montado no
+        # antigo modo unidade (anterior a 2026-10-07, não migrado por decisão do
+        # usuário) mistura turmas — e a mensagem tem de dizer o que fazer.
         conn = ConexaoFalsa([corpo_sql("1,2"), corpo_sql("3")])
-        with self.assertRaises(PayloadIncompleto):
+        with self.assertRaises(PayloadIncompleto) as ctx:
             montar_payload_orcamento(conn, orcamento(), "PageFlow")
+        mensagem = str(ctx.exception)
+        self.assertIn("2 turmas", mensagem)
+        self.assertIn("reenvie os pedidos", mensagem)
 
     def test_sem_forma_de_pagamento_bloqueia_antes_do_sql(self):
         conn = ConexaoFalsa([corpo_sql("1,2,3")])
@@ -84,18 +90,14 @@ class TestPayload(unittest.TestCase):
         self.assertIn("forma de pagamento", str(ctx.exception))
         self.assertIsNone(conn.parametros)
 
-    def test_modo_desconhecido_bloqueia(self):
-        with self.assertRaises(PayloadIncompleto):
-            montar_payload_orcamento(ConexaoFalsa([]), orcamento(modo_agrupamento="turma"), "PageFlow")
 
 
-
-class TestDataDeEntregaNosSqlsDeEscola(unittest.TestCase):
+class TestDataDeEntregaNoSqlAgrupado(unittest.TestCase):
     """A data escolhida no \"Enviar\" manda no obs_producao também na escola.
 
     Desde 2026-09-24 o modal da cascata pede as duas datas e o PageFlow as
-    grava em orcamento_api_orcamentos. Os SQLs de escola passaram a recebê-la
-    em :data_entrega e a preferi-la à do formulário — com COALESCE, para os
+    grava em orcamento_api_orcamentos. O SQL de escola (o Agrupado) a recebe
+    em :data_entrega e a prefere à do formulário — com COALESCE, para os
     lotes que já estavam na fila (coluna nula) seguirem montando igual.
     """
 
@@ -106,24 +108,18 @@ class TestDataDeEntregaNosSqlsDeEscola(unittest.TestCase):
             linha for linha in sql.splitlines() if not linha.lstrip().startswith("--")
         )
 
-    def test_os_dois_sqls_declaram_e_preferem_a_data_do_orcamento(self):
-        for arquivo in ARQUIVO_POR_MODO.values():
-            with self.subTest(arquivo=arquivo):
-                corpo = self._corpo(arquivo)
-                self.assertIn(":data_entrega", corpo)
-                self.assertIn(
-                    "'Data de Entrega: ' || COALESCE(p.data_entrega, ip.data_entrega_pedido, '-')",
-                    corpo,
-                )
+    def test_o_sql_declara_e_prefere_a_data_do_orcamento(self):
+        corpo = self._corpo(ARQUIVO_AGRUPADO)
+        self.assertIn(":data_entrega", corpo)
+        self.assertIn(
+            "'Data de Entrega: ' || COALESCE(p.data_entrega, ip.data_entrega_pedido, '-')",
+            corpo,
+        )
 
-    def test_a_data_vai_ao_sql_nos_dois_modos_de_escola(self):
-        for modo in ARQUIVO_POR_MODO:
-            with self.subTest(modo=modo):
-                conn = ConexaoFalsa([corpo_sql("1,2,3")])
-                montar_payload_orcamento(
-                    conn, orcamento(modo_agrupamento=modo, data_entrega="01/12/2026"), "PageFlow"
-                )
-                self.assertEqual(conn.parametros["data_entrega"], "01/12/2026")
+    def test_a_data_vai_ao_sql(self):
+        conn = ConexaoFalsa([corpo_sql("1,2,3")])
+        montar_payload_orcamento(conn, orcamento(data_entrega="01/12/2026"), "PageFlow")
+        self.assertEqual(conn.parametros["data_entrega"], "01/12/2026")
 
 
 if __name__ == "__main__":

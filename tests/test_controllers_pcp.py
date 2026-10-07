@@ -123,7 +123,6 @@ def _payload_orcamento(**sobrescritas):
         "lote_id": 12,
         "requisicao_id": 40,
         "origem": "escola",
-        "modo_agrupamento": "unidade",
         "cliente_id": 10,
         "vendedor_id": 20,
         "forma_pagamento": 3,
@@ -140,14 +139,14 @@ def _envelope_orcamento(**dados):
 
 
 class TestOrcamentoPreparo(unittest.TestCase):
-    def test_origem_escola_modo_unidade_usa_o_sql_de_unidade(self):
+    def test_origem_escola_usa_o_sql_agrupado(self):
         roteador, _ = _roteador(POST=httpx.Response(200, json=_envelope_orcamento(id_requisicao=9)))
         conexao = ConexaoFalsa(linhas=[LINHA_SQL])
 
         preparo = HandlerPcpOrcamentoEnviar(_erp(roteador)).preparar(conexao, _item(_payload_orcamento()))
 
         declaracao, parametros = conexao.executados[0]
-        self.assertEqual(str(declaracao), str(_consulta("orcamento_unidade.sql", "pedido_distribuicao_ids")))
+        self.assertEqual(str(declaracao), str(_consulta("orcamento_agrupado.sql", "pedido_distribuicao_ids")))
         self.assertEqual(parametros["pedido_distribuicao_ids"], [101, 102])
         self.assertEqual(parametros["data_entrega"], "15/10/2026")
         # O corpo real vai para `payload_enviado`, sem a url_webhook: ela carrega
@@ -156,12 +155,14 @@ class TestOrcamentoPreparo(unittest.TestCase):
         self.assertTrue(preparo.payload_enviado["assincrono"])
         self.assertEqual(preparo.payload_enviado["url_webhook"], "[omitida]")
 
-    def test_origem_escola_modo_escola_usa_o_sql_de_escola(self):
+    def test_item_antigo_com_modo_agrupamento_e_aceito_e_vai_para_o_agrupado(self):
+        # Itens enfileirados antes de 2026-10-07 ainda trazem o campo, inclusive
+        # `unidade`. Recusá-los seria falha DEFINITIVA para um envio válido.
         roteador, _ = _roteador(POST=httpx.Response(200, json=_envelope_orcamento(id_requisicao=9)))
         conexao = ConexaoFalsa(linhas=[LINHA_SQL])
 
         HandlerPcpOrcamentoEnviar(_erp(roteador)).preparar(
-            conexao, _item(_payload_orcamento(modo_agrupamento="escola")))
+            conexao, _item(_payload_orcamento(modo_agrupamento="unidade")))
 
         self.assertEqual(str(conexao.executados[0][0]),
                          str(_consulta("orcamento_agrupado.sql", "pedido_distribuicao_ids")))
@@ -171,7 +172,7 @@ class TestOrcamentoPreparo(unittest.TestCase):
         conexao = ConexaoFalsa(linhas=[LINHA_SQL])
 
         HandlerPcpOrcamentoEnviar(_erp(roteador)).preparar(conexao, _item(_payload_orcamento(
-            origem="integracao", modo_agrupamento=None)))
+            origem="integracao")))
 
         declaracao, parametros = conexao.executados[0]
         self.assertEqual(str(declaracao),
@@ -211,9 +212,6 @@ class TestOrcamentoPayloadInvalido(unittest.TestCase):
 
     def test_origem_desconhecida(self):
         self._falha(_payload_orcamento(origem="parceiro"), "Origem do orçamento desconhecida")
-
-    def test_origem_escola_sem_modo_de_agrupamento(self):
-        self._falha(_payload_orcamento(modo_agrupamento=None), "modo_agrupamento")
 
     def test_data_entrega_fora_do_formato(self):
         self._falha(_payload_orcamento(data_entrega="2026-10-15"), "DD/MM/YYYY")

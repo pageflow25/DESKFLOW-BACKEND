@@ -188,7 +188,8 @@ def baixar_op(baixador: BaixadorArquivos, base: str, temporaria: str, id_op: int
     if not dentro_da_base(base, pasta_final):
         return 0, [f"OP {id_op}: caminho fora da pasta base"], []
 
-    # Um arquivo pode servir a várias origens da mesma OP (modo por escola):
+    # Um arquivo pode servir a várias origens da mesma OP (o SQL Agrupado soma
+    # unidades num item só):
     # baixa uma vez só, e depois grava uma linha de downloads_bremen por origem.
     unicos: "OrderedDict[str, dict]" = OrderedDict()
     for linha in linhas:

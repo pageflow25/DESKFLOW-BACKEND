@@ -17,8 +17,10 @@ parâmetros e para onde vai o resultado:
   de domínio aqui não seria só errada, seria negada pelo banco.
 
 Payload (contrato fixo com o produtor):
-`{orcamento_id, lote_id, requisicao_id, origem, modo_agrupamento, cliente_id,
-vendedor_id, forma_pagamento, ids_origem: [int], data_entrega, url_webhook}`.
+`{orcamento_id, lote_id, requisicao_id, origem, cliente_id, vendedor_id,
+forma_pagamento, ids_origem: [int], data_entrega, url_webhook}`. O SQL sai só da
+`origem`; `modo_agrupamento`, que itens anteriores a 2026-10-07 ainda trazem, é
+ignorado.
 
 Resultado:
 `{id_orcamento, id_requisicao, modo_envio, resposta}` — `id_orcamento` vem

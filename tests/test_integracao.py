@@ -19,6 +19,7 @@ from app.repositorios.pcp import (
 from app.servicos.pcp import payload as modulo_payload
 from app.servicos.pcp.download_arquivos import baixar_arquivos_das_ops, chave_arquivo
 from app.servicos.pcp.payload import (
+    ARQUIVO_AGRUPADO,
     ARQUIVO_INTEGRACAO,
     PARAMETRO_IDS_ESCOLA,
     PARAMETRO_IDS_INTEGRACAO,
@@ -31,7 +32,7 @@ from app.servicos.pcp.payload import (
 def orcamento_integracao(**campos):
     base = dict(
         id=700, requisicao_id=300, lote_id=5, modo_envio="assincrono", url_webhook="https://pf/x",
-        modo_agrupamento=None, cliente_id=3407, vendedor_id=2153, forma_pagamento=1,
+        cliente_id=3407, vendedor_id=2153, forma_pagamento=1,
         pedido_distribuicao_ids=[], origem=ORIGEM_INTEGRACAO,
         integra_pedido_produto_ids=[9001, 9002],
         data_entrega="01/12/2026",
@@ -43,7 +44,7 @@ def orcamento_integracao(**campos):
 def orcamento_agrupado(**campos):
     base = dict(
         id=700, requisicao_id=300, lote_id=5, modo_envio="assincrono", url_webhook="https://pf/x",
-        modo_agrupamento="unidade", cliente_id=501, vendedor_id=7, forma_pagamento=11,
+        cliente_id=501, vendedor_id=7, forma_pagamento=11,
         pedido_distribuicao_ids=[1, 2],
     )
     base.update(campos)
@@ -88,24 +89,23 @@ class TestEscolhaDoSql(unittest.TestCase):
             (ARQUIVO_INTEGRACAO, PARAMETRO_IDS_INTEGRACAO),
         )
 
-    def test_escola_continua_escolhendo_pelo_modo(self):
+    def test_escola_usa_sempre_o_sql_agrupado(self):
+        # Desde 2026-10-07 não há modo de agrupamento: a origem escola tem um SQL só.
         self.assertEqual(
-            _arquivo_e_parametro(orcamento_agrupado(modo_agrupamento="unidade")),
-            ("orcamento_unidade.sql", PARAMETRO_IDS_ESCOLA),
-        )
-        self.assertEqual(
-            _arquivo_e_parametro(orcamento_agrupado(modo_agrupamento="escola")),
-            ("orcamento_agrupado.sql", PARAMETRO_IDS_ESCOLA),
+            _arquivo_e_parametro(orcamento_agrupado()),
+            (ARQUIVO_AGRUPADO, PARAMETRO_IDS_ESCOLA),
         )
 
-    def test_modo_desconhecido_na_escola_bloqueia(self):
-        with self.assertRaises(PayloadIncompleto):
-            _arquivo_e_parametro(orcamento_agrupado(modo_agrupamento="turma"))
+    def test_o_sql_agrupado_e_o_unico_de_escola_na_pasta(self):
+        # O orcamento_unidade.sql foi apagado junto com o modo; um SQL de escola
+        # sobrando na pasta seria código que ninguém chama, mas que o teste de
+        # compilação continuaria pagando.
+        sqls = sorted(p.name for p in modulo_payload.PASTA_SQL.glob("orcamento_*.sql"))
+        self.assertEqual(sqls, [ARQUIVO_AGRUPADO, ARQUIVO_INTEGRACAO])
 
-    def test_integracao_nao_precisa_de_modo_de_agrupamento(self):
-        # modo_agrupamento é NULL no lote de integração (CHECK do banco).
+    def test_integracao_monta_com_o_parametro_de_produtos(self):
         conn = ConexaoFalsa([corpo_sql("9001", "9002")])
-        montar_payload_orcamento(conn, orcamento_integracao(modo_agrupamento=None), "PageFlow")
+        montar_payload_orcamento(conn, orcamento_integracao(), "PageFlow")
         self.assertEqual(conn.parametros[PARAMETRO_IDS_INTEGRACAO], [9001, 9002])
 
     def test_o_sql_de_integracao_existe_e_declara_os_parametros(self):
