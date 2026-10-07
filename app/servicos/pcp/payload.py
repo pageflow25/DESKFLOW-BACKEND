@@ -120,10 +120,13 @@ def _mensagem_divisao_divergente(orcamento: OrcamentoReivindicado, quantidade: i
     """Por que um orçamento do PageFlow virou mais de um no SQL.
 
     Na origem escola isso tem uma causa conhecida e um remédio: o SQL Agrupado
-    devolve uma linha por TURMA, e só os orçamentos montados no antigo modo
-    `unidade` (anteriores a 2026-10-07) podem misturar pedidos de turmas
-    diferentes. Eles não foram migrados, por decisão do usuário; a mensagem diz
-    o que fazer, em vez de deixar o operador decifrar "divisão".
+    devolve uma linha por TURMA, agrupando por `pedido_distribuicoes.id_turma`
+    — a mesma chave com que o PageFlow divide os orçamentos (`turmaDoPedido`).
+    Então só os orçamentos montados no antigo modo `unidade` (anteriores a
+    2026-10-07) podem misturar turmas. Eles não foram migrados, por decisão do
+    usuário, e NÃO existe ação na tela que os redivida (reenviar o orçamento
+    copia os mesmos pedidos). A mensagem diz por que o envio falha, sem mandar o
+    operador fazer algo que o sistema não oferece.
     """
     if orcamento.origem == ORIGEM_INTEGRACAO:
         return (
@@ -131,9 +134,9 @@ def _mensagem_divisao_divergente(orcamento: OrcamentoReivindicado, quantidade: i
             "— a divisão do PageFlow e a do SQL não bateram"
         )
     return (
-        f"Este orçamento tem pedidos de {quantidade} turmas, e o envio agrupa um orçamento por "
-        "turma. Ele foi montado no antigo modo por unidade, que saiu do sistema: reenvie os "
-        "pedidos pelo PCP para que sejam reagrupados por turma."
+        f"Este orçamento tem pedidos de {quantidade} turmas, mas o envio monta um orçamento "
+        "por turma. Ele foi criado no antigo modo por unidade (anterior a 2026-10-07) e não "
+        "pode ser reenviado como está."
     )
 
 

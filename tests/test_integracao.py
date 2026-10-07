@@ -156,7 +156,7 @@ class TestPayloadIntegracao(unittest.TestCase):
 
     def test_a_data_de_entrega_vai_ao_sql_tambem_na_origem_escola(self):
         # Desde 2026-09-24 a data escolhida no "Enviar" vale nas duas origens:
-        # os três SQLs declaram :data_entrega e o parâmetro vai sempre.
+        # os dois SQLs declaram :data_entrega e o parâmetro vai sempre.
         conn = ConexaoFalsa([corpo_sql("1", "2")])
 
         montar_payload_orcamento(conn, orcamento_agrupado(data_entrega="01/12/2026"), "PageFlow")

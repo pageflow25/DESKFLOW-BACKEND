@@ -36,7 +36,7 @@ def modo_envio_de(payload: Optional[dict]) -> str:
 
 
 def _data_entrega_valida(valor: Any) -> bool:
-    """`DD/MM/YYYY`, que é o formato que os três SQLs colocam em `obs_producao`.
+    """`DD/MM/YYYY`, que é o formato que os SQLs de orçamento colocam em `obs_producao`.
 
     A checagem é de forma, não de calendário: o que se quer evitar é texto
     arbitrário do payload viajando para dentro da observação de produção.
@@ -55,7 +55,7 @@ def orcamento_do_payload(
     `montar_payload_orcamento` já sabe consumir.
 
     Valida E constrói no mesmo lugar, de propósito. Reaproveitar a dataclass do
-    caminho antigo é o que mantém uma representação só: é ela que os três SQLs e
+    caminho antigo é o que mantém uma representação só: é ela que os SQLs e
     as duas validações de `servicos/pcp/payload.py` enxergam, e uma segunda cópia dos
     mesmos campos seria a chance perfeita de os dois caminhos divergirem.
     """

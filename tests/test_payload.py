@@ -75,13 +75,15 @@ class TestPayload(unittest.TestCase):
     def test_orcamento_de_varias_turmas_pede_para_reenviar_os_pedidos(self):
         # O SQL Agrupado devolve uma linha por TURMA. Só orçamento montado no
         # antigo modo unidade (anterior a 2026-10-07, não migrado por decisão do
-        # usuário) mistura turmas — e a mensagem tem de dizer o que fazer.
+        # usuário) mistura turmas. A mensagem explica o porquê, e NÃO manda
+        # "reenviar os pedidos": não há ação na tela que os devolva à cascata.
         conn = ConexaoFalsa([corpo_sql("1,2"), corpo_sql("3")])
         with self.assertRaises(PayloadIncompleto) as ctx:
             montar_payload_orcamento(conn, orcamento(), "PageFlow")
         mensagem = str(ctx.exception)
         self.assertIn("2 turmas", mensagem)
-        self.assertIn("reenvie os pedidos", mensagem)
+        self.assertIn("não pode ser reenviado como está", mensagem)
+        self.assertNotIn("reenvie", mensagem)
 
     def test_sem_forma_de_pagamento_bloqueia_antes_do_sql(self):
         conn = ConexaoFalsa([corpo_sql("1,2,3")])

@@ -72,8 +72,8 @@ Até 2026-10-07 a origem escola tinha também o `sql/orcamento_unidade.sql` (1
 orçamento por unidade, 1 item por pedido), escolhido pelo modo de agrupamento
 marcado no "Enviar". O modo saiu do sistema — tela, payload e banco — e o
 Agrupado ficou como o único. Orçamento antigo do modo unidade com pedidos de
-mais de uma turma não é migrado: se reenviado, falha dizendo para reenviar os
-pedidos pelo PCP.
+mais de uma turma não é migrado: se reenviado, falha explicando que não pode
+ser enviado como está (não há ação na tela que o redivida).
 
 Quem divide o lote em orçamentos é o PageFlow, no clique "Enviar". O
 DESKFLOW2.0 roda o SQL só com os ids daquele orçamento. Antes de mandar ao

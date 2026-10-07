@@ -1,8 +1,8 @@
 """`pcp.orcamento.enviar` — POST /api/v1/orcamento. NÃO idempotente.
 
 Substitui o `DespachoOrcamentos` (`servicos/despacho_orcamento.py`) sem mudar a
-chamada que chega ao ERP: o corpo continua saindo dos MESMOS três SQLs, com a
-mesma escolha por origem e modo de agrupamento e a mesma conferência de
+chamada que chega ao ERP: o corpo sai dos SQLs de `sql/`, escolhidos só pela
+origem (o modo de agrupamento saiu em 2026-10-07), com a mesma conferência de
 `codigo_externo` (`servicos/pcp/payload.py`). O que muda é de onde vêm os
 parâmetros e para onde vai o resultado:
 
@@ -68,7 +68,7 @@ class HandlerPcpOrcamentoEnviar:
 
         try:
             # Roda na transação curta do preparo, como o despacho antigo rodava
-            # na sua: é SELECT nos três SQLs, sem I/O externa.
+            # na sua: é SELECT no SQL da origem, sem I/O externa.
             corpo = montar_payload_orcamento(conn, orcamento, self._erp.identifier)
         except PayloadIncompleto as exc:
             # Cadastro incompleto ou item que o SQL descartou: definitivo.
