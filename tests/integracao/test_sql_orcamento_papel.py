@@ -38,7 +38,7 @@ CREATE TEMP TABLE pedido_especificacoes (id int, id_produto int, id_componente i
                                          corverso int, gramatura_miolo text, id_gramatura int,
                                          id_formato int, id_tipo_papel int, id_substrato int,
                                          altura text, largura text, pedido_item_carrinho_id int,
-                                         metadados text)
+                                         metadados text, ordem_componente int)
 """
 
 COM_ARQUIVO, SEM_ARQUIVO, ORFA = "arquivo", "sem_arquivo", "orfa"
@@ -215,3 +215,46 @@ class TestTurmasNumOrcamentoSo(TesteDeFila):
         self.assertEqual(itens[0]["titulo"], "FOLDER MATEMATICA (#1)")
         self.assertEqual(itens[1]["titulo"], "(#1º Ano A) - FOLDER MATEMATICA - (#1)")
         self.assertEqual(itens[2]["titulo"], "(#2º Ano B) - FOLDER MATEMATICA - (#1)")
+
+
+class TestVariosMiolosNaOrdemDoItem(TesteDeFila):
+    """Desde 2026-10-20 um item Bremen pode ter vários miolos (plano 16 do PageFlow).
+
+    O PageFlow grava só os miolos usados e copia a posição de cada componente no
+    item para `pedido_especificacoes.ordem_componente`. O orçamento lista os
+    componentes nessa ordem e tira o título (e as perguntas gerais) do PRIMEIRO
+    miolo dela — antes era o `MAX`, um miolo qualquer. Produto 316 do testing:
+    Capa (644), Miolo (645) e Miolo 2 (646); aqui o Miolo 2 vem antes do Miolo.
+    """
+
+    def test_componentes_e_titulo_pela_ordem(self):
+        sql = (SQL_DIR / "orcamento_agrupado.sql").read_text(encoding="utf-8")
+        with self.engine.connect() as conn:
+            try:
+                for comando in TABELAS_TEMP.split(";"):
+                    conn.execute(text(comando))
+                conn.execute(text("INSERT INTO pedido_formularios VALUES (1, NULL, '2026-10-20', 'T', now(), NULL)"))
+                # (especificação, componente, ordem, arquivo)
+                for espec, comp, ordem, arquivo in [(1, 644, 1, "capa.pdf"), (2, 645, 3, "miolo_b.pdf"),
+                                                    (3, 646, 2, "miolo_a.pdf")]:
+                    conn.execute(text("""
+                        INSERT INTO pedido_especificacoes
+                        VALUES (:e, 316, :c, 1, 1, '75 g', NULL, 9, 9, 109, NULL, NULL, 1, '{}', :o)
+                    """), {"e": espec, "c": comp, "o": ordem})
+                    conn.execute(text("INSERT INTO pedido_arquivos_pdf VALUES (:e, :nome, 4)"),
+                                 {"e": espec, "nome": arquivo})
+                    conn.execute(text("INSERT INTO pedido_distribuicao_arquivos VALUES (1, :e, :c, :e)"),
+                                 {"e": espec, "c": comp})
+                conn.execute(text("INSERT INTO pedido_distribuicoes VALUES (1, NULL, 1, 1, 10, NULL)"))
+
+                payloads = conn.execute(text(sql), {
+                    "pedido_distribuicao_ids": [1], "id_cliente": 1, "id_vendedor": 1,
+                    "id_forma_pagamento": "1", "data_entrega": None,
+                }).scalars().all()
+            finally:
+                conn.rollback()
+
+        item = payloads[0]["data"]["itens"][0]
+        self.assertEqual([c["id"] for c in item["componentes"]], [644, 646, 645])
+        # "miolo_b" ganharia no MAX; o primeiro miolo da ordem é o Miolo 2 ("miolo_a").
+        self.assertEqual(item["titulo"], "MIOLO A (#1)")

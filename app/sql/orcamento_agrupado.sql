@@ -123,6 +123,9 @@ materiais AS (
         ef.id_produto,
         ef.corfrente,
         ef.corverso,
+        -- Posição do componente no item (Capa, Miolo 1, Miolo 2…), copiada do
+        -- cadastro na criação do pedido; nula em pedidos anteriores a 2026-10-20.
+        ef.ordem_componente,
         ap.nome AS arquivo_nome,
         ap.paginas,
         -- Papel DESTE componente (três eixos). `gramatura_miolo` é o texto da
@@ -183,8 +186,12 @@ itens_produto AS (
         MAX(mat.id_produto) AS id_produto,
         -- Depois do miolo, uma especificação COM arquivo: as perguntas gerais
         -- ficam nelas, não nas de papelão/guarda (que o PageFlow grava sem).
+        -- Com vários miolos (desde 2026-10-20), o PRIMEIRO pela ordem do item;
+        -- sem ordem (pedido antigo, um miolo só), o desempate é o id.
         COALESCE(
-            MAX(CASE WHEN mat.is_miolo THEN mat.especificacao_form_id END),
+            (ARRAY_AGG(mat.especificacao_form_id
+                       ORDER BY mat.ordem_componente NULLS LAST, mat.id_componente)
+                FILTER (WHERE mat.is_miolo))[1],
             MAX(CASE WHEN mat.arquivo_pdf_id IS NOT NULL THEN mat.especificacao_form_id END),
             MAX(mat.especificacao_form_id)
         ) AS especificacao_id_geral,
@@ -194,14 +201,18 @@ itens_produto AS (
                     '(#' || TRIM(t.nome) || ') - '
                     || UPPER(TRIM(REGEXP_REPLACE(REGEXP_REPLACE(
                         COALESCE(
-                            MAX(CASE WHEN mat.is_miolo THEN mat.arquivo_nome END),
+                            (ARRAY_AGG(mat.arquivo_nome
+                                       ORDER BY mat.ordem_componente NULLS LAST, mat.id_componente)
+                                FILTER (WHERE mat.is_miolo AND mat.arquivo_nome IS NOT NULL))[1],
                             MAX(mat.arquivo_nome)
                         ), '\.pdf$', '', 'i'), '[_-]+', ' ', 'g')))
                     || ' - (#' || MAX(form.id) || ')'
                 ELSE
                     UPPER(TRIM(REGEXP_REPLACE(REGEXP_REPLACE(
                         COALESCE(
-                            MAX(CASE WHEN mat.is_miolo THEN mat.arquivo_nome END),
+                            (ARRAY_AGG(mat.arquivo_nome
+                                       ORDER BY mat.ordem_componente NULLS LAST, mat.id_componente)
+                                FILTER (WHERE mat.is_miolo AND mat.arquivo_nome IS NOT NULL))[1],
                             MAX(mat.arquivo_nome)
                         ), '\.pdf$', '', 'i'), '[_-]+', ' ', 'g')))
                     || ' (#' || MAX(form.id) || ')'
@@ -350,8 +361,9 @@ SELECT json_strip_nulls(json_build_object(
                                     WHERE tc.especificacao_id = mat.especificacao_form_id
                                 ), '[]'::json)
                             )
-                            -- Ordem estável: componentes que não são miolo antes do miolo.
-                            ORDER BY mat.is_miolo, mat.id_componente, mat.arquivo_pdf_id
+                            -- Na ordem do item (Capa, Miolo 1, Miolo 2…). Pedido antigo, sem
+                            -- ordem: componentes que não são miolo antes do miolo, como antes.
+                            ORDER BY mat.ordem_componente NULLS LAST, mat.is_miolo, mat.id_componente, mat.arquivo_pdf_id
                         )
                         FROM materiais mat
                         WHERE mat.distribuicao_id = ip.distribuicao_referencia
