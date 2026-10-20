@@ -44,7 +44,7 @@ PAYLOAD_APROVACAO = {
     "url_webhook": WEBHOOK,
 }
 
-DADOS_APROVACAO = {"id_orcamento": 555, "gerar_op": True, "itens": [{"id": 1}]}
+DADOS_APROVACAO = {"id_orcamento": 555, "gerar_op": True, "gerarOpDistribuida": False, "itens": [{"id": 1}]}
 
 
 def _sql_da_aprovacao(dados=DADOS_APROVACAO):

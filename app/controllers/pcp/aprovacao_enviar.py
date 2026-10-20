@@ -23,7 +23,7 @@ Diferenças em relação ao caminho antigo:
 
 Payload: `{aprovacao_id, orcamento_id, id_orcamento, gerar_op, itens_aprovados,
 url_webhook}`. Só `aprovacao_id` e `url_webhook` são lidos: o `data` do POST
-(`id_orcamento`, `gerar_op`, `itens` com datas e entregas) sai de
+(`id_orcamento`, `gerar_op`, `gerarOpDistribuida`, `itens` com datas e entregas) sai de
 `sql/aprovacao.sql`, a partir da aprovação — para ser ajustado ali, junto dos
 SQLs de orçamento, em vez de vir pronto do PageFlow.
 
@@ -143,6 +143,7 @@ class HandlerPcpAprovacaoEnviar:
             "data": {
                 "id_orcamento": id_orcamento,
                 "gerar_op": campos["gerar_op"],
+                "gerarOpDistribuida": campos["gerarOpDistribuida"],
                 "itens": itens,
             },
         }

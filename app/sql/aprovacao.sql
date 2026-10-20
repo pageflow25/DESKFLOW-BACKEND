@@ -1,6 +1,7 @@
 -- Aprovação de UM orçamento do PCP (POST /api/v1/proposta/aprovar).
 --
--- Monta o `data` do corpo — { id_orcamento, gerar_op, itens[] } — para UMA
+-- Monta o `data` do corpo — { id_orcamento, gerar_op, gerarOpDistribuida,
+-- itens[] } — para UMA
 -- orcamento_api_aprovacoes. O `identifier` e o modo assíncrono
 -- (`url_webhook`) são postos pelo handler (handlers/pcp/aprovacao_enviar.py),
 -- como no orçamento.
@@ -39,6 +40,10 @@
 -- (fallback distribuição). Entrega sem data é descartada (o PageFlow bloqueia
 -- a aprovação nesse caso, então aqui ela não deveria chegar).
 --
+-- `gerarOpDistribuida`: decisão do "Enviar" do PCP gravada no LOTE
+-- (`orcamento_api_lotes.gerar_op_distribuida`, independente do `gerar_op`).
+-- Aprovação sem lote, ou lote anterior à coluna, vai `false`.
+--
 -- Parâmetro: :aprovacao_id (orcamento_api_aprovacoes.id). Devolve 1 linha com
 -- o `data` (json), ou nenhuma se a aprovação não existir.
 
@@ -51,7 +56,8 @@ WITH aprovacao AS (
         o.resposta_api,
         o.data_saida AS orcamento_data_saida,
         o.data_entrega AS orcamento_data_entrega,
-        COALESCE(l.entregas_fiscais, false) AS entregas_fiscais
+        COALESCE(l.entregas_fiscais, false) AS entregas_fiscais,
+        COALESCE(l.gerar_op_distribuida, false) AS gerar_op_distribuida
     FROM orcamento_api_aprovacoes a
     JOIN orcamento_api_orcamentos o
         ON o.id = a.orcamento_api_orcamento_id
@@ -192,6 +198,7 @@ SELECT
     json_build_object(
         'id_orcamento', ap.id_orcamento,
         'gerar_op', COALESCE(ap.gerar_op, false),
+        'gerarOpDistribuida', ap.gerar_op_distribuida,
         'itens', COALESCE(it.itens, '[]'::json)
     ) AS data
 FROM aprovacao ap

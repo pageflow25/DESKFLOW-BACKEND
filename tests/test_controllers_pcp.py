@@ -365,6 +365,7 @@ def _payload_aprovacao(**sobrescritas):
 DADOS_APROVACAO = {
     "id_orcamento": 555,
     "gerar_op": True,
+    "gerarOpDistribuida": False,
     "itens": [{"id": 1, "data_entrega": "2026-10-20T18:00:00.000-03:00"}, {"id": 2}],
 }
 
@@ -412,6 +413,7 @@ class TestAprovacao(unittest.TestCase):
         self.assertFalse(desfecho.resultado["ja_aprovada"])
         self.assertEqual([requisicao.method for requisicao in vistos], ["GET", "POST"])
         self.assertEqual(preparo.payload_enviado["data"]["gerar_op"], True)
+        self.assertIs(preparo.payload_enviado["data"]["gerarOpDistribuida"], False)
         self.assertEqual(preparo.payload_enviado["url_webhook"], "[omitida]")
 
     def test_resposta_sincrona_com_lista_de_propostas_conclui(self):
@@ -517,6 +519,28 @@ class TestAprovacao(unittest.TestCase):
         self.assertFalse(dados["gerar_op"])
         self.assertEqual(dados["itens"][0]["entregas"], [{"quantidade": 3, "id_cliente": 1}])
         self.assertIn("/proposta/aprovar", str(vistos[-1].url))
+
+    def test_gerar_op_distribuida_do_lote_vai_no_corpo_independente_do_gerar_op(self):
+        conexao = _conexao_aprovacao(gerar_op=False, gerarOpDistribuida=True)
+        _, _, preparo = self._executar(
+            _payload_aprovacao(),
+            get=httpx.Response(200, json=_proposta({1: "Aberta", 2: "Aberta"})),
+            post=httpx.Response(200, json={"success": True, "data": {"id_requisicao": 81}}),
+            conexao=conexao)
+
+        dados = preparo.payload_enviado["data"]
+        self.assertIs(dados["gerarOpDistribuida"], True)
+        self.assertIs(dados["gerar_op"], False)
+
+    def test_sem_gerar_op_distribuida_no_sql_vai_false(self):
+        dados_sem_campo = {k: v for k, v in DADOS_APROVACAO.items() if k != "gerarOpDistribuida"}
+        _, _, preparo = self._executar(
+            _payload_aprovacao(),
+            get=httpx.Response(200, json=_proposta({1: "Aberta", 2: "Aberta"})),
+            post=httpx.Response(200, json={"success": True, "data": {"id_requisicao": 82}}),
+            conexao=ConexaoFalsa(linhas=[dados_sem_campo]))
+
+        self.assertIs(preparo.payload_enviado["data"]["gerarOpDistribuida"], False)
 
     def test_erp_recusa_a_aprovacao(self):
         desfecho, _, _ = self._executar(
