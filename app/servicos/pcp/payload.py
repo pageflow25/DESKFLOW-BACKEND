@@ -2,7 +2,8 @@
 
 O SQL é escolhido só pela ORIGEM do lote:
   - escola     -> `sql/orcamento_agrupado.sql` (o SQL Agrupado: um orçamento
-                  por turma, somando as unidades que pedem o mesmo item);
+                  com todas as turmas, 1 item por item de carrinho e turma,
+                  somando as unidades que pedem o mesmo item);
   - integração -> `sql/orcamento_integracao.sql`.
 
 Até 2026-10-07 a origem escola tinha DOIS SQLs, escolhidos pelo modo de
@@ -119,14 +120,11 @@ def validar_itens(payload: dict, orcamento: OrcamentoReivindicado) -> None:
 def _mensagem_divisao_divergente(orcamento: OrcamentoReivindicado, quantidade: int) -> str:
     """Por que um orçamento do PageFlow virou mais de um no SQL.
 
-    Na origem escola isso tem uma causa conhecida e um remédio: o SQL Agrupado
-    devolve uma linha por TURMA, agrupando por `pedido_distribuicoes.id_turma`
-    — a mesma chave com que o PageFlow divide os orçamentos (`turmaDoPedido`).
-    Então só os orçamentos montados no antigo modo `unidade` (anteriores a
-    2026-10-07) podem misturar turmas. Eles não foram migrados, por decisão do
-    usuário, e NÃO existe ação na tela que os redivida (reenviar o orçamento
-    copia os mesmos pedidos). A mensagem diz por que o envio falha, sem mandar o
-    operador fazer algo que o sistema não oferece.
+    Na origem escola não deveria acontecer: desde 2026-10-20 o SQL Agrupado
+    devolve UMA linha com todas as turmas (antes era uma por turma, e os
+    orçamentos do antigo modo `unidade` que misturavam turmas falhavam aqui —
+    agora eles montam normalmente). A conferência fica como defesa contra o SQL
+    mudar sem o PageFlow acompanhar.
     """
     if orcamento.origem == ORIGEM_INTEGRACAO:
         return (
@@ -134,9 +132,8 @@ def _mensagem_divisao_divergente(orcamento: OrcamentoReivindicado, quantidade: i
             "— a divisão do PageFlow e a do SQL não bateram"
         )
     return (
-        f"Este orçamento tem pedidos de {quantidade} turmas, mas o envio monta um orçamento "
-        "por turma. Ele foi criado no antigo modo por unidade (anterior a 2026-10-07) e não "
-        "pode ser reenviado como está."
+        f"Os itens do orçamento geraram {quantidade} orçamentos no SQL Agrupado, que deveria "
+        "montar um só — a divisão do PageFlow e a do SQL não bateram"
     )
 
 

@@ -1,3 +1,4 @@
+-- database: :memory:
 -- SQL Agrupado: o ÚNICO SQL de orçamento dos lotes de ESCOLA
 -- (orcamento_api_lotes.origem = 'escola').
 --
@@ -8,9 +9,13 @@
 --
 -- Base: docs/legado/query_orcamento_agrupado.sql. Monta o corpo de UM POST
 -- /api/v1/orcamento para UM orcamento_api_orcamentos do PCP — que o PageFlow
--- já criou com os pedidos de uma única turma (ou dos pedidos sem turma) de um
--- mesmo cliente/vendedor/forma de pagamento. Soma as quantidades de todas as
--- unidades que compartilham o mesmo item de carrinho.
+-- cria com TODOS os pedidos de um mesmo cliente/vendedor/forma de pagamento,
+-- de todas as turmas (desde 2026-10-20; antes era 1 orçamento por turma).
+-- Dentro dele, 1 item por item de carrinho E turma: soma as quantidades das
+-- unidades que compartilham o mesmo item na mesma turma, e o item de turma
+-- leva o nome dela na frente do título — "(#TURMA) - ..." — para diferenciar
+-- do mesmo produto em outra turma. Itens sem turma vêm primeiro, depois as
+-- turmas pela ordem do nome.
 --
 -- Diferenças para a query legada:
 --   - Entrada: os ids exatos de pedido_distribuicoes do orçamento, não mais
@@ -37,8 +42,8 @@
 -- Parâmetros: :pedido_distribuicao_ids (int[]), :id_cliente, :id_vendedor,
 -- :id_forma_pagamento, :data_entrega (texto 'DD/MM/YYYY' do orçamento, vindo do
 -- claim — ver repositorios/fila.py; NULL nos lotes anteriores a 2026-09-24, que
--- caem de volta na data do formulário). Devolve 1 linha por turma — para um
--- orçamento do PCP, exatamente 1 (o serviço confere).
+-- caem de volta na data do formulário). Devolve exatamente 1 linha (o
+-- orçamento inteiro) ou nenhuma, quando nenhum item pôde ser montado.
 
 WITH parametros AS (
     SELECT
@@ -380,12 +385,13 @@ SELECT json_strip_nulls(json_build_object(
                         WHERE tg.especificacao_id = ip.especificacao_id_geral
                     ), '[]'::json)
                 )
-                ORDER BY ip.distribuicao_referencia
+                -- Sem turma primeiro; depois as turmas pelo nome, cada uma com
+                -- os itens juntos.
+                ORDER BY ip.id_turma IS NOT NULL, ip.nome_turma, ip.id_turma, ip.distribuicao_referencia
             ), '[]'::json
         )
     )
 )) AS payload
 FROM itens_produto ip
 CROSS JOIN parametros p
-GROUP BY ip.id_turma, p.id_cliente, p.id_vendedor, p.id_forma_pagamento
-ORDER BY ip.id_turma NULLS FIRST;
+GROUP BY p.id_cliente, p.id_vendedor, p.id_forma_pagamento;

@@ -168,3 +168,50 @@ class TestComponentesPorEspecificacaoNoOrcamento(TesteDeFila):
 
     def test_orcamento_agrupado(self):
         self._conferir("orcamento_agrupado.sql")
+
+
+class TestTurmasNumOrcamentoSo(TesteDeFila):
+    """Desde 2026-10-20 o orçamento de escola leva TODAS as turmas.
+
+    O mesmo item de carrinho em turmas diferentes vira um item por turma, com o
+    nome dela na frente do título; as unidades da mesma turma somam. Pedidos
+    sem turma ficam num item próprio, sem prefixo, antes das turmas.
+    """
+
+    def test_um_orcamento_com_um_item_por_turma(self):
+        sql = (SQL_DIR / "orcamento_agrupado.sql").read_text(encoding="utf-8")
+        with self.engine.connect() as conn:
+            try:
+                for comando in TABELAS_TEMP.split(";"):
+                    conn.execute(text(comando))
+                conn.execute(text("CREATE TEMP TABLE escola_turmas (id int, nome text, area text)"))
+                conn.execute(text("INSERT INTO escola_turmas VALUES (10, '2º Ano B', NULL), (20, '1º Ano A', NULL)"))
+                conn.execute(text("INSERT INTO pedido_formularios VALUES (1, NULL, '2026-10-10', 'T', now(), NULL)"))
+                # Item 35: componente único "Folder" (92), com PDF.
+                conn.execute(text("""
+                    INSERT INTO pedido_especificacoes
+                    VALUES (1, 35, 92, 4, 4, '75 g', NULL, 11, 9, 109, NULL, NULL, 1, '{"componente":"x"}')
+                """))
+                conn.execute(text("INSERT INTO pedido_arquivos_pdf VALUES (1, 'folder_matematica.pdf', 4)"))
+                # (distribuição, unidade, quantidade, turma) — todas do mesmo item de carrinho.
+                for d, unidade, quantidade, turma in [(1, 501, 10, 10), (2, 502, 5, 10), (3, 501, 7, 20), (4, 501, 3, None)]:
+                    conn.execute(text("INSERT INTO pedido_distribuicoes VALUES (:d, :u, 1, 1, :q, :t)"),
+                                 {"d": d, "u": unidade, "q": quantidade, "t": turma})
+                    conn.execute(text("INSERT INTO pedido_distribuicao_arquivos VALUES (:d, 1, 92, 1)"), {"d": d})
+
+                payloads = conn.execute(text(sql), {
+                    "pedido_distribuicao_ids": [1, 2, 3, 4], "id_cliente": 1, "id_vendedor": 1,
+                    "id_forma_pagamento": "1", "data_entrega": None,
+                }).scalars().all()
+            finally:
+                conn.rollback()
+
+        self.assertEqual(len(payloads), 1)
+        itens = payloads[0]["data"]["itens"]
+        self.assertEqual(
+            [(i["codigo_externo"], i["quantidade"]) for i in itens],
+            [("4", 3), ("3", 7), ("1,2", 15)],
+        )
+        self.assertEqual(itens[0]["titulo"], "FOLDER MATEMATICA (#1)")
+        self.assertEqual(itens[1]["titulo"], "(#1º Ano A) - FOLDER MATEMATICA - (#1)")
+        self.assertEqual(itens[2]["titulo"], "(#2º Ano B) - FOLDER MATEMATICA - (#1)")
