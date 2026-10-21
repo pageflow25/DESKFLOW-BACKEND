@@ -14,6 +14,7 @@ quebrar sem ninguém notar:
   resultado incerto não pode virar retentativa automática.
 """
 
+import json
 import os
 import tempfile
 import unittest
@@ -168,6 +169,26 @@ class TestOrcamentoPreparo(unittest.TestCase):
         self.assertEqual(str(conexao.executados[0][0]),
                          str(_consulta("orcamento_agrupado.sql", "pedido_distribuicao_ids")))
 
+    def test_complementos_do_envio_parcial_vao_ao_sql(self):
+        roteador, _ = _roteador(POST=httpx.Response(200, json=_envelope_orcamento(id_requisicao=9)))
+        conexao = ConexaoFalsa(linhas=[LINHA_SQL])
+
+        HandlerPcpOrcamentoEnviar(_erp(roteador)).preparar(conexao, _item(_payload_orcamento(
+            complementos_nome_arquivo={"102": " 2ª remessa "})))
+
+        _, parametros = conexao.executados[0]
+        self.assertEqual(json.loads(parametros["complementos_nome_arquivo"]), {"102": "2ª remessa"})
+
+    def test_item_sem_o_campo_vai_com_o_nome_original(self):
+        # Itens enfileirados antes de 2026-10-21 não trazem o campo.
+        roteador, _ = _roteador(POST=httpx.Response(200, json=_envelope_orcamento(id_requisicao=9)))
+        conexao = ConexaoFalsa(linhas=[LINHA_SQL])
+
+        HandlerPcpOrcamentoEnviar(_erp(roteador)).preparar(conexao, _item(_payload_orcamento()))
+
+        _, parametros = conexao.executados[0]
+        self.assertIsNone(parametros["complementos_nome_arquivo"])
+
     def test_origem_integracao_usa_o_sql_de_integracao_e_o_outro_parametro(self):
         roteador, _ = _roteador(POST=httpx.Response(200, json=_envelope_orcamento(id_requisicao=9)))
         conexao = ConexaoFalsa(linhas=[LINHA_SQL])
@@ -216,6 +237,17 @@ class TestOrcamentoPayloadInvalido(unittest.TestCase):
 
     def test_data_entrega_fora_do_formato(self):
         self._falha(_payload_orcamento(data_entrega="2026-10-15"), "DD/MM/YYYY")
+
+    def test_complementos_que_nao_sao_objeto(self):
+        self._falha(_payload_orcamento(complementos_nome_arquivo=["2ª remessa"]), "complementos_nome_arquivo")
+
+    def test_complemento_de_id_fora_do_orcamento(self):
+        self._falha(_payload_orcamento(complementos_nome_arquivo={"999": "2ª remessa"}), "fora de `ids_origem`")
+
+    def test_complemento_longo_vazio_ou_com_quebra_de_linha(self):
+        for texto in ("x" * 61, "   ", "a\nb", 12):
+            with self.subTest(texto=texto):
+                self._falha(_payload_orcamento(complementos_nome_arquivo={"101": texto}), "60 caracteres")
 
     def test_id_que_nao_e_id(self):
         self._falha(_payload_orcamento(ids_origem=[101, "x"]), "não é id")

@@ -1,3 +1,4 @@
+import json
 import unittest
 from types import SimpleNamespace
 
@@ -117,6 +118,44 @@ class TestDataDeEntregaNoSqlAgrupado(unittest.TestCase):
         conn = ConexaoFalsa([corpo_sql("1,2,3")])
         montar_payload_orcamento(conn, orcamento(data_entrega="01/12/2026"), "PageFlow")
         self.assertEqual(conn.parametros["data_entrega"], "01/12/2026")
+
+
+class TestComplementoDoEnvioParcial(unittest.TestCase):
+    """O complemento do nome dos arquivos de um envio PARCIAL (2026-10-21).
+
+    O PageFlow decide quais pedidos são de formulário enviado só em parte e
+    manda `{id: texto}` no payload; o SQL Agrupado acrescenta o texto ao título
+    do item. Aqui se trava a ponte: o mapa vira o parâmetro JSON do SQL, e o SQL
+    o declara e o usa no título.
+    """
+
+    def _corpo(self):
+        sql = (modulo_payload.PASTA_SQL / ARQUIVO_AGRUPADO).read_text(encoding="utf-8-sig")
+        return chr(10).join(
+            linha for linha in sql.splitlines() if not linha.lstrip().startswith("--")
+        )
+
+    def test_o_mapa_vai_ao_sql_como_json_com_ids_em_texto(self):
+        conn = ConexaoFalsa([corpo_sql("1,2,3")])
+        montar_payload_orcamento(
+            conn, orcamento(complementos_nome_arquivo={1: "2ª remessa", 2: "2ª remessa"}), "PageFlow")
+        self.assertEqual(
+            json.loads(conn.parametros["complementos_nome_arquivo"]),
+            {"1": "2ª remessa", "2": "2ª remessa"},
+        )
+        self.assertIn("2ª remessa", conn.parametros["complementos_nome_arquivo"])
+
+    def test_sem_complemento_o_parametro_vai_nulo(self):
+        conn = ConexaoFalsa([corpo_sql("1,2,3")])
+        montar_payload_orcamento(conn, orcamento(), "PageFlow")
+        self.assertIn("complementos_nome_arquivo", conn.parametros)
+        self.assertIsNone(conn.parametros["complementos_nome_arquivo"])
+
+    def test_o_sql_declara_o_parametro_e_o_poe_no_titulo(self):
+        corpo = self._corpo()
+        self.assertIn("CAST(:complementos_nome_arquivo AS jsonb)", corpo)
+        # Nas duas formas de título (com e sem turma) e no nome de reserva.
+        self.assertEqual(corpo.count("COALESCE(' - ' || ia.complemento_nome_arquivo, '')"), 3)
 
 
 if __name__ == "__main__":

@@ -38,12 +38,19 @@
 --     de ir com cor fixa 4/0: a cor dela não vai, e o Bremen usa a do modelo.
 --   - `tarefas_gerais` sai como { id, descricao } (formato do Wingraph).
 --   - Campos internos (ids_distribuicao, id_escola) não vão mais no corpo.
+--   - Envio PARCIAL (2026-10-21): o pedido de um formulário enviado só em parte
+--     traz um complemento, que entra no título logo depois do nome do arquivo e
+--     antes do "(#formulário)": "NOME - COMPLEMENTO (#123)" ou
+--     "(#TURMA) - NOME - COMPLEMENTO - (#123)". Sem complemento, o título é o de
+--     sempre. Quem decide o que é parcial é o PageFlow; aqui só se aplica.
 --
 -- Parâmetros: :pedido_distribuicao_ids (int[]), :id_cliente, :id_vendedor,
 -- :id_forma_pagamento, :data_entrega (texto 'DD/MM/YYYY' do orçamento, vindo do
 -- claim — ver repositorios/fila.py; NULL nos lotes anteriores a 2026-09-24, que
--- caem de volta na data do formulário). Devolve exatamente 1 linha (o
--- orçamento inteiro) ou nenhuma, quando nenhum item pôde ser montado.
+-- caem de volta na data do formulário), :complementos_nome_arquivo (texto JSON
+-- {"<id do pedido>": "complemento"} com os pedidos de envio parcial; NULL sem
+-- nenhum). Devolve exatamente 1 linha (o orçamento inteiro) ou nenhuma, quando
+-- nenhum item pôde ser montado.
 
 WITH parametros AS (
     SELECT
@@ -56,7 +63,12 @@ WITH parametros AS (
         -- — ver repositorios/fila.py). Manda sobre a do formulário; vem NULL
         -- só nos lotes de escola anteriores a 2026-09-24, que já estavam na
         -- fila, e aí o COALESCE lá embaixo cai em form.data_entrega.
-        CAST(:data_entrega AS text) AS data_entrega
+        CAST(:data_entrega AS text) AS data_entrega,
+        -- Complemento do nome do arquivo de cada pedido de formulário enviado
+        -- PARCIALMENTE, gravado pelo PageFlow em
+        -- orcamento_api_itens.complemento_nome_arquivo e trazido no payload do
+        -- item da fila. NULL (o normal) deixa todo título com o nome original.
+        CAST(:complementos_nome_arquivo AS jsonb) AS complementos_nome_arquivo
 ),
 
 -- 1 linha por item comercial entregue a uma unidade/turma.
@@ -165,8 +177,12 @@ itens_agrupados AS (
         MAX(d.formulario_id) AS formulario_id,
         MIN(d.distribuicao_id) AS distribuicao_referencia,
         SUM(d.quantidade) AS quantidade_total,
-        array_to_string(array_agg(DISTINCT d.distribuicao_id ORDER BY d.distribuicao_id), ',') AS codigo_externo
+        array_to_string(array_agg(DISTINCT d.distribuicao_id ORDER BY d.distribuicao_id), ',') AS codigo_externo,
+        -- Um item é de um item de carrinho só, logo de um formulário só: ou todas
+        -- as distribuições dele são do envio parcial, ou nenhuma.
+        UPPER(MAX(NULLIF(TRIM(p.complementos_nome_arquivo ->> d.distribuicao_id::text), ''))) AS complemento_nome_arquivo
     FROM distribuicoes d
+    CROSS JOIN parametros p
     GROUP BY d.pedido_item_carrinho_id, d.id_turma
 ),
 
@@ -206,6 +222,7 @@ itens_produto AS (
                                 FILTER (WHERE mat.is_miolo AND mat.arquivo_nome IS NOT NULL))[1],
                             MAX(mat.arquivo_nome)
                         ), '\.pdf$', '', 'i'), '[_-]+', ' ', 'g')))
+                    || COALESCE(' - ' || ia.complemento_nome_arquivo, '')
                     || ' - (#' || MAX(form.id) || ')'
                 ELSE
                     UPPER(TRIM(REGEXP_REPLACE(REGEXP_REPLACE(
@@ -215,9 +232,10 @@ itens_produto AS (
                                 FILTER (WHERE mat.is_miolo AND mat.arquivo_nome IS NOT NULL))[1],
                             MAX(mat.arquivo_nome)
                         ), '\.pdf$', '', 'i'), '[_-]+', ' ', 'g')))
+                    || COALESCE(' - ' || ia.complemento_nome_arquivo, '')
                     || ' (#' || MAX(form.id) || ')'
             END,
-            'Produto ' || MAX(mat.id_produto)
+            'Produto ' || MAX(mat.id_produto) || COALESCE(' - ' || ia.complemento_nome_arquivo, '')
         ) AS nome_arquivo,
         MAX(form.observacoes) AS obs_producao,
         MAX(TO_CHAR(form.data_entrega, 'DD/MM/YYYY')) AS data_entrega_pedido,
@@ -228,7 +246,7 @@ itens_produto AS (
     JOIN pedido_formularios form ON form.id = ia.formulario_id
     GROUP BY
         ia.pedido_item_carrinho_id, ia.id_turma, ia.formulario_id, ia.distribuicao_referencia,
-        ia.quantidade_total, ia.codigo_externo, t.nome, t.area
+        ia.quantidade_total, ia.codigo_externo, ia.complemento_nome_arquivo, t.nome, t.area
 ),
 
 respostas_componentes AS (

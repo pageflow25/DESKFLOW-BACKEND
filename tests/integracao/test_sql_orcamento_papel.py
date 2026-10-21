@@ -118,7 +118,7 @@ class TestComponentesPorEspecificacaoNoOrcamento(TesteDeFila):
                 for d in distribuicoes:
                     payloads = conn.execute(text(sql), {
                         "pedido_distribuicao_ids": [d], "id_cliente": 1, "id_vendedor": 1,
-                        "id_forma_pagamento": "1", "data_entrega": None,
+                        "id_forma_pagamento": "1", "data_entrega": None, "complementos_nome_arquivo": None,
                     }).scalars().all()
                     self.assertEqual(len(payloads), 1, f"{arquivo}: distribuição {d}")
                     componentes = payloads[0]["data"]["itens"][0]["componentes"]
@@ -201,7 +201,7 @@ class TestTurmasNumOrcamentoSo(TesteDeFila):
 
                 payloads = conn.execute(text(sql), {
                     "pedido_distribuicao_ids": [1, 2, 3, 4], "id_cliente": 1, "id_vendedor": 1,
-                    "id_forma_pagamento": "1", "data_entrega": None,
+                    "id_forma_pagamento": "1", "data_entrega": None, "complementos_nome_arquivo": None,
                 }).scalars().all()
             finally:
                 conn.rollback()
@@ -215,6 +215,68 @@ class TestTurmasNumOrcamentoSo(TesteDeFila):
         self.assertEqual(itens[0]["titulo"], "FOLDER MATEMATICA (#1)")
         self.assertEqual(itens[1]["titulo"], "(#1º Ano A) - FOLDER MATEMATICA - (#1)")
         self.assertEqual(itens[2]["titulo"], "(#2º Ano B) - FOLDER MATEMATICA - (#1)")
+
+
+class TestComplementoDoEnvioParcial(TesteDeFila):
+    """Envio PARCIAL (2026-10-21): o complemento entra no título do item.
+
+    O formulário 1 vai só em parte, então os pedidos dele chegam com o
+    complemento no parâmetro; o formulário 2 vai inteiro, no mesmo orçamento, e
+    o título dele não muda. O texto entra depois do nome do arquivo, em
+    maiúsculas como o nome, e antes do "(#formulário)" — com e sem turma.
+    """
+
+    def test_complemento_so_nos_itens_do_formulario_parcial(self):
+        sql = (SQL_DIR / "orcamento_agrupado.sql").read_text(encoding="utf-8")
+        with self.engine.connect() as conn:
+            try:
+                for comando in TABELAS_TEMP.split(";"):
+                    conn.execute(text(comando))
+                conn.execute(text("CREATE TEMP TABLE escola_turmas (id int, nome text, area text)"))
+                conn.execute(text("INSERT INTO escola_turmas VALUES (10, '2º Ano B', NULL)"))
+                conn.execute(text("""
+                    INSERT INTO pedido_formularios VALUES
+                        (1, NULL, '2026-10-10', 'T', now(), NULL), (2, NULL, '2026-10-10', 'U', now(), NULL)
+                """))
+                # Dois itens de carrinho com o componente único "Folder" (92), um por formulário.
+                for espec, carrinho, arquivo in [(1, 1, "folder_matematica.pdf"), (2, 2, "apostila-portugues.pdf")]:
+                    conn.execute(text("""
+                        INSERT INTO pedido_especificacoes
+                        VALUES (:e, 35, 92, 4, 4, '75 g', NULL, 11, 9, 109, NULL, NULL, :c, '{"componente":"x"}')
+                    """), {"e": espec, "c": carrinho})
+                    conn.execute(text("INSERT INTO pedido_arquivos_pdf VALUES (:e, :nome, 4)"),
+                                 {"e": espec, "nome": arquivo})
+                # (distribuição, formulário, carrinho, turma)
+                for d, formulario, carrinho, turma in [(1, 1, 1, None), (2, 1, 1, 10), (3, 2, 2, None)]:
+                    conn.execute(text("INSERT INTO pedido_distribuicoes VALUES (:d, 501, :f, :c, 5, :t)"),
+                                 {"d": d, "f": formulario, "c": carrinho, "t": turma})
+                    conn.execute(text("INSERT INTO pedido_distribuicao_arquivos VALUES (:d, :c, 92, :c)"),
+                                 {"d": d, "c": carrinho})
+
+                def titulos(complementos):
+                    payloads = conn.execute(text(sql), {
+                        "pedido_distribuicao_ids": [1, 2, 3], "id_cliente": 1, "id_vendedor": 1,
+                        "id_forma_pagamento": "1", "data_entrega": None,
+                        "complementos_nome_arquivo": complementos,
+                    }).scalars().all()
+                    self.assertEqual(len(payloads), 1)
+                    return [i["titulo"] for i in payloads[0]["data"]["itens"]]
+
+                com_complemento = titulos('{"1": "2ª remessa", "2": "2ª remessa"}')
+                sem_complemento = titulos(None)
+            finally:
+                conn.rollback()
+
+        self.assertEqual(com_complemento, [
+            "FOLDER MATEMATICA - 2ª REMESSA (#1)",
+            "APOSTILA PORTUGUES (#2)",
+            "(#2º Ano B) - FOLDER MATEMATICA - 2ª REMESSA - (#1)",
+        ])
+        self.assertEqual(sem_complemento, [
+            "FOLDER MATEMATICA (#1)",
+            "APOSTILA PORTUGUES (#2)",
+            "(#2º Ano B) - FOLDER MATEMATICA - (#1)",
+        ])
 
 
 class TestVariosMiolosNaOrdemDoItem(TesteDeFila):
@@ -249,7 +311,7 @@ class TestVariosMiolosNaOrdemDoItem(TesteDeFila):
 
                 payloads = conn.execute(text(sql), {
                     "pedido_distribuicao_ids": [1], "id_cliente": 1, "id_vendedor": 1,
-                    "id_forma_pagamento": "1", "data_entrega": None,
+                    "id_forma_pagamento": "1", "data_entrega": None, "complementos_nome_arquivo": None,
                 }).scalars().all()
             finally:
                 conn.rollback()

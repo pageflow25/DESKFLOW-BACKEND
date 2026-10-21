@@ -26,6 +26,9 @@ MODO_ASSINCRONO = "assincrono"
 
 ORIGENS = (ORIGEM_ESCOLA, ORIGEM_INTEGRACAO)
 
+# Tamanho de `orcamento_api_itens.complemento_nome_arquivo` no PageFlow.
+LIMITE_COMPLEMENTO_NOME_ARQUIVO = 60
+
 
 def url_webhook_de(payload: Optional[dict]) -> Optional[str]:
     url = (payload or {}).get("url_webhook")
@@ -87,6 +90,43 @@ def _data_entrega_valida(valor: Any) -> bool:
     return (len(dia), len(mes), len(ano)) == (2, 2, 4) and all(p.isdigit() for p in partes)
 
 
+def _complemento_valido(texto: Any) -> bool:
+    """Uma linha só, não vazia, até 60 caracteres: é o que o PageFlow grava, e o
+    texto vai para dentro do título do item no ERP."""
+    if not isinstance(texto, str) or not texto.strip():
+        return False
+    if any(ord(caractere) < 32 or ord(caractere) == 127 for caractere in texto):
+        return False
+    return len(texto.strip()) <= LIMITE_COMPLEMENTO_NOME_ARQUIVO
+
+
+def _complementos_nome_arquivo(
+    bruto: Any, ids: list,
+) -> Tuple[Optional[dict], Optional[PayloadInvalido]]:
+    """`complementos_nome_arquivo` do payload (desde 2026-10-21): `{id: texto}`
+    só com pedidos de formulário enviado parcialmente. Ausente — item enfileirado
+    antes do campo existir — vale `{}`, o nome original. Um id fora de
+    `ids_origem` ou um texto malformado é erro do produtor, e recusar é melhor que
+    mandar ao ERP um título que ninguém pediu."""
+    if bruto is None:
+        return {}, None
+    if not isinstance(bruto, dict):
+        return None, PayloadInvalido(
+            f"`complementos_nome_arquivo` precisa ser um objeto {{id: texto}}; veio {bruto!r}.")
+    complementos = {}
+    for chave, texto in bruto.items():
+        id_ = inteiro_positivo(chave)
+        if id_ is None or id_ not in ids:
+            return None, PayloadInvalido(
+                f"`complementos_nome_arquivo` tem id fora de `ids_origem`: {chave!r}.")
+        if not _complemento_valido(texto):
+            return None, PayloadInvalido(
+                f"`complementos_nome_arquivo` do id {id_} precisa ser texto de uma linha, "
+                f"com até {LIMITE_COMPLEMENTO_NOME_ARQUIVO} caracteres; veio {texto!r}.")
+        complementos[id_] = texto.strip()
+    return complementos, None
+
+
 def orcamento_do_payload(
     payload: Optional[dict],
 ) -> Tuple[Optional[OrcamentoReivindicado], Optional[PayloadInvalido]]:
@@ -128,6 +168,10 @@ def orcamento_do_payload(
         return None, PayloadInvalido(
             f"`data_entrega` precisa vir como DD/MM/YYYY; veio {data_entrega!r}.")
 
+    complementos, invalido = _complementos_nome_arquivo(payload.get("complementos_nome_arquivo"), ids)
+    if invalido is not None:
+        return None, invalido
+
     de_integracao = origem == ORIGEM_INTEGRACAO
     return OrcamentoReivindicado(
         id=orcamento_id,
@@ -142,6 +186,7 @@ def orcamento_do_payload(
         origem=origem,
         integra_pedido_produto_ids=ids if de_integracao else [],
         data_entrega=data_entrega,
+        complementos_nome_arquivo=complementos,
     ), None
 
 

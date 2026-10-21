@@ -19,6 +19,7 @@ perceber. A conferência é pelo `codigo_externo`, que carrega os ids de ORIGEM
 — pedido de escola ou produto de pedido de integração, conforme o lote.
 """
 
+import json
 from functools import lru_cache
 from pathlib import Path
 
@@ -137,6 +138,12 @@ def _mensagem_divisao_divergente(orcamento: OrcamentoReivindicado, quantidade: i
     )
 
 
+def _complementos_json(complementos: dict):
+    if not complementos:
+        return None
+    return json.dumps({str(id_): texto for id_, texto in complementos.items()}, ensure_ascii=False)
+
+
 def montar_payload_orcamento(conn, orcamento: OrcamentoReivindicado, identifier: str) -> dict:
     ids = list(orcamento.ids_origem)
     if not ids:
@@ -154,6 +161,10 @@ def montar_payload_orcamento(conn, orcamento: OrcamentoReivindicado, identifier:
         # do formulário. Vem None nos lotes de escola que já estavam na fila, e
         # aí o COALESCE do SQL cai de volta em form.data_entrega.
         "data_entrega": orcamento.data_entrega,
+        # Só o SQL Agrupado (origem escola) o declara; o de integração o ignora.
+        # Vai como texto JSON `{"<id>": "texto"}`, que o SQL lê com `->>`; None
+        # quando não há complemento, e aí todo título sai com o nome original.
+        "complementos_nome_arquivo": _complementos_json(orcamento.complementos_nome_arquivo),
     }
     linhas = conn.execute(_consulta(arquivo, parametro_ids), parametros).scalars().all()
 

@@ -62,6 +62,12 @@ class OrcamentoReivindicado:
     # Não é a data que vai ao ERP como data do item — essa é a `data_saida`,
     # que o PageFlow manda na APROVAÇÃO.
     data_entrega: Optional[str] = None
+    # Desde 2026-10-21, só na origem escola: `{id do pedido: texto}` com os
+    # pedidos de formulário enviado PARCIALMENTE (quem decide é o PageFlow, que
+    # grava em `orcamento_api_itens.complemento_nome_arquivo`). O SQL Agrupado
+    # acrescenta o texto ao título do item — o "nome do arquivo" no ERP. Vazio
+    # (o normal, e o de todo item anterior) mantém o nome original.
+    complementos_nome_arquivo: dict = field(default_factory=dict)
 
     @property
     def ids_origem(self) -> list:
@@ -92,7 +98,7 @@ def carregar_orcamento(conn, orcamento_id: int) -> Optional[OrcamentoReivindicad
     # Uma consulta só para as duas origens: o item tem exatamente uma das duas
     # colunas preenchida, então cada lista sai com os ids que lhe cabem.
     itens = conn.execute(text("""
-        SELECT pedido_distribuicao_id, integra_pedido_produto_id
+        SELECT pedido_distribuicao_id, integra_pedido_produto_id, complemento_nome_arquivo
           FROM orcamento_api_itens
          WHERE orcamento_api_orcamento_id = :id
          ORDER BY pedido_distribuicao_id NULLS LAST, integra_pedido_produto_id NULLS LAST
@@ -100,6 +106,13 @@ def carregar_orcamento(conn, orcamento_id: int) -> Optional[OrcamentoReivindicad
 
     pedidos = [item["pedido_distribuicao_id"] for item in itens if item["pedido_distribuicao_id"] is not None]
     produtos = [item["integra_pedido_produto_id"] for item in itens if item["integra_pedido_produto_id"] is not None]
+    # O mesmo que o produtor do PageFlow põe no payload, para o dry-run montar o
+    # título igual ao envio de verdade.
+    complementos = {
+        item["pedido_distribuicao_id"]: item["complemento_nome_arquivo"]
+        for item in itens
+        if item["pedido_distribuicao_id"] is not None and item["complemento_nome_arquivo"]
+    }
 
     return OrcamentoReivindicado(
         id=linha["id"],
@@ -114,6 +127,7 @@ def carregar_orcamento(conn, orcamento_id: int) -> Optional[OrcamentoReivindicad
         origem=linha["origem"] or ORIGEM_ESCOLA,
         integra_pedido_produto_ids=produtos,
         data_entrega=linha["data_entrega"],
+        complementos_nome_arquivo=complementos,
     )
 
 
