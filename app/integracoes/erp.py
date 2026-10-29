@@ -246,9 +246,10 @@ class ErpClient:
         return self._token
 
     def garantir_login(self) -> None:
-        """Faz login se o token estiver vencido. Chamado no início de cada
-        ciclo, antes de qualquer claim: com o ERP fora ou a senha errada, nada
-        sai da fila.
+        """Faz login se o token estiver vencido. Chamado por `_enviar` antes de
+        cada requisição (e pelo comando `verificar`), não antes do claim: com o
+        ERP fora ou a senha errada o item já foi reivindicado, e a
+        `FalhaLogin` vira `retentar` no motor — nenhuma requisição saiu.
 
         Lazy, com dupla verificação: o caminho comum (token válido) não toca no
         lock. Antes, com o lock tomado em TODA chamada, N threads serializavam

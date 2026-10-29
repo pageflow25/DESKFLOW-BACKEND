@@ -364,6 +364,66 @@ class TestNaoIdempotenteNaoRetentaSozinho(unittest.TestCase):
         self.assertEqual(desfecho.erro_codigo, "RESULTADO_INCERTO")
         self.assertEqual(len(vistos), 1, "a chamada não pode ser repetida")
 
+    def test_login_recusado_retenta_sem_post_e_nao_fica_incerto(self):
+        # Senha errada: o login falha ANTES do POST. Nada saiu, então repetir é
+        # seguro — `incerto` aqui mandaria à decisão humana um orçamento que
+        # nunca chegou ao ERP.
+        vistos = []
+
+        def roteador(request):
+            vistos.append(request)
+            if request.url.path == "/api/v1/auth":
+                return httpx.Response(401, json={"success": False, "message": "senha inválida"})
+            raise AssertionError(f"chamada inesperada: {request.method} {request.url}")
+
+        handler = HandlerPcpOrcamentoEnviar(_erp(roteador))
+        item = _item(_payload_orcamento())
+        preparo = handler.preparar(ConexaoFalsa(linhas=[LINHA_SQL]), item)
+
+        desfecho = self._motor(_catalogo("pcp.orcamento.enviar"))._chamar(
+            item, handler, preparo, 30.0)
+
+        self.assertIs(desfecho.estado, Estado.RETENTAR)
+        self.assertEqual(desfecho.erro_codigo, "ERP_LOGIN")
+        self.assertEqual([r.url.path for r in vistos], ["/api/v1/auth"], "nenhum POST de orçamento sai")
+
+    def test_login_sem_conexao_tambem_retenta(self):
+        def roteador(request):
+            raise httpx.ConnectError("sem rota", request=request)
+
+        handler = HandlerPcpOrcamentoEnviar(_erp(roteador))
+        item = _item(_payload_orcamento())
+        preparo = handler.preparar(ConexaoFalsa(linhas=[LINHA_SQL]), item)
+
+        desfecho = self._motor(_catalogo("pcp.orcamento.enviar"))._chamar(
+            item, handler, preparo, 30.0)
+
+        self.assertIs(desfecho.estado, Estado.RETENTAR)
+        self.assertEqual(desfecho.erro_codigo, "ERP_LOGIN")
+
+    def test_relogin_recusado_depois_de_401_retenta(self):
+        # 401 no POST é o ERP recusando sem processar; se o novo login também
+        # falha, continua sendo certeza de que nada foi gravado.
+        logins = []
+
+        def roteador(request):
+            if request.url.path == "/api/v1/auth":
+                logins.append(request)
+                if len(logins) == 1:
+                    return httpx.Response(200, json={"sucess": True, "data": {"token": "tok-1"}})
+                return httpx.Response(401, json={"success": False, "message": "senha inválida"})
+            return httpx.Response(401, json={"success": False, "message": "token expirado"})
+
+        handler = HandlerPcpOrcamentoEnviar(_erp(roteador))
+        item = _item(_payload_orcamento())
+        preparo = handler.preparar(ConexaoFalsa(linhas=[LINHA_SQL]), item)
+
+        desfecho = self._motor(_catalogo("pcp.orcamento.enviar"))._chamar(
+            item, handler, preparo, 30.0)
+
+        self.assertIs(desfecho.estado, Estado.RETENTAR)
+        self.assertEqual(desfecho.erro_codigo, "ERP_LOGIN")
+
     def test_verificacao_do_pcp_nao_decide_e_o_item_segue_incerto(self):
         # Enquanto a Bremen não confirmar a consulta por codigo_externo, o
         # incerto vai para decisão humana em vez de virar retentativa.
