@@ -16,6 +16,9 @@ def configuracao(**sobrescritas):
         ERP_503_MAX_WAIT_SECONDS=60,
         ERP_503_RETRY_BASE_SECONDS=5,
         ERP_503_RETRY_MAX_INTERVAL_SECONDS=30,
+        # Sem padrão no código: vêm 100 % do .env (ver `core/config.py`).
+        ERP_MAX_CONEXOES=6,
+        ERP_CONEXOES_RESERVADAS_SINCRONO=2,
         BLOB_READ_WRITE_TOKEN="blob-token",
         DOWNLOAD_BASE_PATH="",
         DOWNLOAD_TIMEOUT=5,

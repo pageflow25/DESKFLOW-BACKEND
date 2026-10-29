@@ -133,8 +133,8 @@ o próximo tenta de novo.
 
 | Ciclo | Intervalo | O que faz |
 |---|---|---|
-| fila síncrona | `FILA_POLL_SINCRONO_SEGUNDOS` (1 s) | claim e execução no pool síncrono (1 por vez, em ordem) |
-| fila assíncrona | `FILA_POLL_ASSINCRONO_SEGUNDOS` (5 s) | claim e execução no pool assíncrono (4 em paralelo) |
+| fila síncrona | `FILA_POLL_SINCRONO_SEGUNDOS` (1 s) | claim e execução no pool síncrono (`FILA_POOL_SINCRONO` threads; com `1`, um por vez, em ordem) |
+| fila assíncrona | `FILA_POLL_ASSINCRONO_SEGUNDOS` (5 s) | claim e execução no pool assíncrono (`FILA_POOL_ASSINCRONO` threads em paralelo) |
 | reaper | `FILA_REAPER_SEGUNDOS` (30 s) | devolve itens com lease vencido |
 | heartbeat | `FILA_HEARTBEAT_SEGUNDOS` (30 s) | registra o worker vivo em `fila_workers` |
 
@@ -289,6 +289,17 @@ arquivo (ex.: `testing`), defina `DESKFLOW2_ENV_FILE=.env.testing`. Arquivos
 | `DATABASE_URL` | o mesmo Postgres do PageFlow |
 | `ERP_BASE_URL` | base da API do Wingraph |
 | `ERP_USER` / `ERP_PASSWORD` | credenciais do ERP |
+| `FILA_POOL_SINCRONO` | threads do pool síncrono (>= 1). `1` = um lançamento síncrono de cada vez, em ordem |
+| `FILA_POOL_ASSINCRONO` | threads do pool assíncrono (>= 1) |
+| `ERP_MAX_CONEXOES` | teto de conexões simultâneas ao ERP (>= 1) |
+| `ERP_CONEXOES_RESERVADAS_SINCRONO` | conexões reservadas ao pool síncrono (0 a `ERP_MAX_CONEXOES - 1`); o assíncrono enxerga o teto menos a reserva |
+
+As quatro últimas não têm padrão no código: o número de threads e de conexões
+vem 100 % do `.env`. Ausente ou fora da faixa, o worker não sobe — o erro do
+boot diz qual chave. Para não haver disputa de conexão entre os pools, mantenha
+`FILA_POOL_SINCRONO <= ERP_CONEXOES_RESERVADAS_SINCRONO` e
+`FILA_POOL_ASSINCRONO <= ERP_MAX_CONEXOES - ERP_CONEXOES_RESERVADAS_SINCRONO`.
+O pool do banco se ajusta sozinho (`DB_POOL_SIZE=0`).
 
 ### Opcionais
 
@@ -305,12 +316,9 @@ arquivo (ex.: `testing`), defina `DESKFLOW2_ENV_FILE=.env.testing`. Arquivos
 | `ERP_503_MAX_WAIT_SECONDS` | `300` | janela para repetir 503 e falha de conexão |
 | `ERP_503_RETRY_BASE_SECONDS` | `5` | espera inicial entre tentativas |
 | `ERP_503_RETRY_MAX_INTERVAL_SECONDS` | `30` | espera máxima entre tentativas |
-| `ERP_MAX_CONEXOES` | `6` | teto de conexões simultâneas ao ERP |
-| `ERP_CONEXOES_RESERVADAS_SINCRONO` | `2` | conexões reservadas ao pool síncrono |
 | `FILA_ATIVA` | `true` | `false` faz o `worker` sair sem iniciar |
 | `FILA_DESTINO` | `erp_wingraph` | destino cujos itens este worker executa |
 | `FILA_WORKER_ID` | `<host>:<pid>` | id do worker (único em `fila_workers`) |
-| `FILA_POOL_SINCRONO` / `FILA_POOL_ASSINCRONO` | `1` / `4` | tamanho de cada pool |
 | `FILA_POLL_SINCRONO_SEGUNDOS` / `FILA_POLL_ASSINCRONO_SEGUNDOS` | `1` / `5` | intervalo do poll |
 | `FILA_LOTE_CLAIM` | `10` | teto de itens por claim |
 | `FILA_LEASE_MARGEM_SEGUNDOS` | `30` | lease = timeout do tipo + margem |
@@ -331,6 +339,10 @@ DATABASE_URL=postgresql://usuario:senha@host:5432/pageflow
 ERP_BASE_URL=https://erp.exemplo.com.br
 ERP_USER=usuario
 ERP_PASSWORD=senha
+FILA_POOL_SINCRONO=1
+FILA_POOL_ASSINCRONO=4
+ERP_MAX_CONEXOES=6
+ERP_CONEXOES_RESERVADAS_SINCRONO=2
 DOWNLOAD_BASE_PATH=\\servidor\producao
 BLOB_READ_WRITE_TOKEN=token
 ```

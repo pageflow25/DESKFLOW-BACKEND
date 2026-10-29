@@ -36,9 +36,6 @@ from ..utils.conversao import inteiro_positivo
 
 logger = logging.getLogger(__name__)
 
-PADRAO_MAX_CONEXOES = 6
-PADRAO_CONEXOES_RESERVADAS_SINCRONO = 2
-
 CAMINHO_CLIENTE = "/api/v1/cliente"
 CAMINHO_CARACTERISTICAS_PRODUTO = "/api/v1/caracteristicasproduto"
 CAMINHO_ORCAMENTO = "/api/v1/orcamento"
@@ -191,9 +188,10 @@ class ErpClient:
     ):
         self._settings = settings
         self._base = settings.ERP_BASE_URL
-        self._maximo = max(1, int(getattr(settings, "ERP_MAX_CONEXOES", PADRAO_MAX_CONEXOES)))
-        reserva = int(getattr(settings, "ERP_CONEXOES_RESERVADAS_SINCRONO", PADRAO_CONEXOES_RESERVADAS_SINCRONO))
-        self._reserva_sincrono = min(max(0, reserva), self._maximo - 1)
+        # Os dois vêm do .env, já validados em `Settings` (teto >= 1 e
+        # 0 <= reserva < teto): nada de padrão nem de correção silenciosa aqui.
+        self._maximo = settings.ERP_MAX_CONEXOES
+        self._reserva_sincrono = settings.ERP_CONEXOES_RESERVADAS_SINCRONO
         # Limites explícitos: o pool default do httpx funcionava por acidente.
         self._http = http or httpx.Client(
             timeout=settings.ERP_TIMEOUT,
@@ -213,7 +211,7 @@ class ErpClient:
         # síncrona só o total. Logo a assíncrona nunca passa de
         # (máximo - reserva) e sempre sobra conexão para o síncrono.
         self._vagas_total = threading.BoundedSemaphore(self._maximo)
-        self._vagas_assincrono = threading.BoundedSemaphore(max(1, self._maximo - self._reserva_sincrono))
+        self._vagas_assincrono = threading.BoundedSemaphore(self._maximo - self._reserva_sincrono)
 
     # --- Token -----------------------------------------------------------------
 
