@@ -281,6 +281,19 @@ respostas_gerais AS (
     ORDER BY ip.distribuicao_referencia, bp.id
 ),
 
+-- Envio das tarefas OBRIGATÓRIAS (gravadas pelo PageFlow a partir do vínculo item × componente,
+-- doc calculadora-orcamento/21): a tela de Configurações do sistema grava
+-- `tarefas.enviar_obrigatorias_erp`. Sem a chave ou com 'false', só as EXTRAS (pedidas no
+-- formulário) vão ao ERP — o Bremen completa o resto pelo modelo do produto. Lida a cada envio.
+envio_tarefas AS (
+    SELECT COALESCE(
+        (SELECT LOWER(TRIM(valor)) = 'true'
+           FROM configuracao_sistema
+          WHERE chave = 'tarefas.enviar_obrigatorias_erp'),
+        FALSE
+    ) AS enviar_obrigatorias
+),
+
 -- Tarefas de escopo componente vinculadas à especificação via tabela pivot
 tarefas_componentes AS (
     SELECT DISTINCT
@@ -289,7 +302,9 @@ tarefas_componentes AS (
         bt.descricao
     FROM pedido_especificacoes_tarefas bet
     JOIN bremen_tarefas bt ON bt.id = bet.tarefa_id
+    CROSS JOIN envio_tarefas et
     WHERE bt.id_componente IS TRUE
+      AND (bet.origem = 'extra' OR et.enviar_obrigatorias)
 ),
 
 -- Tarefas de escopo geral vinculadas à especificação via tabela pivot
@@ -300,7 +315,9 @@ tarefas_gerais AS (
         bt.descricao
     FROM pedido_especificacoes_tarefas bet
     JOIN bremen_tarefas bt ON bt.id = bet.tarefa_id
+    CROSS JOIN envio_tarefas et
     WHERE bt.id_geral IS TRUE
+      AND (bet.origem = 'extra' OR et.enviar_obrigatorias)
 )
 
 SELECT json_strip_nulls(json_build_object(
