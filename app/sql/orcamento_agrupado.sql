@@ -46,6 +46,11 @@
 --   - Preço fechado (2026-10-30): item de pedido gerado pelo "Fechar pedido" da
 --     Calculadora vai com `valor_total_final` (total da linha) e
 --     `usar_listapreco = 0`; os demais seguem pela lista do ERP (precos_fechados).
+--   - Nome do arquivo no título (2026-11-03): vem PRONTO do PageFlow em
+--     `pedido_arquivos_pdf.nome_formatado` (sem .pdf, `_`/`-` viram espaço,
+--     CAIXA ALTA — utils/arquivos/formatarNomeArquivoPdf.js lá). Aqui não se
+--     transforma o nome: a regra é só do PageFlow. Exige a migration
+--     20261103120000-add-nome-formatado-pedido-arquivos-pdf no banco.
 --
 -- Parâmetros: :pedido_distribuicao_ids (int[]), :id_cliente, :id_vendedor,
 -- :id_forma_pagamento, :data_entrega (texto 'DD/MM/YYYY' do orçamento, vindo do
@@ -141,7 +146,8 @@ materiais AS (
         -- Posição do componente no item (Capa, Miolo 1, Miolo 2…), copiada do
         -- cadastro na criação do pedido; nula em pedidos anteriores a 2026-10-20.
         ef.ordem_componente,
-        ap.nome AS arquivo_nome,
+        -- Já formatado pelo PageFlow; o nome original (ap.nome) não é usado aqui.
+        ap.nome_formatado AS arquivo_nome_formatado,
         ap.paginas,
         -- Papel DESTE componente (três eixos). `gramatura_miolo` é o texto da
         -- gramatura do componente, apesar do nome (ver a doc do PageFlow);
@@ -244,23 +250,21 @@ itens_produto AS (
             CASE
                 WHEN ia.id_turma IS NOT NULL AND NULLIF(TRIM(t.nome), '') IS NOT NULL THEN
                     '(#' || TRIM(t.nome) || ') - '
-                    || UPPER(TRIM(REGEXP_REPLACE(REGEXP_REPLACE(
-                        COALESCE(
-                            (ARRAY_AGG(mat.arquivo_nome
-                                       ORDER BY mat.ordem_componente NULLS LAST, mat.id_componente)
-                                FILTER (WHERE mat.is_miolo AND mat.arquivo_nome IS NOT NULL))[1],
-                            MAX(mat.arquivo_nome)
-                        ), '\.pdf$', '', 'i'), '[_-]+', ' ', 'g')))
+                    || COALESCE(
+                        (ARRAY_AGG(mat.arquivo_nome_formatado
+                                   ORDER BY mat.ordem_componente NULLS LAST, mat.id_componente)
+                            FILTER (WHERE mat.is_miolo AND mat.arquivo_nome_formatado IS NOT NULL))[1],
+                        MAX(mat.arquivo_nome_formatado)
+                    )
                     || COALESCE(' - ' || ia.complemento_nome_arquivo, '')
                     || ' - (#' || MAX(form.id) || ')'
                 ELSE
-                    UPPER(TRIM(REGEXP_REPLACE(REGEXP_REPLACE(
-                        COALESCE(
-                            (ARRAY_AGG(mat.arquivo_nome
-                                       ORDER BY mat.ordem_componente NULLS LAST, mat.id_componente)
-                                FILTER (WHERE mat.is_miolo AND mat.arquivo_nome IS NOT NULL))[1],
-                            MAX(mat.arquivo_nome)
-                        ), '\.pdf$', '', 'i'), '[_-]+', ' ', 'g')))
+                    COALESCE(
+                        (ARRAY_AGG(mat.arquivo_nome_formatado
+                                   ORDER BY mat.ordem_componente NULLS LAST, mat.id_componente)
+                            FILTER (WHERE mat.is_miolo AND mat.arquivo_nome_formatado IS NOT NULL))[1],
+                        MAX(mat.arquivo_nome_formatado)
+                    )
                     || COALESCE(' - ' || ia.complemento_nome_arquivo, '')
                     || ' (#' || MAX(form.id) || ')'
             END,

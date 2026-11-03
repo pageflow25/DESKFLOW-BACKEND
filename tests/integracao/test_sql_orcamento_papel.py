@@ -19,6 +19,7 @@ alguém reconfigurar os itens usados aqui, reconfira antes de acusar bug.
 """
 
 import pathlib
+import re
 
 from sqlalchemy import text
 
@@ -28,10 +29,10 @@ SQL_DIR = pathlib.Path(__file__).resolve().parents[2] / "app" / "sql"
 
 TABELAS_TEMP = """
 CREATE TEMP TABLE pedido_formularios (id int, observacoes text, data_entrega date, titulo text,
-                                      criado_em timestamptz, usuario_id int);
+                                      criado_em timestamptz, usuario_id int, formulario_orcamento_id int);
 CREATE TEMP TABLE pedido_distribuicoes (id int, unidade_escolar_id int, formulario_id int,
                                         pedido_item_carrinho_id int, quantidade int, id_turma int);
-CREATE TEMP TABLE pedido_arquivos_pdf (id int, nome text, paginas int);
+CREATE TEMP TABLE pedido_arquivos_pdf (id int, nome text, paginas int, nome_formatado text);
 CREATE TEMP TABLE pedido_distribuicao_arquivos (distribuicao_material_id int, arquivo_pdf_id int,
                                                 id_componente int, especificacao_form_id int);
 CREATE TEMP TABLE pedido_especificacoes (id int, id_produto int, id_componente int, corfrente int,
@@ -40,6 +41,18 @@ CREATE TEMP TABLE pedido_especificacoes (id int, id_produto int, id_componente i
                                          altura text, largura text, pedido_item_carrinho_id int,
                                          metadados text, ordem_componente int)
 """
+
+def nome_formatado(nome: str) -> str:
+    """O que o PageFlow grava em `pedido_arquivos_pdf.nome_formatado`
+    (BACKEND_PAGEFLOW/utils/arquivos/formatarNomeArquivoPdf.js). O SQL lê a
+    coluna pronta; a regra só existe aqui para montar o fixture."""
+    return re.sub(r"[_-]+", " ", re.sub(r"\.pdf$", "", nome, flags=re.I)).strip(" ").upper()
+
+
+def inserir_arquivo(conn, id_: int, nome: str) -> None:
+    conn.execute(text("INSERT INTO pedido_arquivos_pdf VALUES (:id, :nome, 4, :nome_formatado)"),
+                 {"id": id_, "nome": nome, "nome_formatado": nome_formatado(nome)})
+
 
 COM_ARQUIVO, SEM_ARQUIVO, ORFA = "arquivo", "sem_arquivo", "orfa"
 
@@ -107,8 +120,7 @@ class TestComponentesPorEspecificacaoNoOrcamento(TesteDeFila):
                            "metadados": '{"componente":"x","sem_arquivo":true}' if origem == SEM_ARQUIVO
                                         else '{"componente":"x"}'})
                     if origem == COM_ARQUIVO:
-                        conn.execute(text("INSERT INTO pedido_arquivos_pdf VALUES (:id, :nome, 4)"),
-                                     {"id": espec, "nome": f"arquivo_{espec}.pdf"})
+                        inserir_arquivo(conn, espec, f"arquivo_{espec}.pdf")
                         conn.execute(text("INSERT INTO pedido_distribuicao_arquivos VALUES (:d, :id, :comp, :id)"),
                                      {"d": d, "id": espec, "comp": comp})
                 distribuicoes = sorted({linha[0] for linha in ESPECIFICACOES})
@@ -192,7 +204,7 @@ class TestTurmasNumOrcamentoSo(TesteDeFila):
                     INSERT INTO pedido_especificacoes
                     VALUES (1, 35, 92, 4, 4, '75 g', NULL, 11, 9, 109, NULL, NULL, 1, '{"componente":"x"}')
                 """))
-                conn.execute(text("INSERT INTO pedido_arquivos_pdf VALUES (1, 'folder_matematica.pdf', 4)"))
+                inserir_arquivo(conn, 1, "folder_matematica.pdf")
                 # (distribuição, unidade, quantidade, turma) — todas do mesmo item de carrinho.
                 for d, unidade, quantidade, turma in [(1, 501, 10, 10), (2, 502, 5, 10), (3, 501, 7, 20), (4, 501, 3, None)]:
                     conn.execute(text("INSERT INTO pedido_distribuicoes VALUES (:d, :u, 1, 1, :q, :t)"),
@@ -244,8 +256,7 @@ class TestComplementoDoEnvioParcial(TesteDeFila):
                         INSERT INTO pedido_especificacoes
                         VALUES (:e, 35, 92, 4, 4, '75 g', NULL, 11, 9, 109, NULL, NULL, :c, '{"componente":"x"}')
                     """), {"e": espec, "c": carrinho})
-                    conn.execute(text("INSERT INTO pedido_arquivos_pdf VALUES (:e, :nome, 4)"),
-                                 {"e": espec, "nome": arquivo})
+                    inserir_arquivo(conn, espec, arquivo)
                 # (distribuição, formulário, carrinho, turma)
                 for d, formulario, carrinho, turma in [(1, 1, 1, None), (2, 1, 1, 10), (3, 2, 2, None)]:
                     conn.execute(text("INSERT INTO pedido_distribuicoes VALUES (:d, 501, :f, :c, 5, :t)"),
@@ -303,8 +314,7 @@ class TestVariosMiolosNaOrdemDoItem(TesteDeFila):
                         INSERT INTO pedido_especificacoes
                         VALUES (:e, 316, :c, 1, 1, '75 g', NULL, 9, 9, 109, NULL, NULL, 1, '{}', :o)
                     """), {"e": espec, "c": comp, "o": ordem})
-                    conn.execute(text("INSERT INTO pedido_arquivos_pdf VALUES (:e, :nome, 4)"),
-                                 {"e": espec, "nome": arquivo})
+                    inserir_arquivo(conn, espec, arquivo)
                     conn.execute(text("INSERT INTO pedido_distribuicao_arquivos VALUES (1, :e, :c, :e)"),
                                  {"e": espec, "c": comp})
                 conn.execute(text("INSERT INTO pedido_distribuicoes VALUES (1, NULL, 1, 1, 10, NULL)"))
