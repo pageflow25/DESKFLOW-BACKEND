@@ -3,7 +3,7 @@
 Antes o JSON vinha pronto no payload do item (`itens_aprovados`, montado pelo
 PageFlow). Agora sai do SQL, ao lado dos SQLs de orçamento, para poder ser
 ajustado sem mexer no PageFlow. O SQL lê tudo pela aprovação: o orçamento, o
-`id_orcamento` do ERP, o `gerar_op`, o `gerarOpDistribuida` (do lote), os itens devolvidos pelo ERP com as datas
+`id_orcamento` do ERP, o `gerar_op`, o `gerar_op_por_entrega` (do lote), os itens devolvidos pelo ERP com as datas
 e, em lote com entregas por distribuição, as `entregas[]`.
 """
 
@@ -22,7 +22,7 @@ def _consulta():
 
 
 def montar_dados_aprovacao(conn, aprovacao_id: int):
-    """O `data` da aprovação (`{id_orcamento, gerar_op, gerarOpDistribuida, itens}`), ou `None`
+    """O `data` da aprovação (`{id_orcamento, gerar_op, gerar_op_por_entrega, itens}`), ou `None`
     quando a aprovação não existe no banco."""
     linhas = conn.execute(_consulta(), {"aprovacao_id": aprovacao_id}).scalars().all()
     if not linhas:

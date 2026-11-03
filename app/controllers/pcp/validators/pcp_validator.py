@@ -197,7 +197,7 @@ def aprovacao_do_payload(
 
     É só dele que o handler precisa: o corpo da aprovação sai de
     `sql/aprovacao.sql`, que lê o orçamento, o `id_orcamento`, o `gerar_op`, o
-    `gerarOpDistribuida` (do lote) e
+    `gerar_op_por_entrega` (do lote) e
     os itens a partir da aprovação. `id_orcamento` e `itens_aprovados` ainda
     vêm no payload (o PageFlow os manda para a tela da fila), mas não são lidos
     — quem é conferido é o resultado do SQL, em `aprovacao_dos_dados`.
@@ -214,7 +214,7 @@ def aprovacao_dos_dados(
 ) -> Tuple[Optional[dict], Optional[PayloadInvalido]]:
     """Confere o `data` montado por `sql/aprovacao.sql`.
 
-    Devolve `{id_orcamento, itens, gerar_op, gerarOpDistribuida}`. As três recusas são definitivas:
+    Devolve `{id_orcamento, itens, gerar_op, gerar_op_por_entrega}`. As três recusas são definitivas:
     aprovação inexistente, orçamento sem `id_orcamento` (quem o grava é o
     retorno do orçamento, não aparece com o tempo) e nenhum item a aprovar.
     """
@@ -239,7 +239,7 @@ def aprovacao_dos_dados(
         "id_orcamento": id_orcamento,
         "itens": itens,
         "gerar_op": bool(dados.get("gerar_op")),
-        "gerarOpDistribuida": bool(dados.get("gerarOpDistribuida")),
+        "gerar_op_por_entrega": bool(dados.get("gerar_op_por_entrega")),
     }, None
 
 

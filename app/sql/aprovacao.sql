@@ -1,6 +1,6 @@
 -- Aprovação de UM orçamento do PCP (POST /api/v1/proposta/aprovar).
 --
--- Monta o `data` do corpo — { id_orcamento, gerar_op, gerarOpDistribuida,
+-- Monta o `data` do corpo — { id_orcamento, gerar_op, gerar_op_por_entrega,
 -- itens[] } — para UMA
 -- orcamento_api_aprovacoes. O `identifier` e o modo assíncrono
 -- (`url_webhook`) são postos pelo handler (handlers/pcp/aprovacao_enviar.py),
@@ -40,9 +40,11 @@
 -- (fallback distribuição). Entrega sem data é descartada (o PageFlow bloqueia
 -- a aprovação nesse caso, então aqui ela não deveria chegar).
 --
--- `gerarOpDistribuida`: decisão do "Enviar" do PCP gravada no LOTE
+-- `gerar_op_por_entrega`: decisão do "Enviar" do PCP gravada no LOTE
 -- (`orcamento_api_lotes.gerar_op_distribuida`, independente do `gerar_op`).
--- Aprovação sem lote, ou lote anterior à coluna, vai `false`.
+-- Aprovação sem lote, ou lote anterior à coluna, vai `false`. Nome do campo
+-- pela doc do Wingraph ("uma OP diferente para cada entrega aprovada"); até
+-- 2026-11-03 ia como `gerarOpDistribuida`, que não consta na API.
 --
 -- Parâmetro: :aprovacao_id (orcamento_api_aprovacoes.id). Devolve 1 linha com
 -- o `data` (json), ou nenhuma se a aprovação não existir.
@@ -198,7 +200,7 @@ SELECT
     json_build_object(
         'id_orcamento', ap.id_orcamento,
         'gerar_op', COALESCE(ap.gerar_op, false),
-        'gerarOpDistribuida', ap.gerar_op_distribuida,
+        'gerar_op_por_entrega', ap.gerar_op_distribuida,
         'itens', COALESCE(it.itens, '[]'::json)
     ) AS data
 FROM aprovacao ap
