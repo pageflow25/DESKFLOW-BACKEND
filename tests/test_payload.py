@@ -154,8 +154,10 @@ class TestComplementoDoEnvioParcial(unittest.TestCase):
     def test_o_sql_declara_o_parametro_e_o_poe_no_titulo(self):
         corpo = self._corpo()
         self.assertIn("CAST(:complementos_nome_arquivo AS jsonb)", corpo)
-        # Nas duas formas de título (com e sem turma) e no nome de reserva.
-        self.assertEqual(corpo.count("COALESCE(' - ' || ia.complemento_nome_arquivo, '')"), 3)
+        # Montado uma vez e usado nas duas formas de título (com e sem turma) e
+        # no nome de reserva.
+        self.assertIn("COALESCE(' - ' || i.complemento_nome_arquivo, '') AS sufixo", corpo)
+        self.assertEqual(corpo.count("|| s.sufixo"), 3)
 
 
 if __name__ == "__main__":

@@ -2,63 +2,28 @@
 -- SQL Agrupado: o ÚNICO SQL de orçamento dos lotes de ESCOLA
 -- (orcamento_api_lotes.origem = 'escola').
 --
--- Até 2026-10-07 havia dois, escolhidos pelo modo de agrupamento marcado no
--- "Enviar": este (o antigo "modo escola") e o orcamento_unidade.sql (1
--- orçamento por unidade, 1 item por pedido). O modo saiu do sistema e o
--- orcamento_unidade.sql foi apagado; todo envio de escola sai daqui.
+-- Monta o corpo de UM POST /api/v1/orcamento para UM orcamento_api_orcamentos
+-- do PCP, que o PageFlow cria com todos os pedidos de um mesmo cliente/
+-- vendedor/forma de pagamento, de todas as turmas. Dentro dele, 1 item por item
+-- de carrinho E turma: soma as quantidades das unidades que pedem o mesmo item
+-- na mesma turma, e o item de turma leva o nome dela na frente do título.
+-- Itens sem turma vêm primeiro, depois as turmas pela ordem do nome.
 --
--- Base: docs/legado/query_orcamento_agrupado.sql. Monta o corpo de UM POST
--- /api/v1/orcamento para UM orcamento_api_orcamentos do PCP — que o PageFlow
--- cria com TODOS os pedidos de um mesmo cliente/vendedor/forma de pagamento,
--- de todas as turmas (desde 2026-10-20; antes era 1 orçamento por turma).
--- Dentro dele, 1 item por item de carrinho E turma: soma as quantidades das
--- unidades que compartilham o mesmo item na mesma turma, e o item de turma
--- leva o nome dela na frente do título — "(#TURMA) - ..." — para diferenciar
--- do mesmo produto em outra turma. Itens sem turma vêm primeiro, depois as
--- turmas pela ordem do nome.
---
--- Diferenças para a query legada:
---   - Entrada: os ids exatos de pedido_distribuicoes do orçamento, não mais
---     filtros por escola/data/status.
---   - Cabeçalho (id_cliente/id_vendedor/id_forma_pagamento) vem da requisição
---     (par escolhido no "Enviar"), não de uma unidade qualquer com LIMIT 1.
---   - Cada item leva `codigo_externo` = ids dos pedidos agrupados, separados
---     por vírgula ("12345683,12345687"); o PageFlow desmembra no retorno.
---   - `materiais` lê o papel em três eixos (id_substrato /
---     bremen_formato_papel). A reserva por id_papel (bremen_tamanho_papel)
---     saiu em 2026-09-30: a migration 20260923110000-contract-papel-antigo do
---     PageFlow dropou pedido_especificacoes.id_papel e moveu a tabela para o
---     schema contract_backup, e o LEFT JOIN quebrava a query inteira. Pedido
---     antigo sem os três eixos cai no texto livre de ef.altura/ef.largura
---     (BACKEND_PAGEFLOW/docs/papel-tres-eixos-deskflow.md).
---   - Componentes POR ESPECIFICAÇÃO (2026-10-02): sem cenários miolo/capa/
---     outros — o PageFlow grava uma especificação por componente, com o papel
---     resolvido, inclusive dos componentes SEM arquivo (papelão, guarda), e
---     cada um vira um objeto montado da própria especificação. A capa deixou
---     de ir com cor fixa 4/0: a cor dela não vai, e o Bremen usa a do modelo.
---   - `tarefas_gerais` sai como { id, descricao } (formato do Wingraph).
---   - Campos internos (ids_distribuicao, id_escola) não vão mais no corpo.
---   - Envio PARCIAL (2026-10-21): o pedido de um formulário enviado só em parte
---     traz um complemento, que entra no título logo depois do nome do arquivo e
---     antes do "(#formulário)": "NOME - COMPLEMENTO (#123)" ou
---     "(#TURMA) - NOME - COMPLEMENTO - (#123)". Sem complemento, o título é o de
---     sempre. Quem decide o que é parcial é o PageFlow; aqui só se aplica.
---   - Preço fechado (2026-10-30): item de pedido gerado pelo "Fechar pedido" da
---     Calculadora vai com `valor_total_final` (total da linha) e
---     `usar_listapreco = 0`; os demais seguem pela lista do ERP (precos_fechados).
---   - Nome do arquivo no título (2026-11-03): vem PRONTO do PageFlow em
---     `pedido_arquivos_pdf.nome_formatado` (sem .pdf, `_`/`-` viram espaço,
---     CAIXA ALTA — utils/arquivos/formatarNomeArquivoPdf.js lá). Aqui não se
---     transforma o nome: a regra é só do PageFlow. Exige a migration
---     20261103120000-add-nome-formatado-pedido-arquivos-pdf no banco.
+-- O que vem PRONTO do PageFlow (aqui só se lê, não se decide):
+--   - uma especificação por componente, com papel em três eixos e cor já
+--     resolvidos — inclusive a dos componentes SEM arquivo (papelão, guarda),
+--     marcados com `metadados.sem_arquivo = true`;
+--   - o nome do arquivo formatado (pedido_arquivos_pdf.nome_formatado);
+--   - o complemento do título nos envios PARCIAIS (:complementos_nome_arquivo);
+--   - o preço fechado da Calculadora (precificacao_pedido_item_valores).
+-- O histórico de cada regra está no git log deste arquivo.
 --
 -- Parâmetros: :pedido_distribuicao_ids (int[]), :id_cliente, :id_vendedor,
 -- :id_forma_pagamento, :data_entrega (texto 'DD/MM/YYYY' do orçamento, vindo do
 -- claim — ver repositorios/fila.py; NULL nos lotes anteriores a 2026-09-24, que
--- caem de volta na data do formulário), :complementos_nome_arquivo (texto JSON
--- {"<id do pedido>": "complemento"} com os pedidos de envio parcial; NULL sem
--- nenhum). Devolve exatamente 1 linha (o orçamento inteiro) ou nenhuma, quando
--- nenhum item pôde ser montado.
+-- caem na data do formulário), :complementos_nome_arquivo (texto JSON
+-- {"<id do pedido>": "complemento"}; NULL sem envio parcial). Devolve 1 linha
+-- (o orçamento inteiro) ou nenhuma, quando nenhum item pôde ser montado.
 
 WITH parametros AS (
     SELECT
@@ -66,24 +31,14 @@ WITH parametros AS (
         CAST(:id_cliente AS int) AS id_cliente,
         CAST(:id_vendedor AS int) AS id_vendedor,
         CAST(:id_forma_pagamento AS text) AS id_forma_pagamento,
-        -- Data de entrega ESCOLHIDA no "Enviar" e gravada em
-        -- orcamento_api_orcamentos.data_entrega ('DD/MM/YYYY', vinda do claim
-        -- — ver repositorios/fila.py). Manda sobre a do formulário; vem NULL
-        -- só nos lotes de escola anteriores a 2026-09-24, que já estavam na
-        -- fila, e aí o COALESCE lá embaixo cai em form.data_entrega.
         CAST(:data_entrega AS text) AS data_entrega,
-        -- Complemento do nome do arquivo de cada pedido de formulário enviado
-        -- PARCIALMENTE, gravado pelo PageFlow em
-        -- orcamento_api_itens.complemento_nome_arquivo e trazido no payload do
-        -- item da fila. NULL (o normal) deixa todo título com o nome original.
         CAST(:complementos_nome_arquivo AS jsonb) AS complementos_nome_arquivo
 ),
 
--- 1 linha por item comercial entregue a uma unidade/turma.
+-- 1 linha por pedido: um item de carrinho entregue a uma unidade/turma.
 distribuicoes AS (
     SELECT
         dm.id AS distribuicao_id,
-        dm.unidade_escolar_id AS unidade_id,
         dm.formulario_id,
         dm.pedido_item_carrinho_id,
         dm.quantidade,
@@ -94,92 +49,10 @@ distribuicoes AS (
       AND dm.quantidade > 0
 ),
 
--- Componentes de cada distribuição: 1 linha por componente, cada um com a SUA
--- especificação (papel, cor, perguntas, tarefas). Duas fontes:
---   1. os arquivos distribuídos (pedido_distribuicao_arquivos): o que tem PDF
---      — capa, miolo, folha de rosto;
---   2. os componentes SEM arquivo do mesmo item de carrinho (papelão, guarda),
---      que o PageFlow grava desde 2026-09-24 com papel próprio, cor 0/0, as
---      perguntas deles e `metadados.sem_arquivo = true`
---      (especificacaoPedidoService.criarEspecificacoesDeComponentesSemArquivo).
--- O critério da fonte 2 é a marca `sem_arquivo`, e não "está no carrinho e não
--- tem arquivo": pedidos de jun–ago têm especificações repetidas no carrinho
--- que nunca foram componente de nada. O CASE garante que o cast para jsonb só
--- roda em texto que contém a marca — um `metadados` malformado em qualquer
--- outra linha da tabela não derruba o orçamento.
-componentes_distribuicao AS (
-    SELECT
-        pda.distribuicao_material_id AS distribuicao_id,
-        pda.especificacao_form_id,
-        pda.arquivo_pdf_id,
-        pda.id_componente
-    FROM pedido_distribuicao_arquivos pda
-    WHERE pda.distribuicao_material_id IN (SELECT distribuicao_id FROM distribuicoes)
-
-    UNION ALL
-
-    SELECT
-        d.distribuicao_id,
-        ef.id,
-        NULL,
-        ef.id_componente
-    FROM distribuicoes d
-    JOIN pedido_especificacoes ef ON ef.pedido_item_carrinho_id = d.pedido_item_carrinho_id
-    WHERE CASE
-              WHEN ef.metadados LIKE '%sem_arquivo%'
-              THEN (ef.metadados::jsonb ->> 'sem_arquivo') = 'true'
-              ELSE FALSE
-          END
-),
-
--- 1 linha por (distribuição, componente). Se o mesmo componente vier pelas
--- duas fontes, fica a que tem arquivo.
-materiais AS (
-    SELECT DISTINCT ON (cd.distribuicao_id, COALESCE(cd.id_componente, ef.id_componente))
-        cd.distribuicao_id,
-        cd.arquivo_pdf_id,
-        cd.especificacao_form_id,
-        COALESCE(cd.id_componente, ef.id_componente) AS id_componente,
-        ef.id_produto,
-        ef.corfrente,
-        ef.corverso,
-        -- Posição do componente no item (Capa, Miolo 1, Miolo 2…), copiada do
-        -- cadastro na criação do pedido; nula em pedidos anteriores a 2026-10-20.
-        ef.ordem_componente,
-        -- Já formatado pelo PageFlow; o nome original (ap.nome) não é usado aqui.
-        ap.nome_formatado AS arquivo_nome_formatado,
-        ap.paginas,
-        -- Papel DESTE componente (três eixos). `gramatura_miolo` é o texto da
-        -- gramatura do componente, apesar do nome (ver a doc do PageFlow);
-        -- serve só de reserva quando a especificação não aponta para
-        -- bremen_gramatura.
-        COALESCE(
-            bg.gramatura,
-            NULLIF(replace(regexp_replace(ef.gramatura_miolo::text, '[^0-9.,]', '', 'g'), ',', '.'), '')::numeric
-        ) AS gramatura,
-        ef.id_substrato AS idgruposubstratoimpressao,
-        COALESCE(bf.altura, NULLIF(ef.altura, '')::numeric) AS altura_mm,
-        COALESCE(bf.largura, NULLIF(ef.largura, '')::numeric) AS largura_mm,
-        bc.descricao AS componente_descricao,
-        COALESCE(bc.is_capa, FALSE) AS is_capa,
-        COALESCE(bc.is_miolo, FALSE) AS is_miolo
-    FROM componentes_distribuicao cd
-    JOIN pedido_especificacoes ef ON ef.id = cd.especificacao_form_id
-    LEFT JOIN pedido_arquivos_pdf ap ON ap.id = cd.arquivo_pdf_id
-    JOIN bremen_itens bi ON bi.id_produto = ef.id_produto
-    LEFT JOIN bremen_componentes bc ON bc.id_componente = COALESCE(cd.id_componente, ef.id_componente)
-    LEFT JOIN bremen_gramatura bg ON bg.id = ef.id_gramatura
-    LEFT JOIN bremen_formato_papel bf ON bf.id = ef.id_formato
-    ORDER BY
-        cd.distribuicao_id,
-        COALESCE(cd.id_componente, ef.id_componente),
-        (cd.arquivo_pdf_id IS NULL),
-        cd.arquivo_pdf_id
-),
-
--- Soma as quantidades de todas as unidades que compartilham o mesmo item de
--- carrinho (mesmo item comercial, distribuído em vários destinos).
-itens_agrupados AS (
+-- 1 linha por item do orçamento (item de carrinho × turma). Todos os pedidos do
+-- grupo têm os mesmos componentes, então os do primeiro (a referência)
+-- descrevem o item inteiro.
+itens AS (
     SELECT
         d.pedido_item_carrinho_id,
         d.id_turma,
@@ -187,25 +60,117 @@ itens_agrupados AS (
         MIN(d.distribuicao_id) AS distribuicao_referencia,
         SUM(d.quantidade) AS quantidade_total,
         array_to_string(array_agg(DISTINCT d.distribuicao_id ORDER BY d.distribuicao_id), ',') AS codigo_externo,
-        -- Um item é de um item de carrinho só, logo de um formulário só: ou todas
-        -- as distribuições dele são do envio parcial, ou nenhuma.
+        -- Um item de carrinho é de um formulário só: ou o grupo inteiro é do
+        -- envio parcial, ou nenhum pedido dele é.
         UPPER(MAX(NULLIF(TRIM(p.complementos_nome_arquivo ->> d.distribuicao_id::text), ''))) AS complemento_nome_arquivo
     FROM distribuicoes d
     CROSS JOIN parametros p
     GROUP BY d.pedido_item_carrinho_id, d.id_turma
 ),
 
--- Preço fechado no PageFlow (Calculadora), por item: soma de
--- valor_fechado_unitario × quantidade de cada distribuição × componente
--- (precificacao_pedido_item_valores), já com o preço próprio de cada destino.
--- Só para pedido gerado pelo "Fechar pedido" (formulario_orcamento_id): em
--- pedido comum o PageFlow também grava um fechado — o de tabela, sozinho, mesmo
--- no modo sombra — e esse não pode mandar sobre a lista do ERP. Item com algum
--- componente sem fechado fica fora e vai pela lista, como antes.
--- `valor_total_final` é o TOTAL da linha, não o unitário: no retorno do ERP ele
--- sempre vem = valor_unitario × quantidade (conferido nos orçamentos do PCP em
--- 2026-10-30), apesar de `precificacao.valor_total_final_semantica = unitario`
--- no PageFlow, que era a hipótese da época (P-5 da doc da Calculadora).
+-- Componentes do pedido de referência de cada item, de duas fontes:
+--   1. os arquivos distribuídos (capa, miolo, folha de rosto);
+--   2. as especificações SEM arquivo do mesmo item de carrinho (papelão,
+--      guarda). O critério é a marca `sem_arquivo`, não "não tem arquivo":
+--      pedidos de jun–ago têm especificações repetidas no carrinho que nunca
+--      foram componente. O CASE só converte para jsonb o texto que contém a
+--      marca, para um `metadados` malformado não derrubar o orçamento.
+componentes AS (
+    SELECT
+        pda.distribuicao_material_id AS distribuicao_id,
+        pda.especificacao_form_id,
+        pda.arquivo_pdf_id,
+        pda.id_componente
+    FROM pedido_distribuicao_arquivos pda
+    WHERE pda.distribuicao_material_id IN (SELECT distribuicao_referencia FROM itens)
+
+    UNION ALL
+
+    SELECT i.distribuicao_referencia, ef.id, NULL, ef.id_componente
+    FROM itens i
+    JOIN pedido_especificacoes ef ON ef.pedido_item_carrinho_id = i.pedido_item_carrinho_id
+    WHERE CASE
+              WHEN ef.metadados LIKE '%sem_arquivo%'
+              THEN (ef.metadados::jsonb ->> 'sem_arquivo') = 'true'
+              ELSE FALSE
+          END
+),
+
+-- 1 linha por (pedido de referência, componente), já nos valores que vão ao
+-- ERP. Se o componente vier pelas duas fontes, fica a que tem arquivo.
+materiais AS (
+    SELECT DISTINCT ON (c.distribuicao_id, COALESCE(c.id_componente, ef.id_componente))
+        c.distribuicao_id,
+        c.arquivo_pdf_id,
+        c.especificacao_form_id,
+        COALESCE(c.id_componente, ef.id_componente) AS id_componente,
+        ef.id_produto,
+        -- Posição do componente no item (Capa, Miolo 1, Miolo 2…); nula em
+        -- pedidos anteriores a 2026-10-20.
+        ef.ordem_componente,
+        COALESCE(bc.is_miolo, FALSE) AS is_miolo,
+        bc.descricao AS componente_descricao,
+        ap.nome_formatado AS arquivo_nome_formatado,
+        ap.paginas,
+        ef.id_substrato AS idgruposubstratoimpressao,
+        -- Papel em três eixos; pedido antigo sem eles cai no texto livre da
+        -- especificação (`gramatura_miolo` é a gramatura DO componente, apesar
+        -- do nome).
+        COALESCE(
+            bg.gramatura,
+            NULLIF(replace(regexp_replace(ef.gramatura_miolo::text, '[^0-9.,]', '', 'g'), ',', '.'), '')::numeric
+        ) AS gramatura,
+        ROUND(COALESCE(bf.altura, NULLIF(ef.altura, '')::numeric) / 10, 2) AS altura_cm,
+        ROUND(COALESCE(bf.largura, NULLIF(ef.largura, '')::numeric) / 10, 2) AS largura_cm,
+        -- A cor da CAPA não vai (a gravada é a do PDF/item: capa colorida de
+        -- miolo PB sairia 1/1) e o Bremen usa a do modelo. "Capa + Miolo"
+        -- (is_capa E is_miolo) é o PDF inteiro: a cor dele vai.
+        CASE WHEN COALESCE(bc.is_miolo, FALSE) OR NOT COALESCE(bc.is_capa, FALSE) THEN ef.corfrente END AS corfrente,
+        CASE WHEN COALESCE(bc.is_miolo, FALSE) OR NOT COALESCE(bc.is_capa, FALSE) THEN ef.corverso END AS corverso
+    FROM componentes c
+    JOIN pedido_especificacoes ef ON ef.id = c.especificacao_form_id
+    LEFT JOIN pedido_arquivos_pdf ap ON ap.id = c.arquivo_pdf_id
+    LEFT JOIN bremen_componentes bc ON bc.id_componente = COALESCE(c.id_componente, ef.id_componente)
+    LEFT JOIN bremen_gramatura bg ON bg.id = ef.id_gramatura
+    LEFT JOIN bremen_formato_papel bf ON bf.id = ef.id_formato
+    -- Produto fora do catálogo Bremen não monta (payload.py acusa o pedido).
+    WHERE EXISTS (SELECT 1 FROM bremen_itens bi WHERE bi.id_produto = ef.id_produto)
+    ORDER BY
+        c.distribuicao_id,
+        COALESCE(c.id_componente, ef.id_componente),
+        (c.arquivo_pdf_id IS NULL),
+        c.arquivo_pdf_id
+),
+
+-- O que o item tira dos seus componentes: o produto, a especificação das
+-- perguntas e tarefas GERAIS e o nome do arquivo do título. Os dois últimos vêm
+-- do PRIMEIRO miolo pela ordem do item (pedido antigo, sem ordem: pelo id).
+resumo_item AS (
+    SELECT
+        m.distribuicao_id,
+        MAX(m.id_produto) AS id_produto,
+        COALESCE(
+            (ARRAY_AGG(m.especificacao_form_id ORDER BY m.ordem_componente NULLS LAST, m.id_componente)
+                FILTER (WHERE m.is_miolo))[1],
+            -- Sem miolo, uma com arquivo: papelão/guarda não têm as perguntas gerais.
+            MAX(m.especificacao_form_id) FILTER (WHERE m.arquivo_pdf_id IS NOT NULL),
+            MAX(m.especificacao_form_id)
+        ) AS especificacao_id_geral,
+        COALESCE(
+            (ARRAY_AGG(m.arquivo_nome_formatado ORDER BY m.ordem_componente NULLS LAST, m.id_componente)
+                FILTER (WHERE m.is_miolo AND m.arquivo_nome_formatado IS NOT NULL))[1],
+            MAX(m.arquivo_nome_formatado)
+        ) AS nome_arquivo
+    FROM materiais m
+    GROUP BY m.distribuicao_id
+),
+
+-- Preço fechado no PageFlow (Calculadora): soma de valor_fechado_unitario ×
+-- quantidade de cada pedido × componente. Só para pedido gerado pelo "Fechar
+-- pedido" (formulario_orcamento_id): o fechado de tabela que o PageFlow grava
+-- em pedido comum não pode mandar sobre a lista do ERP. Item com algum
+-- componente sem fechado fica fora e vai pela lista. É o TOTAL da linha, não o
+-- unitário (conferido no retorno do ERP em 2026-10-30).
 precos_fechados AS (
     SELECT
         d.pedido_item_carrinho_id,
@@ -220,141 +185,88 @@ precos_fechados AS (
        AND SUM(v.valor_fechado_unitario * d.quantidade) > 0
 ),
 
--- Metadados do item comercial a partir dos materiais da distribuição de
--- referência (todas as distribuições do grupo compartilham o mesmo item de
--- carrinho, logo os mesmos arquivos/especificações).
+-- O item pronto para o JSON: cabeçalho, título e textos do formulário.
 itens_produto AS (
     SELECT
-        ia.pedido_item_carrinho_id,
-        ia.id_turma,
-        ia.formulario_id,
-        ia.distribuicao_referencia,
-        ia.quantidade_total,
-        ia.codigo_externo,
+        i.id_turma,
+        i.distribuicao_referencia,
+        i.quantidade_total,
+        i.codigo_externo,
+        r.id_produto,
+        r.especificacao_id_geral,
         pf.valor_total_fechado,
         t.nome AS nome_turma,
-        t.area AS area_turma,
-        MAX(mat.id_produto) AS id_produto,
-        -- Depois do miolo, uma especificação COM arquivo: as perguntas gerais
-        -- ficam nelas, não nas de papelão/guarda (que o PageFlow grava sem).
-        -- Com vários miolos (desde 2026-10-20), o PRIMEIRO pela ordem do item;
-        -- sem ordem (pedido antigo, um miolo só), o desempate é o id.
-        COALESCE(
-            (ARRAY_AGG(mat.especificacao_form_id
-                       ORDER BY mat.ordem_componente NULLS LAST, mat.id_componente)
-                FILTER (WHERE mat.is_miolo))[1],
-            MAX(CASE WHEN mat.arquivo_pdf_id IS NOT NULL THEN mat.especificacao_form_id END),
-            MAX(mat.especificacao_form_id)
-        ) AS especificacao_id_geral,
+        -- "(#TURMA) - NOME - COMPLEMENTO - (#form)" ou "NOME - COMPLEMENTO (#form)";
+        -- sem nome de arquivo, "Produto <id> - COMPLEMENTO".
         COALESCE(
             CASE
-                WHEN ia.id_turma IS NOT NULL AND NULLIF(TRIM(t.nome), '') IS NOT NULL THEN
-                    '(#' || TRIM(t.nome) || ') - '
-                    || COALESCE(
-                        (ARRAY_AGG(mat.arquivo_nome_formatado
-                                   ORDER BY mat.ordem_componente NULLS LAST, mat.id_componente)
-                            FILTER (WHERE mat.is_miolo AND mat.arquivo_nome_formatado IS NOT NULL))[1],
-                        MAX(mat.arquivo_nome_formatado)
-                    )
-                    || COALESCE(' - ' || ia.complemento_nome_arquivo, '')
-                    || ' - (#' || MAX(form.id) || ')'
-                ELSE
-                    COALESCE(
-                        (ARRAY_AGG(mat.arquivo_nome_formatado
-                                   ORDER BY mat.ordem_componente NULLS LAST, mat.id_componente)
-                            FILTER (WHERE mat.is_miolo AND mat.arquivo_nome_formatado IS NOT NULL))[1],
-                        MAX(mat.arquivo_nome_formatado)
-                    )
-                    || COALESCE(' - ' || ia.complemento_nome_arquivo, '')
-                    || ' (#' || MAX(form.id) || ')'
+                WHEN i.id_turma IS NOT NULL AND NULLIF(TRIM(t.nome), '') IS NOT NULL
+                THEN '(#' || TRIM(t.nome) || ') - ' || r.nome_arquivo || s.sufixo || ' - (#' || form.id || ')'
+                ELSE r.nome_arquivo || s.sufixo || ' (#' || form.id || ')'
             END,
-            'Produto ' || MAX(mat.id_produto) || COALESCE(' - ' || ia.complemento_nome_arquivo, '')
-        ) AS nome_arquivo,
-        MAX(form.observacoes) AS obs_producao,
-        MAX(TO_CHAR(form.data_entrega, 'DD/MM/YYYY')) AS data_entrega_pedido,
-        MAX(form.titulo) AS form_titulo
-    FROM itens_agrupados ia
-    LEFT JOIN escola_turmas t ON t.id = ia.id_turma
+            'Produto ' || r.id_produto || s.sufixo
+        ) AS titulo,
+        form.observacoes AS obs_producao,
+        TO_CHAR(form.data_entrega, 'DD/MM/YYYY') AS data_entrega_pedido,
+        form.titulo AS form_titulo
+    FROM itens i
+    CROSS JOIN LATERAL (SELECT COALESCE(' - ' || i.complemento_nome_arquivo, '') AS sufixo) s
+    JOIN resumo_item r ON r.distribuicao_id = i.distribuicao_referencia
+    JOIN pedido_formularios form ON form.id = i.formulario_id
+    LEFT JOIN escola_turmas t ON t.id = i.id_turma
     LEFT JOIN precos_fechados pf
-        ON pf.pedido_item_carrinho_id = ia.pedido_item_carrinho_id
-       AND pf.id_turma IS NOT DISTINCT FROM ia.id_turma
-    JOIN materiais mat ON mat.distribuicao_id = ia.distribuicao_referencia
-    JOIN pedido_formularios form ON form.id = ia.formulario_id
-    GROUP BY
-        ia.pedido_item_carrinho_id, ia.id_turma, ia.formulario_id, ia.distribuicao_referencia,
-        ia.quantidade_total, ia.codigo_externo, ia.complemento_nome_arquivo, pf.valor_total_fechado,
-        t.nome, t.area
+        ON pf.pedido_item_carrinho_id = i.pedido_item_carrinho_id
+       AND pf.id_turma IS NOT DISTINCT FROM i.id_turma
 ),
 
-respostas_componentes AS (
-    SELECT DISTINCT ON (mat.distribuicao_id, mat.id_componente, bp.id)
-        mat.distribuicao_id,
-        mat.especificacao_form_id,
-        mat.id_componente,
-        bp.id AS pergunta_id,
+-- Resposta de cada pergunta (de componente ou geral) nas especificações usadas.
+respostas AS (
+    SELECT DISTINCT ON (pr.especificacao_id, bp.id)
+        pr.especificacao_id,
+        bp.id_componente,
+        bp.id_geral,
+        bp.id_pergunta,
+        bp.nome AS pergunta,
+        bp.tipo,
         br.descricao_opcao AS resposta
-    FROM materiais mat
-    JOIN bremen_perguntas bp ON bp.id_componente = mat.id_componente
-    LEFT JOIN pedido_pergunta_resposta pr
-        ON pr.pergunta_id = bp.id
-        AND pr.especificacao_id = mat.especificacao_form_id
-    LEFT JOIN bremen_respostas br ON br.id = pr.resposta_id
+    FROM pedido_pergunta_resposta pr
+    JOIN bremen_perguntas bp ON bp.id = pr.pergunta_id
+    JOIN bremen_respostas br ON br.id = pr.resposta_id
     WHERE br.valor IS NOT NULL
-    ORDER BY mat.distribuicao_id, mat.id_componente, bp.id
+      AND pr.especificacao_id IN (
+          SELECT especificacao_form_id FROM materiais
+          UNION
+          SELECT especificacao_id_geral FROM resumo_item
+      )
+    ORDER BY pr.especificacao_id, bp.id, pr.id
 ),
 
-respostas_gerais AS (
-    SELECT DISTINCT ON (ip.distribuicao_referencia, bp.id)
-        ip.distribuicao_referencia,
-        bp.id AS pergunta_id,
-        br.descricao_opcao AS resposta
-    FROM itens_produto ip
-    JOIN bremen_perguntas bp ON bp.id_geral = ip.id_produto
-    LEFT JOIN pedido_pergunta_resposta pr
-        ON pr.pergunta_id = bp.id
-        AND pr.especificacao_id = ip.especificacao_id_geral
-    LEFT JOIN bremen_respostas br ON br.id = pr.resposta_id
-    WHERE br.valor IS NOT NULL
-    ORDER BY ip.distribuicao_referencia, bp.id
-),
-
--- Envio das tarefas OBRIGATÓRIAS (gravadas pelo PageFlow a partir do vínculo item × componente,
--- doc calculadora-orcamento/21): a tela de Configurações do sistema grava
--- `tarefas.enviar_obrigatorias_erp`. Sem a chave ou com 'false', só as EXTRAS (pedidas no
--- formulário) vão ao ERP — o Bremen completa o resto pelo modelo do produto. Lida a cada envio.
-envio_tarefas AS (
-    SELECT COALESCE(
-        (SELECT LOWER(TRIM(valor)) = 'true'
-           FROM configuracao_sistema
-          WHERE chave = 'tarefas.enviar_obrigatorias_erp'),
-        FALSE
-    ) AS enviar_obrigatorias
-),
-
--- Tarefas de escopo componente vinculadas à especificação via tabela pivot
-tarefas_componentes AS (
-    SELECT DISTINCT
+-- Tarefas de cada especificação. Só as EXTRAS (pedidas no formulário) vão ao
+-- ERP — o Bremen completa o resto pelo modelo —, a não ser que a tela de
+-- Configurações ligue `tarefas.enviar_obrigatorias_erp`; aí as obrigatórias
+-- (vínculo item × componente) também vão. Lida a cada envio.
+tarefas AS (
+    SELECT
         bet.especificacao_id,
         bt.id_tarefa,
-        bt.descricao
+        bt.descricao,
+        bt.id_componente IS TRUE AS de_componente,
+        bt.id_geral IS TRUE AS geral
     FROM pedido_especificacoes_tarefas bet
     JOIN bremen_tarefas bt ON bt.id = bet.tarefa_id
-    CROSS JOIN envio_tarefas et
-    WHERE bt.id_componente IS TRUE
-      AND (bet.origem = 'extra' OR et.enviar_obrigatorias)
-),
-
--- Tarefas de escopo geral vinculadas à especificação via tabela pivot
-tarefas_gerais AS (
-    SELECT DISTINCT
-        bet.especificacao_id,
-        bt.id_tarefa,
-        bt.descricao
-    FROM pedido_especificacoes_tarefas bet
-    JOIN bremen_tarefas bt ON bt.id = bet.tarefa_id
-    CROSS JOIN envio_tarefas et
-    WHERE bt.id_geral IS TRUE
-      AND (bet.origem = 'extra' OR et.enviar_obrigatorias)
+    WHERE (
+            bet.origem = 'extra'
+            OR EXISTS (
+                SELECT 1 FROM configuracao_sistema
+                 WHERE chave = 'tarefas.enviar_obrigatorias_erp'
+                   AND LOWER(TRIM(valor)) = 'true'
+            )
+          )
+      AND bet.especificacao_id IN (
+          SELECT especificacao_form_id FROM materiais
+          UNION
+          SELECT especificacao_id_geral FROM resumo_item
+      )
 )
 
 SELECT json_strip_nulls(json_build_object(
@@ -366,7 +278,7 @@ SELECT json_strip_nulls(json_build_object(
             json_agg(
                 json_build_object(
                     'id_produto', ip.id_produto,
-                    'titulo', ip.nome_arquivo,
+                    'titulo', ip.titulo,
                     'codigo_externo', ip.codigo_externo,
                     'obs_producao', CONCAT_WS(
                         CHR(10) || CHR(10),
@@ -378,98 +290,75 @@ SELECT json_strip_nulls(json_build_object(
                         )
                     ),
                     'quantidade', ip.quantidade_total,
-                    -- Com preço fechado no PageFlow, vai ele e a lista do ERP
-                    -- não é usada; sem, a lista (ver precos_fechados).
+                    -- Com preço fechado, vai ele e a lista do ERP não é usada.
                     'usar_listapreco', CASE WHEN ip.valor_total_fechado IS NULL THEN 1 ELSE 0 END,
                     'valor_total_final', ip.valor_total_fechado,
                     'manter_estrutura_mod_produto', 1,
+                    -- Um componente, um objeto, da especificação DELE. Chave nula
+                    -- some no json_strip_nulls e o Bremen completa pelo modelo
+                    -- (`manter_estrutura_mod_produto`) — p.ex. as páginas de
+                    -- componente sem arquivo.
                     'componentes', COALESCE((
                         SELECT json_agg(
-                            -- Um componente, um objeto: medida, páginas, papel, cor,
-                            -- perguntas e tarefas vêm da especificação DELE, que o
-                            -- PageFlow já grava resolvida por componente. Chave nula
-                            -- some no json_strip_nulls de fora e o Bremen completa
-                            -- pelo modelo (`manter_estrutura_mod_produto`) — é o caso
-                            -- de `quantidade_paginas` em componente sem arquivo.
                             json_build_object(
                                 'id', mat.id_componente,
                                 'descricao', mat.componente_descricao,
-                                'altura', ROUND(mat.altura_mm::numeric / 10, 2),
-                                'largura', ROUND(mat.largura_mm::numeric / 10, 2),
+                                'altura', mat.altura_cm,
+                                'largura', mat.largura_cm,
                                 'quantidade_paginas', mat.paginas,
                                 'idgruposubstratoimpressao', mat.idgruposubstratoimpressao,
                                 'gramaturasubstratoimpressao', mat.gramatura,
-                                -- Única exceção por tipo: a cor da CAPA não vai. O
-                                -- papel é resolvido por componente, mas a cor gravada
-                                -- na capa é a do PDF/item (capa colorida de miolo PB
-                                -- sai 1/1), então o Bremen usa a do modelo. Sai daqui
-                                -- quando o PageFlow resolver a cor por componente. "Capa + Miolo"
-                                -- (is_capa E is_miolo) é o PDF inteiro: a cor dele vai.
-                                'corfrente', CASE WHEN mat.is_miolo OR NOT mat.is_capa THEN mat.corfrente END,
-                                'corverso', CASE WHEN mat.is_miolo OR NOT mat.is_capa THEN mat.corverso END,
+                                'corfrente', mat.corfrente,
+                                'corverso', mat.corverso,
                                 'perguntas_componente', COALESCE((
                                     SELECT json_agg(
                                         json_build_object(
-                                            'id_pergunta', bp.id_pergunta,
-                                            'pergunta', bp.nome,
-                                            'tipo', bp.tipo,
-                                            'resposta', rc.resposta
+                                            'id_pergunta', r.id_pergunta,
+                                            'pergunta', r.pergunta,
+                                            'tipo', r.tipo,
+                                            'resposta', r.resposta
                                         )
-                                        ORDER BY bp.id_pergunta
+                                        ORDER BY r.id_pergunta
                                     )
-                                    FROM bremen_perguntas bp
-                                    INNER JOIN respostas_componentes rc
-                                        ON rc.pergunta_id = bp.id
-                                        AND rc.distribuicao_id = mat.distribuicao_id
-                                        AND rc.id_componente = mat.id_componente
-                                    WHERE bp.id_componente = mat.id_componente
+                                    FROM respostas r
+                                    WHERE r.especificacao_id = mat.especificacao_form_id
+                                      AND r.id_componente = mat.id_componente
                                 ), '[]'::json),
                                 'tarefas_componente', COALESCE((
-                                    SELECT json_agg(
-                                        json_build_object(
-                                            'id', tc.id_tarefa,
-                                            'descricao', tc.descricao
-                                        )
-                                        ORDER BY tc.id_tarefa
-                                    )
-                                    FROM tarefas_componentes tc
-                                    WHERE tc.especificacao_id = mat.especificacao_form_id
+                                    SELECT json_agg(json_build_object('id', t.id_tarefa, 'descricao', t.descricao) ORDER BY t.id_tarefa)
+                                    FROM (
+                                        SELECT DISTINCT id_tarefa, descricao FROM tarefas
+                                         WHERE especificacao_id = mat.especificacao_form_id AND de_componente
+                                    ) t
                                 ), '[]'::json)
                             )
-                            -- Na ordem do item (Capa, Miolo 1, Miolo 2…). Pedido antigo, sem
-                            -- ordem: componentes que não são miolo antes do miolo, como antes.
+                            -- Na ordem do item (Capa, Miolo 1, Miolo 2…). Pedido
+                            -- antigo, sem ordem: o que não é miolo antes do miolo.
                             ORDER BY mat.ordem_componente NULLS LAST, mat.is_miolo, mat.id_componente, mat.arquivo_pdf_id
                         )
                         FROM materiais mat
                         WHERE mat.distribuicao_id = ip.distribuicao_referencia
                     ), '[]'::json),
                     'perguntas_gerais', COALESCE((
-                        SELECT
-                            json_agg(
-                                json_build_object(
-                                    'tipo', bp.tipo,
-                                    'pergunta', bp.nome,
-                                    'resposta', rg.resposta,
-                                    'id_pergunta', bp.id_pergunta
-                                )
-                                ORDER BY bp.id_pergunta
-                            )
-                        FROM bremen_perguntas bp
-                        INNER JOIN respostas_gerais rg
-                            ON rg.pergunta_id = bp.id
-                           AND rg.distribuicao_referencia = ip.distribuicao_referencia
-                        WHERE bp.id_geral = ip.id_produto
-                    ), '[]'::json),
-                    'tarefas_gerais', COALESCE((
                         SELECT json_agg(
                             json_build_object(
-                                'id', tg.id_tarefa,
-                                'descricao', tg.descricao
+                                'tipo', r.tipo,
+                                'pergunta', r.pergunta,
+                                'resposta', r.resposta,
+                                'id_pergunta', r.id_pergunta
                             )
-                            ORDER BY tg.id_tarefa
+                            ORDER BY r.id_pergunta
                         )
-                        FROM tarefas_gerais tg
-                        WHERE tg.especificacao_id = ip.especificacao_id_geral
+                        FROM respostas r
+                        WHERE r.especificacao_id = ip.especificacao_id_geral
+                          AND r.id_geral = ip.id_produto
+                    ), '[]'::json),
+                    'tarefas_gerais', COALESCE((
+                        SELECT json_agg(json_build_object('id', t.id_tarefa, 'descricao', t.descricao) ORDER BY t.id_tarefa)
+                        FROM (
+                            SELECT DISTINCT id_tarefa, descricao FROM tarefas
+                             WHERE especificacao_id = ip.especificacao_id_geral AND geral
+                        ) t
                     ), '[]'::json)
                 )
                 -- Sem turma primeiro; depois as turmas pelo nome, cada uma com
