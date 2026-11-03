@@ -43,6 +43,9 @@
 --     antes do "(#formulário)": "NOME - COMPLEMENTO (#123)" ou
 --     "(#TURMA) - NOME - COMPLEMENTO - (#123)". Sem complemento, o título é o de
 --     sempre. Quem decide o que é parcial é o PageFlow; aqui só se aplica.
+--   - Preço fechado (2026-10-30): item de pedido gerado pelo "Fechar pedido" da
+--     Calculadora vai com `valor_total_final` (total da linha) e
+--     `usar_listapreco = 0`; os demais seguem pela lista do ERP (precos_fechados).
 --
 -- Parâmetros: :pedido_distribuicao_ids (int[]), :id_cliente, :id_vendedor,
 -- :id_forma_pagamento, :data_entrega (texto 'DD/MM/YYYY' do orçamento, vindo do
@@ -186,6 +189,31 @@ itens_agrupados AS (
     GROUP BY d.pedido_item_carrinho_id, d.id_turma
 ),
 
+-- Preço fechado no PageFlow (Calculadora), por item: soma de
+-- valor_fechado_unitario × quantidade de cada distribuição × componente
+-- (precificacao_pedido_item_valores), já com o preço próprio de cada destino.
+-- Só para pedido gerado pelo "Fechar pedido" (formulario_orcamento_id): em
+-- pedido comum o PageFlow também grava um fechado — o de tabela, sozinho, mesmo
+-- no modo sombra — e esse não pode mandar sobre a lista do ERP. Item com algum
+-- componente sem fechado fica fora e vai pela lista, como antes.
+-- `valor_total_final` é o TOTAL da linha, não o unitário: no retorno do ERP ele
+-- sempre vem = valor_unitario × quantidade (conferido nos orçamentos do PCP em
+-- 2026-10-30), apesar de `precificacao.valor_total_final_semantica = unitario`
+-- no PageFlow, que era a hipótese da época (P-5 da doc da Calculadora).
+precos_fechados AS (
+    SELECT
+        d.pedido_item_carrinho_id,
+        d.id_turma,
+        SUM(v.valor_fechado_unitario * d.quantidade) AS valor_total_fechado
+    FROM distribuicoes d
+    JOIN pedido_formularios f ON f.id = d.formulario_id
+    LEFT JOIN precificacao_pedido_item_valores v ON v.distribuicao_id = d.distribuicao_id
+    WHERE f.formulario_orcamento_id IS NOT NULL
+    GROUP BY d.pedido_item_carrinho_id, d.id_turma
+    HAVING BOOL_AND(v.valor_fechado_unitario IS NOT NULL)
+       AND SUM(v.valor_fechado_unitario * d.quantidade) > 0
+),
+
 -- Metadados do item comercial a partir dos materiais da distribuição de
 -- referência (todas as distribuições do grupo compartilham o mesmo item de
 -- carrinho, logo os mesmos arquivos/especificações).
@@ -197,6 +225,7 @@ itens_produto AS (
         ia.distribuicao_referencia,
         ia.quantidade_total,
         ia.codigo_externo,
+        pf.valor_total_fechado,
         t.nome AS nome_turma,
         t.area AS area_turma,
         MAX(mat.id_produto) AS id_produto,
@@ -242,11 +271,15 @@ itens_produto AS (
         MAX(form.titulo) AS form_titulo
     FROM itens_agrupados ia
     LEFT JOIN escola_turmas t ON t.id = ia.id_turma
+    LEFT JOIN precos_fechados pf
+        ON pf.pedido_item_carrinho_id = ia.pedido_item_carrinho_id
+       AND pf.id_turma IS NOT DISTINCT FROM ia.id_turma
     JOIN materiais mat ON mat.distribuicao_id = ia.distribuicao_referencia
     JOIN pedido_formularios form ON form.id = ia.formulario_id
     GROUP BY
         ia.pedido_item_carrinho_id, ia.id_turma, ia.formulario_id, ia.distribuicao_referencia,
-        ia.quantidade_total, ia.codigo_externo, ia.complemento_nome_arquivo, t.nome, t.area
+        ia.quantidade_total, ia.codigo_externo, ia.complemento_nome_arquivo, pf.valor_total_fechado,
+        t.nome, t.area
 ),
 
 respostas_componentes AS (
@@ -324,7 +357,10 @@ SELECT json_strip_nulls(json_build_object(
                         )
                     ),
                     'quantidade', ip.quantidade_total,
-                    'usar_listapreco', 1,
+                    -- Com preço fechado no PageFlow, vai ele e a lista do ERP
+                    -- não é usada; sem, a lista (ver precos_fechados).
+                    'usar_listapreco', CASE WHEN ip.valor_total_fechado IS NULL THEN 1 ELSE 0 END,
+                    'valor_total_final', ip.valor_total_fechado,
                     'manter_estrutura_mod_produto', 1,
                     'componentes', COALESCE((
                         SELECT json_agg(
