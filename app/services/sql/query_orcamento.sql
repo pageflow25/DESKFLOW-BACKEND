@@ -90,7 +90,7 @@ distribuicoes AS (
 
 -- Materiais (arquivos) de cada distribuição — 1 linha por pedido_distribuicao_arquivos,
 -- já com o componente Bremen resolvido de forma determinística.
-materiais AS (
+materiais_arquivos AS (
     SELECT
         pda.distribuicao_material_id AS distribuicao_id,
         pda.arquivo_pdf_id,
@@ -120,6 +120,56 @@ materiais AS (
     LEFT JOIN bremen_componentes bc ON bc.id_componente = pda.id_componente
     LEFT JOIN bremen_gramatura bg ON bg.id = ef.id_gramatura
     LEFT JOIN bremen_tamanho_papel bt ON bt.id = ef.id_papel
+),
+
+-- Componentes do modelo que NUNCA têm arquivo (Papelão, Guarda de capa dura):
+-- não estão em pedido_distribuicao_arquivos, mas o Bremen exige as medidas
+-- deles ("Medidas Finais Comp. - Campo obrigatório"), senão o item inteiro
+-- fica "em edição" e o orçamento é recusado. Vão com a medida do item (da
+-- especificação do miolo, ou da primeira com arquivo) e o resto o Bremen
+-- completa pelo modelo (manter_estrutura_mod_produto). Capa e miolo sem
+-- arquivo seguem fora do payload. Papelão/Guarda iam até a reescrita de
+-- 02/09 (9685a07), que passou a montar só a partir dos arquivos.
+componentes_sem_arquivo AS (
+    SELECT DISTINCT ON (ref.distribuicao_id, bc.id_componente)
+        ref.distribuicao_id,
+        NULL::int AS arquivo_pdf_id,
+        ref.especificacao_form_id,
+        bc.id_componente,
+        ref.id_produto,
+        NULL::int AS corfrente,
+        NULL::int AS corverso,
+        NULL::text AS gramatura_miolo,
+        NULL::text AS arquivo_nome,
+        NULL::int AS paginas,
+        NULL::numeric AS gramatura_catalogo,
+        NULL::int AS idgruposubstratoimpressao,
+        ref.altura_mm,
+        ref.largura_mm,
+        ref.produto_descricao,
+        ref.sub_grupo,
+        ref.frente_verso,
+        ref."categoria_Prod",
+        bc.descricao AS componente_descricao,
+        FALSE AS is_capa,
+        FALSE AS is_miolo
+    FROM materiais_arquivos ref
+    JOIN bremen_componentes bc
+        ON bc.id_produto = ref.id_produto
+       AND NOT COALESCE(bc.is_capa, FALSE)
+       AND NOT COALESCE(bc.is_miolo, FALSE)
+    WHERE NOT EXISTS (
+        SELECT 1 FROM materiais_arquivos m
+        WHERE m.distribuicao_id = ref.distribuicao_id
+          AND m.id_componente = bc.id_componente
+    )
+    ORDER BY ref.distribuicao_id, bc.id_componente, ref.is_miolo DESC, ref.especificacao_form_id
+),
+
+materiais AS (
+    SELECT * FROM materiais_arquivos
+    UNION ALL
+    SELECT * FROM componentes_sem_arquivo
 ),
 
 -- Agrega os metadados do item comercial a partir dos seus materiais.
