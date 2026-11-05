@@ -4,7 +4,7 @@ O PageFlow grava uma especificação por componente, com o papel em três eixos 
 resolvido (ver BACKEND_PAGEFLOW/docs/papel-tres-eixos-deskflow.md): capa com o
 papel dela, folha de rosto herdando do miolo, dobra aplicada no substrato — e,
 desde 2026-09-24, também os componentes SEM arquivo (papelão, guarda), marcados
-com `metadados.sem_arquivo = true`. O orçamento monta cada componente da
+com `pedido_especificacoes.sem_arquivo`. O orçamento monta cada componente da
 própria especificação, sem cenário por tipo nem regra por categoria de produto.
 A única exceção é a cor da capa, que não vai (a gravada é a do PDF/item).
 
@@ -36,10 +36,11 @@ CREATE TEMP TABLE pedido_arquivos_pdf (id int, nome text, paginas int, nome_form
 CREATE TEMP TABLE pedido_distribuicao_arquivos (distribuicao_material_id int, arquivo_pdf_id int,
                                                 id_componente int, especificacao_form_id int);
 CREATE TEMP TABLE pedido_especificacoes (id int, id_produto int, id_componente int, corfrente int,
-                                         corverso int, gramatura_miolo text, id_gramatura int,
+                                         corverso int, gramatura numeric, id_gramatura int,
                                          id_formato int, id_tipo_papel int, id_substrato int,
                                          altura text, largura text, pedido_item_carrinho_id int,
-                                         metadados text, ordem_componente int)
+                                         metadados text, ordem_componente int,
+                                         sem_arquivo boolean NOT NULL DEFAULT false)
 """
 
 def nome_formatado(nome: str) -> str:
@@ -107,15 +108,16 @@ class TestComponentesPorEspecificacaoNoOrcamento(TesteDeFila):
                     espec = d * 1000 + posicao
                     conn.execute(text("""
                         INSERT INTO pedido_especificacoes
-                        SELECT :espec, :prod, :comp, :corfrente, :corverso, CAST(:gramatura AS int) || ' g',
+                        SELECT :espec, :prod, :comp, :corfrente, :corverso, CAST(:gramatura AS numeric),
                                (SELECT id FROM bremen_gramatura WHERE gramatura = :gramatura),
                                :formato, :tipo, :substrato,
                                CASE WHEN :formato IS NULL THEN '297' END,
                                CASE WHEN :formato IS NULL THEN '210' END,
-                               :carrinho, :metadados
+                               :carrinho, :metadados, NULL, :sem_arquivo
                     """), {"espec": espec, "prod": prod, "comp": comp, "gramatura": gramatura,
                            "formato": formato, "tipo": tipo, "substrato": substrato,
                            "corfrente": cor[0], "corverso": cor[1], "carrinho": d,
+                           "sem_arquivo": origem == SEM_ARQUIVO,
                            # JSON.stringify do PageFlow: sem espaço depois dos dois-pontos.
                            "metadados": '{"componente":"x","sem_arquivo":true}' if origem == SEM_ARQUIVO
                                         else '{"componente":"x"}'})
@@ -202,7 +204,7 @@ class TestTurmasNumOrcamentoSo(TesteDeFila):
                 # Item 35: componente único "Folder" (92), com PDF.
                 conn.execute(text("""
                     INSERT INTO pedido_especificacoes
-                    VALUES (1, 35, 92, 4, 4, '75 g', NULL, 11, 9, 109, NULL, NULL, 1, '{"componente":"x"}')
+                    VALUES (1, 35, 92, 4, 4, 75, NULL, 11, 9, 109, NULL, NULL, 1, '{"componente":"x"}')
                 """))
                 inserir_arquivo(conn, 1, "folder_matematica.pdf")
                 # (distribuição, unidade, quantidade, turma) — todas do mesmo item de carrinho.
@@ -254,7 +256,7 @@ class TestComplementoDoEnvioParcial(TesteDeFila):
                 for espec, carrinho, arquivo in [(1, 1, "folder_matematica.pdf"), (2, 2, "apostila-portugues.pdf")]:
                     conn.execute(text("""
                         INSERT INTO pedido_especificacoes
-                        VALUES (:e, 35, 92, 4, 4, '75 g', NULL, 11, 9, 109, NULL, NULL, :c, '{"componente":"x"}')
+                        VALUES (:e, 35, 92, 4, 4, 75, NULL, 11, 9, 109, NULL, NULL, :c, '{"componente":"x"}')
                     """), {"e": espec, "c": carrinho})
                     inserir_arquivo(conn, espec, arquivo)
                 # (distribuição, formulário, carrinho, turma)
@@ -312,7 +314,7 @@ class TestVariosMiolosNaOrdemDoItem(TesteDeFila):
                                                     (3, 646, 2, "miolo_a.pdf")]:
                     conn.execute(text("""
                         INSERT INTO pedido_especificacoes
-                        VALUES (:e, 316, :c, 1, 1, '75 g', NULL, 9, 9, 109, NULL, NULL, 1, '{}', :o)
+                        VALUES (:e, 316, :c, 1, 1, 75, NULL, 9, 9, 109, NULL, NULL, 1, '{}', :o)
                     """), {"e": espec, "c": comp, "o": ordem})
                     inserir_arquivo(conn, espec, arquivo)
                     conn.execute(text("INSERT INTO pedido_distribuicao_arquivos VALUES (1, :e, :c, :e)"),

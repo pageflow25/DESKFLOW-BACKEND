@@ -12,7 +12,8 @@
 -- O que vem PRONTO do PageFlow (aqui só se lê, não se decide):
 --   - uma especificação por componente, com papel em três eixos e cor já
 --     resolvidos — inclusive a dos componentes SEM arquivo (papelão, guarda),
---     marcados com `metadados.sem_arquivo = true`;
+--     marcados em `pedido_especificacoes.sem_arquivo`;
+--   - a gramatura de cada componente em número (`pedido_especificacoes.gramatura`);
 --   - o nome do arquivo formatado (pedido_arquivos_pdf.nome_formatado);
 --   - o complemento do título nos envios PARCIAIS (:complementos_nome_arquivo);
 --   - o preço fechado da Calculadora (precificacao_pedido_item_valores).
@@ -73,8 +74,7 @@ itens AS (
 --   2. as especificações SEM arquivo do mesmo item de carrinho (papelão,
 --      guarda). O critério é a marca `sem_arquivo`, não "não tem arquivo":
 --      pedidos de jun–ago têm especificações repetidas no carrinho que nunca
---      foram componente. O CASE só converte para jsonb o texto que contém a
---      marca, para um `metadados` malformado não derrubar o orçamento.
+--      foram componente.
 componentes AS (
     SELECT
         pda.distribuicao_material_id AS distribuicao_id,
@@ -89,11 +89,7 @@ componentes AS (
     SELECT i.distribuicao_referencia, ef.id, NULL, ef.id_componente
     FROM itens i
     JOIN pedido_especificacoes ef ON ef.pedido_item_carrinho_id = i.pedido_item_carrinho_id
-    WHERE CASE
-              WHEN ef.metadados LIKE '%sem_arquivo%'
-              THEN (ef.metadados::jsonb ->> 'sem_arquivo') = 'true'
-              ELSE FALSE
-          END
+    WHERE ef.sem_arquivo
 ),
 
 -- 1 linha por (pedido de referência, componente), já nos valores que vão ao
@@ -113,13 +109,9 @@ materiais AS (
         ap.nome_formatado AS arquivo_nome_formatado,
         ap.paginas,
         ef.id_substrato AS idgruposubstratoimpressao,
-        -- Papel em três eixos; pedido antigo sem eles cai no texto livre da
-        -- especificação (`gramatura_miolo` é a gramatura DO componente, apesar
-        -- do nome).
-        COALESCE(
-            bg.gramatura,
-            NULLIF(replace(regexp_replace(ef.gramatura_miolo::text, '[^0-9.,]', '', 'g'), ',', '.'), '')::numeric
-        ) AS gramatura,
+        ef.gramatura,
+        -- Medida do formato; pedido antigo sem formato cai no texto livre da
+        -- especificação.
         ROUND(COALESCE(bf.altura, NULLIF(ef.altura, '')::numeric) / 10, 2) AS altura_cm,
         ROUND(COALESCE(bf.largura, NULLIF(ef.largura, '')::numeric) / 10, 2) AS largura_cm,
         -- A cor da CAPA não vai (a gravada é a do PDF/item: capa colorida de
@@ -131,7 +123,6 @@ materiais AS (
     JOIN pedido_especificacoes ef ON ef.id = c.especificacao_form_id
     LEFT JOIN pedido_arquivos_pdf ap ON ap.id = c.arquivo_pdf_id
     LEFT JOIN bremen_componentes bc ON bc.id_componente = COALESCE(c.id_componente, ef.id_componente)
-    LEFT JOIN bremen_gramatura bg ON bg.id = ef.id_gramatura
     LEFT JOIN bremen_formato_papel bf ON bf.id = ef.id_formato
     -- Produto fora do catálogo Bremen não monta (payload.py acusa o pedido).
     WHERE EXISTS (SELECT 1 FROM bremen_itens bi WHERE bi.id_produto = ef.id_produto)
