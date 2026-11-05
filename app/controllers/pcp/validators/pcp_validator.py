@@ -14,6 +14,7 @@ generico malformado, e o operador precisa dessa diferenca.
 `desfecho_do_ack`, que le a RESPOSTA.
 """
 
+from decimal import Decimal, InvalidOperation
 from typing import Any, Optional, Tuple
 
 from ....fila.catalogo import CLASSE_ASSINCRONO, CLASSE_SINCRONO
@@ -127,6 +128,37 @@ def _complementos_nome_arquivo(
     return complementos, None
 
 
+def _valores_fechados_unitario(
+    bruto: Any, ids: list,
+) -> Tuple[Optional[dict], Optional[PayloadInvalido]]:
+    """`valores_fechados_unitario` do payload (desde 2026-11-05): `{id: "12.3400"}`
+    só com os pedidos que vão ao ERP com o preço fechado da Calculadora. Ausente —
+    item enfileirado antes do campo existir — vale `{}`: tudo pela lista. Id fora
+    de `ids_origem` ou valor que não é um decimal maior que zero é erro do
+    produtor: mandar ao ERP um preço que ninguém fechou é pior que recusar."""
+    if bruto is None:
+        return {}, None
+    if not isinstance(bruto, dict):
+        return None, PayloadInvalido(
+            f"`valores_fechados_unitario` precisa ser um objeto {{id: valor}}; veio {bruto!r}.")
+    valores = {}
+    for chave, valor in bruto.items():
+        id_ = inteiro_positivo(chave)
+        if id_ is None or id_ not in ids:
+            return None, PayloadInvalido(
+                f"`valores_fechados_unitario` tem id fora de `ids_origem`: {chave!r}.")
+        try:
+            decimal = Decimal(str(valor))
+        except (InvalidOperation, ValueError):
+            decimal = None
+        if isinstance(valor, bool) or decimal is None or not decimal.is_finite() or decimal <= 0:
+            return None, PayloadInvalido(
+                f"`valores_fechados_unitario` do id {id_} precisa ser um decimal maior que zero; "
+                f"veio {valor!r}.")
+        valores[id_] = str(decimal)
+    return valores, None
+
+
 def orcamento_do_payload(
     payload: Optional[dict],
 ) -> Tuple[Optional[OrcamentoReivindicado], Optional[PayloadInvalido]]:
@@ -172,6 +204,10 @@ def orcamento_do_payload(
     if invalido is not None:
         return None, invalido
 
+    valores_fechados, invalido = _valores_fechados_unitario(payload.get("valores_fechados_unitario"), ids)
+    if invalido is not None:
+        return None, invalido
+
     de_integracao = origem == ORIGEM_INTEGRACAO
     return OrcamentoReivindicado(
         id=orcamento_id,
@@ -187,6 +223,7 @@ def orcamento_do_payload(
         integra_pedido_produto_ids=ids if de_integracao else [],
         data_entrega=data_entrega,
         complementos_nome_arquivo=complementos,
+        valores_fechados_unitario=valores_fechados,
     ), None
 
 

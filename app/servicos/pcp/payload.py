@@ -144,6 +144,12 @@ def _complementos_json(complementos: dict):
     return json.dumps({str(id_): texto for id_, texto in complementos.items()}, ensure_ascii=False)
 
 
+def _valores_fechados_json(valores: dict):
+    if not valores:
+        return None
+    return json.dumps({str(id_): str(valor) for id_, valor in valores.items()})
+
+
 def montar_payload_orcamento(conn, orcamento: OrcamentoReivindicado, identifier: str) -> dict:
     ids = list(orcamento.ids_origem)
     if not ids:
@@ -165,6 +171,9 @@ def montar_payload_orcamento(conn, orcamento: OrcamentoReivindicado, identifier:
         # Vai como texto JSON `{"<id>": "texto"}`, que o SQL lê com `->>`; None
         # quando não há complemento, e aí todo título sai com o nome original.
         "complementos_nome_arquivo": _complementos_json(orcamento.complementos_nome_arquivo),
+        # Também só do SQL Agrupado: `{"<id>": "12.3400"}` com o preço fechado
+        # que o PageFlow decidiu; None = todos os pedidos pela lista do ERP.
+        "valores_fechados_unitario": _valores_fechados_json(orcamento.valores_fechados_unitario),
     }
     linhas = conn.execute(_consulta(arquivo, parametro_ids), parametros).scalars().all()
 

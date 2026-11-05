@@ -132,7 +132,7 @@ class TestComponentesPorEspecificacaoNoOrcamento(TesteDeFila):
                 for d in distribuicoes:
                     payloads = conn.execute(text(sql), {
                         "pedido_distribuicao_ids": [d], "id_cliente": 1, "id_vendedor": 1,
-                        "id_forma_pagamento": "1", "data_entrega": None, "complementos_nome_arquivo": None,
+                        "id_forma_pagamento": "1", "data_entrega": None, "complementos_nome_arquivo": None, "valores_fechados_unitario": None,
                     }).scalars().all()
                     self.assertEqual(len(payloads), 1, f"{arquivo}: distribuição {d}")
                     componentes = payloads[0]["data"]["itens"][0]["componentes"]
@@ -215,7 +215,7 @@ class TestTurmasNumOrcamentoSo(TesteDeFila):
 
                 payloads = conn.execute(text(sql), {
                     "pedido_distribuicao_ids": [1, 2, 3, 4], "id_cliente": 1, "id_vendedor": 1,
-                    "id_forma_pagamento": "1", "data_entrega": None, "complementos_nome_arquivo": None,
+                    "id_forma_pagamento": "1", "data_entrega": None, "complementos_nome_arquivo": None, "valores_fechados_unitario": None,
                 }).scalars().all()
             finally:
                 conn.rollback()
@@ -270,7 +270,7 @@ class TestComplementoDoEnvioParcial(TesteDeFila):
                     payloads = conn.execute(text(sql), {
                         "pedido_distribuicao_ids": [1, 2, 3], "id_cliente": 1, "id_vendedor": 1,
                         "id_forma_pagamento": "1", "data_entrega": None,
-                        "complementos_nome_arquivo": complementos,
+                        "complementos_nome_arquivo": complementos, "valores_fechados_unitario": None,
                     }).scalars().all()
                     self.assertEqual(len(payloads), 1)
                     return [i["titulo"] for i in payloads[0]["data"]["itens"]]
@@ -290,6 +290,62 @@ class TestComplementoDoEnvioParcial(TesteDeFila):
             "APOSTILA PORTUGUES (#2)",
             "(#2º Ano B) - FOLDER MATEMATICA - (#1)",
         ])
+
+
+class TestPrecoFechadoDoPageFlow(TesteDeFila):
+    """Desde 2026-11-05 o PageFlow decide, por pedido, se ele vai ao ERP com o
+    preço fechado da Calculadora e manda o UNITÁRIO em
+    `:valores_fechados_unitario`. O SQL só multiplica pela quantidade, soma no
+    item e troca `usar_listapreco` — sem ler `precificacao_pedido_item_valores`.
+    Um pedido do item sem preço fechado põe o item inteiro na lista.
+    """
+
+    def test_total_por_item_e_lista_quando_falta_um_pedido(self):
+        sql = (SQL_DIR / "orcamento_agrupado.sql").read_text(encoding="utf-8")
+        with self.engine.connect() as conn:
+            try:
+                for comando in TABELAS_TEMP.split(";"):
+                    conn.execute(text(comando))
+                conn.execute(text("CREATE TEMP TABLE escola_turmas (id int, nome text, area text)"))
+                conn.execute(text("""
+                    INSERT INTO pedido_formularios VALUES
+                        (1, NULL, '2026-10-10', 'T', now(), NULL), (2, NULL, '2026-10-10', 'U', now(), NULL)
+                """))
+                for espec, carrinho, arquivo in [(1, 1, "folder_matematica.pdf"), (2, 2, "apostila-portugues.pdf")]:
+                    conn.execute(text("""
+                        INSERT INTO pedido_especificacoes
+                        VALUES (:e, 35, 92, 4, 4, 75, NULL, 11, 9, 109, NULL, NULL, :c, '{"componente":"x"}')
+                    """), {"e": espec, "c": carrinho})
+                    inserir_arquivo(conn, espec, arquivo)
+                # (distribuição, formulário, carrinho, quantidade): 1 e 4 somam no mesmo item.
+                for d, formulario, carrinho, quantidade in [(1, 1, 1, 5), (4, 1, 1, 3), (3, 2, 2, 10)]:
+                    conn.execute(text("INSERT INTO pedido_distribuicoes VALUES (:d, 501, :f, :c, :q, NULL)"),
+                                 {"d": d, "f": formulario, "c": carrinho, "q": quantidade})
+                    conn.execute(text("INSERT INTO pedido_distribuicao_arquivos VALUES (:d, :c, 92, :c)"),
+                                 {"d": d, "c": carrinho})
+
+                def precos(valores):
+                    payloads = conn.execute(text(sql), {
+                        "pedido_distribuicao_ids": [1, 3, 4], "id_cliente": 1, "id_vendedor": 1,
+                        "id_forma_pagamento": "1", "data_entrega": None,
+                        "complementos_nome_arquivo": None, "valores_fechados_unitario": valores,
+                    }).scalars().all()
+                    self.assertEqual(len(payloads), 1)
+                    return {
+                        i["codigo_externo"]: (i["usar_listapreco"], i.get("valor_total_final"))
+                        for i in payloads[0]["data"]["itens"]
+                    }
+
+                todos = precos('{"1": "2.0000", "4": "3.5000", "3": "1.1000"}')
+                falta_um = precos('{"1": "2.0000", "3": "1.1000"}')
+                nenhum = precos(None)
+            finally:
+                conn.rollback()
+
+        # 2 × 5 + 3,5 × 3 = 20,5; 1,1 × 10 = 11.
+        self.assertEqual(todos, {"1,4": (0, 20.5), "3": (0, 11.0)})
+        self.assertEqual(falta_um, {"1,4": (1, None), "3": (0, 11.0)})
+        self.assertEqual(nenhum, {"1,4": (1, None), "3": (1, None)})
 
 
 class TestVariosMiolosNaOrdemDoItem(TesteDeFila):
@@ -323,7 +379,7 @@ class TestVariosMiolosNaOrdemDoItem(TesteDeFila):
 
                 payloads = conn.execute(text(sql), {
                     "pedido_distribuicao_ids": [1], "id_cliente": 1, "id_vendedor": 1,
-                    "id_forma_pagamento": "1", "data_entrega": None, "complementos_nome_arquivo": None,
+                    "id_forma_pagamento": "1", "data_entrega": None, "complementos_nome_arquivo": None, "valores_fechados_unitario": None,
                 }).scalars().all()
             finally:
                 conn.rollback()

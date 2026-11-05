@@ -151,6 +151,29 @@ class TestComplementoDoEnvioParcial(unittest.TestCase):
         self.assertIn("complementos_nome_arquivo", conn.parametros)
         self.assertIsNone(conn.parametros["complementos_nome_arquivo"])
 
+    def test_preco_fechado_vai_ao_sql_como_json_de_texto_decimal(self):
+        conn = ConexaoFalsa([corpo_sql("1,2,3")])
+        montar_payload_orcamento(
+            conn, orcamento(valores_fechados_unitario={1: "12.3450", 3: "0.5000"}), "PageFlow")
+        self.assertEqual(
+            json.loads(conn.parametros["valores_fechados_unitario"]),
+            {"1": "12.3450", "3": "0.5000"},
+        )
+
+    def test_sem_preco_fechado_o_parametro_vai_nulo(self):
+        conn = ConexaoFalsa([corpo_sql("1,2,3")])
+        montar_payload_orcamento(conn, orcamento(), "PageFlow")
+        self.assertIn("valores_fechados_unitario", conn.parametros)
+        self.assertIsNone(conn.parametros["valores_fechados_unitario"])
+
+    def test_o_sql_le_o_preco_fechado_do_parametro_e_nao_decide_mais(self):
+        corpo = self._corpo()
+        self.assertIn("CAST(:valores_fechados_unitario AS jsonb)", corpo)
+        self.assertIn("'usar_listapreco', CASE WHEN ip.valor_total_fechado IS NULL THEN 1 ELSE 0 END", corpo)
+        # A regra (formulário do "Fechar pedido", componentes) é do PageFlow.
+        self.assertNotIn("precificacao_pedido_item_valores", corpo)
+        self.assertNotIn("formulario_orcamento_id", corpo)
+
     def test_o_sql_declara_o_parametro_e_o_poe_no_titulo(self):
         corpo = self._corpo()
         self.assertIn("CAST(:complementos_nome_arquivo AS jsonb)", corpo)

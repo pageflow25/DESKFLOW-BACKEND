@@ -68,6 +68,12 @@ class OrcamentoReivindicado:
     # acrescenta o texto ao título do item — o "nome do arquivo" no ERP. Vazio
     # (o normal, e o de todo item anterior) mantém o nome original.
     complementos_nome_arquivo: dict = field(default_factory=dict)
+    # Desde 2026-11-05, só na origem escola: `{id do pedido: "12.3400"}` com os
+    # pedidos que vão ao ERP com o preço fechado da Calculadora (quem decide é o
+    # PageFlow, que grava em `orcamento_api_itens.valor_fechado_unitario`). O SQL
+    # Agrupado multiplica pela quantidade e manda `usar_listapreco = 0` +
+    # `valor_total_final`. Vazio = tudo pela lista de preço do ERP.
+    valores_fechados_unitario: dict = field(default_factory=dict)
 
     @property
     def ids_origem(self) -> list:
@@ -98,7 +104,8 @@ def carregar_orcamento(conn, orcamento_id: int) -> Optional[OrcamentoReivindicad
     # Uma consulta só para as duas origens: o item tem exatamente uma das duas
     # colunas preenchida, então cada lista sai com os ids que lhe cabem.
     itens = conn.execute(text("""
-        SELECT pedido_distribuicao_id, integra_pedido_produto_id, complemento_nome_arquivo
+        SELECT pedido_distribuicao_id, integra_pedido_produto_id, complemento_nome_arquivo,
+               valor_fechado_unitario::text AS valor_fechado_unitario
           FROM orcamento_api_itens
          WHERE orcamento_api_orcamento_id = :id
          ORDER BY pedido_distribuicao_id NULLS LAST, integra_pedido_produto_id NULLS LAST
@@ -112,6 +119,11 @@ def carregar_orcamento(conn, orcamento_id: int) -> Optional[OrcamentoReivindicad
         item["pedido_distribuicao_id"]: item["complemento_nome_arquivo"]
         for item in itens
         if item["pedido_distribuicao_id"] is not None and item["complemento_nome_arquivo"]
+    }
+    valores_fechados = {
+        item["pedido_distribuicao_id"]: item["valor_fechado_unitario"]
+        for item in itens
+        if item["pedido_distribuicao_id"] is not None and item["valor_fechado_unitario"] is not None
     }
 
     return OrcamentoReivindicado(
@@ -128,6 +140,7 @@ def carregar_orcamento(conn, orcamento_id: int) -> Optional[OrcamentoReivindicad
         integra_pedido_produto_ids=produtos,
         data_entrega=linha["data_entrega"],
         complementos_nome_arquivo=complementos,
+        valores_fechados_unitario=valores_fechados,
     )
 
 

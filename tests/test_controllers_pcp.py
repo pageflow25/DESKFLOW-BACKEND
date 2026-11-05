@@ -179,6 +179,26 @@ class TestOrcamentoPreparo(unittest.TestCase):
         _, parametros = conexao.executados[0]
         self.assertEqual(json.loads(parametros["complementos_nome_arquivo"]), {"102": "2ª remessa"})
 
+    def test_preco_fechado_do_pageflow_vai_ao_sql(self):
+        roteador, _ = _roteador(POST=httpx.Response(200, json=_envelope_orcamento(id_requisicao=9)))
+        conexao = ConexaoFalsa(linhas=[LINHA_SQL])
+
+        HandlerPcpOrcamentoEnviar(_erp(roteador)).preparar(conexao, _item(_payload_orcamento(
+            valores_fechados_unitario={"102": "12.3450"})))
+
+        _, parametros = conexao.executados[0]
+        self.assertEqual(json.loads(parametros["valores_fechados_unitario"]), {"102": "12.3450"})
+
+    def test_item_sem_preco_fechado_vai_pela_lista(self):
+        # Itens enfileirados antes de 2026-11-05 não trazem o campo.
+        roteador, _ = _roteador(POST=httpx.Response(200, json=_envelope_orcamento(id_requisicao=9)))
+        conexao = ConexaoFalsa(linhas=[LINHA_SQL])
+
+        HandlerPcpOrcamentoEnviar(_erp(roteador)).preparar(conexao, _item(_payload_orcamento()))
+
+        _, parametros = conexao.executados[0]
+        self.assertIsNone(parametros["valores_fechados_unitario"])
+
     def test_item_sem_o_campo_vai_com_o_nome_original(self):
         # Itens enfileirados antes de 2026-10-21 não trazem o campo.
         roteador, _ = _roteador(POST=httpx.Response(200, json=_envelope_orcamento(id_requisicao=9)))
@@ -248,6 +268,17 @@ class TestOrcamentoPayloadInvalido(unittest.TestCase):
         for texto in ("x" * 61, "   ", "a\nb", 12):
             with self.subTest(texto=texto):
                 self._falha(_payload_orcamento(complementos_nome_arquivo={"101": texto}), "60 caracteres")
+
+    def test_preco_fechado_que_nao_e_objeto(self):
+        self._falha(_payload_orcamento(valores_fechados_unitario=["1.0"]), "valores_fechados_unitario")
+
+    def test_preco_fechado_de_id_fora_do_orcamento(self):
+        self._falha(_payload_orcamento(valores_fechados_unitario={"999": "1.0"}), "fora de `ids_origem`")
+
+    def test_preco_fechado_que_nao_e_decimal_positivo(self):
+        for valor in ("0", "-1", "abc", "NaN", "Infinity", None, True):
+            with self.subTest(valor=valor):
+                self._falha(_payload_orcamento(valores_fechados_unitario={"101": valor}), "maior que zero")
 
     def test_id_que_nao_e_id(self):
         self._falha(_payload_orcamento(ids_origem=[101, "x"]), "não é id")

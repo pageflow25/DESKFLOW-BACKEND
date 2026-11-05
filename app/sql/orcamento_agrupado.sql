@@ -16,14 +16,19 @@
 --   - a gramatura de cada componente em número (`pedido_especificacoes.gramatura`);
 --   - o nome do arquivo formatado (pedido_arquivos_pdf.nome_formatado);
 --   - o complemento do título nos envios PARCIAIS (:complementos_nome_arquivo);
---   - o preço fechado da Calculadora (precificacao_pedido_item_valores).
+--   - o preço fechado da Calculadora (:valores_fechados_unitario): o PageFlow
+--     decide no envio quais pedidos vão com ele e grava o unitário em
+--     orcamento_api_itens.valor_fechado_unitario; aqui só se multiplica pela
+--     quantidade e se soma no item.
 -- O histórico de cada regra está no git log deste arquivo.
 --
 -- Parâmetros: :pedido_distribuicao_ids (int[]), :id_cliente, :id_vendedor,
 -- :id_forma_pagamento, :data_entrega (texto 'DD/MM/YYYY' do orçamento, vindo do
 -- claim — ver repositorios/fila.py; NULL nos lotes anteriores a 2026-09-24, que
 -- caem na data do formulário), :complementos_nome_arquivo (texto JSON
--- {"<id do pedido>": "complemento"}; NULL sem envio parcial). Devolve 1 linha
+-- {"<id do pedido>": "complemento"}; NULL sem envio parcial),
+-- :valores_fechados_unitario (texto JSON {"<id do pedido>": "12.3400"}; NULL ou
+-- sem o id = o pedido vai pela lista de preço do ERP). Devolve 1 linha
 -- (o orçamento inteiro) ou nenhuma, quando nenhum item pôde ser montado.
 
 WITH parametros AS (
@@ -33,7 +38,8 @@ WITH parametros AS (
         CAST(:id_vendedor AS int) AS id_vendedor,
         CAST(:id_forma_pagamento AS text) AS id_forma_pagamento,
         CAST(:data_entrega AS text) AS data_entrega,
-        CAST(:complementos_nome_arquivo AS jsonb) AS complementos_nome_arquivo
+        CAST(:complementos_nome_arquivo AS jsonb) AS complementos_nome_arquivo,
+        CAST(:valores_fechados_unitario AS jsonb) AS valores_fechados_unitario
 ),
 
 -- 1 linha por pedido: um item de carrinho entregue a uma unidade/turma.
@@ -156,24 +162,19 @@ resumo_item AS (
     GROUP BY m.distribuicao_id
 ),
 
--- Preço fechado no PageFlow (Calculadora): soma de valor_fechado_unitario ×
--- quantidade de cada pedido × componente. Só para pedido gerado pelo "Fechar
--- pedido" (formulario_orcamento_id): o fechado de tabela que o PageFlow grava
--- em pedido comum não pode mandar sobre a lista do ERP. Item com algum
--- componente sem fechado fica fora e vai pela lista. É o TOTAL da linha, não o
--- unitário (conferido no retorno do ERP em 2026-10-30).
+-- Preço fechado da Calculadora, já decidido pelo PageFlow por pedido
+-- (:valores_fechados_unitario). O item vai com ele só se TODOS os pedidos do
+-- item o têm; basta um sem para o item inteiro ir pela lista. É o TOTAL da
+-- linha, não o unitário (conferido no retorno do ERP em 2026-10-30).
 precos_fechados AS (
     SELECT
         d.pedido_item_carrinho_id,
         d.id_turma,
-        SUM(v.valor_fechado_unitario * d.quantidade) AS valor_total_fechado
+        SUM((p.valores_fechados_unitario ->> d.distribuicao_id::text)::numeric * d.quantidade) AS valor_total_fechado
     FROM distribuicoes d
-    JOIN pedido_formularios f ON f.id = d.formulario_id
-    LEFT JOIN precificacao_pedido_item_valores v ON v.distribuicao_id = d.distribuicao_id
-    WHERE f.formulario_orcamento_id IS NOT NULL
+    CROSS JOIN parametros p
     GROUP BY d.pedido_item_carrinho_id, d.id_turma
-    HAVING BOOL_AND(v.valor_fechado_unitario IS NOT NULL)
-       AND SUM(v.valor_fechado_unitario * d.quantidade) > 0
+    HAVING BOOL_AND(p.valores_fechados_unitario ->> d.distribuicao_id::text IS NOT NULL)
 ),
 
 -- O item pronto para o JSON: cabeçalho, título e textos do formulário.
