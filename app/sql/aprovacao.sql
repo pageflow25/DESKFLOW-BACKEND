@@ -22,7 +22,8 @@
 -- vieram — a mesma fonte que o PageFlow usa (`orcamento.resposta_api.data.itens`
 -- na aprovação manual, `retorno.itens` na automática, que é o mesmo corpo).
 --
--- `data_entrega` de cada item ('YYYY-MM-DD' + 'T18:00:00.000-03:00'):
+-- `data_entrega` de cada item ('YYYY-MM-DD' + 'T23:59:00.000-03:00', o horário
+-- fixo de saída; a coluna do orçamento é DATE, então a hora não vem do banco):
 --   1. `orcamento_api_orcamentos.data_saida` — a data de SAÍDA escolhida no
 --      "Enviar", nas duas origens (igual para todos os itens);
 --   2. fallback de lote de escola anterior a 2026-09-24 (orçamento sem
@@ -35,7 +36,7 @@
 -- (venda = movimenta_estoque false, remessa = true) e por cliente, endereço,
 -- contato, natureza, transportadora, data e valor unitário, somando a
 -- quantidade congelada no envio. Venda primeiro, depois remessa, cada papel na
--- ordem em que apareceu (pedido, movimenta_estoque). Datas: venda =
+-- ordem em que apareceu (pedido, movimenta_estoque). Datas, no formato do item: venda =
 -- orçamento.data_entrega (fallback formulário); remessa = orçamento.data_saida
 -- (fallback distribuição). Entrega sem data é descartada (o PageFlow bloqueia
 -- a aprovação nesse caso, então aqui ela não deveria chegar).
@@ -152,7 +153,7 @@ entregas_agrupadas AS (
         MIN(ordem) AS ordem,
         json_strip_nulls(
             json_build_object(
-                'data_entrega', to_char(dia, 'YYYY-MM-DD'),
+                'data_entrega', to_char(dia, 'YYYY-MM-DD') || 'T23:59:00.000-03:00',
                 'quantidade', SUM(quantidade),
                 'id_cliente', id_cliente,
                 'id_endereco', id_endereco,
@@ -183,7 +184,7 @@ itens AS (
             json_strip_nulls(
                 json_build_object(
                     'id', ie.id_item_orcamento,
-                    'data_entrega', to_char(di.dia, 'YYYY-MM-DD'),
+                    'data_entrega', to_char(di.dia, 'YYYY-MM-DD') || 'T23:59:00.000-03:00',
                     'entregas', en.entregas
                 )
             )
