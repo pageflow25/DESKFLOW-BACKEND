@@ -22,7 +22,7 @@
 -- vieram — a mesma fonte que o PageFlow usa (`orcamento.resposta_api.data.itens`
 -- na aprovação manual, `retorno.itens` na automática, que é o mesmo corpo).
 --
--- `data_entrega` de cada item ('YYYY-MM-DD' + 'T23:59:00.000-03:00', o horário
+-- `data_entrega` de cada item ('YYYY-MM-DD' + 'T20:59:00.000-03:00', o horário
 -- fixo de saída; a coluna do orçamento é DATE, então a hora não vem do banco):
 --   1. `orcamento_api_orcamentos.data_saida` — a data de SAÍDA escolhida no
 --      "Enviar", nas duas origens (igual para todos os itens);
@@ -153,7 +153,7 @@ entregas_agrupadas AS (
         MIN(ordem) AS ordem,
         json_strip_nulls(
             json_build_object(
-                'data_entrega', to_char(dia, 'YYYY-MM-DD') || 'T23:59:00.000-03:00',
+                'data_entrega', to_char(dia, 'YYYY-MM-DD') || 'T20:59:00.000-03:00',
                 'quantidade', SUM(quantidade),
                 'id_cliente', id_cliente,
                 'id_endereco', id_endereco,
@@ -184,7 +184,7 @@ itens AS (
             json_strip_nulls(
                 json_build_object(
                     'id', ie.id_item_orcamento,
-                    'data_entrega', to_char(di.dia, 'YYYY-MM-DD') || 'T23:59:00.000-03:00',
+                    'data_entrega', to_char(di.dia, 'YYYY-MM-DD') || 'T20:59:00.000-03:00',
                     'entregas', en.entregas
                 )
             )
