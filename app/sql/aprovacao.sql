@@ -121,11 +121,7 @@ linhas_entrega AS (
         e.id_transportadora,
         e.valor_unitario,
         COALESCE(i.quantidade_no_envio, pd.quantidade) AS quantidade,
-        CASE
-            WHEN e.movimenta_estoque
-                THEN COALESCE(ap.orcamento_data_saida::date, pd.data_saida::date)
-            ELSE COALESCE(ap.orcamento_data_entrega::date, f.data_entrega::date)
-        END AS dia,
+        f.data_entrega::date AS dia,
         ROW_NUMBER() OVER (
             PARTITION BY ir.id_item_orcamento
             ORDER BY pd.id, e.movimenta_estoque
