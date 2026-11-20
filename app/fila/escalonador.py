@@ -106,16 +106,16 @@ class Escalonador:
         self._motor = Motor(engine, catalogo, registry, settings, self.worker_id)
 
         self._pool_sincrono = ThreadPoolExecutor(
-            max_workers=max(1, settings.FILA_POOL_SINCRONO), thread_name_prefix="fila-sinc")
+            max_workers=settings.FILA_POOL_SINCRONO, thread_name_prefix="fila-sinc")
         self._pool_assincrono = ThreadPoolExecutor(
-            max_workers=max(1, settings.FILA_POOL_ASSINCRONO), thread_name_prefix="fila-assinc")
+            max_workers=settings.FILA_POOL_ASSINCRONO, thread_name_prefix="fila-assinc")
 
         self.sincrono = Despachante(
             engine, catalogo, self._motor, settings, CLASSE_SINCRONO,
-            max(1, settings.FILA_POOL_SINCRONO), self._pool_sincrono, self.worker_id, settings.FILA_DESTINO)
+            settings.FILA_POOL_SINCRONO, self._pool_sincrono, self.worker_id, settings.FILA_DESTINO)
         self.assincrono = Despachante(
             engine, catalogo, self._motor, settings, CLASSE_ASSINCRONO,
-            max(1, settings.FILA_POOL_ASSINCRONO), self._pool_assincrono, self.worker_id, settings.FILA_DESTINO)
+            settings.FILA_POOL_ASSINCRONO, self._pool_assincrono, self.worker_id, settings.FILA_DESTINO)
 
     # --- Ciclos do agendador -------------------------------------------------
 

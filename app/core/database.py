@@ -30,7 +30,7 @@ def dimensionar_pool(settings) -> int:
     if not settings.FILA_ATIVA:
         # Sem fila não há ciclo: só `verificar` e `dry-run`, uma conexão cada.
         return 1
-    slots = max(1, settings.FILA_POOL_SINCRONO) + max(1, settings.FILA_POOL_ASSINCRONO)
+    slots = settings.FILA_POOL_SINCRONO + settings.FILA_POOL_ASSINCRONO
     return CONEXOES_CICLOS_FILA + slots * 2
 
 

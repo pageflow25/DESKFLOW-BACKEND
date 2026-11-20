@@ -3,7 +3,7 @@
 import os
 from functools import lru_cache
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -36,8 +36,10 @@ class Settings(BaseSettings):
     # Teto de conexões simultâneas ao ERP e quantas ficam RESERVADAS à classe
     # síncrona. O pool assíncrono só enxerga (TETO - RESERVA): sem isso os dois
     # pools seriam separados só no nome, porque disputariam o mesmo cliente HTTP.
-    ERP_MAX_CONEXOES: int = 6
-    ERP_CONEXOES_RESERVADAS_SINCRONO: int = 2
+    # Obrigatórias, sem padrão no código: andam junto com os FILA_POOL_* e
+    # vêm 100 % do .env.
+    ERP_MAX_CONEXOES: int
+    ERP_CONEXOES_RESERVADAS_SINCRONO: int
 
     # As chaves PAGEFLOW_* e PCP_* sairam na Fase 6b, junto dos ciclos antigos
     # que as liam. O worker nao chama mais o PageFlow por HTTP (o resultado e
@@ -61,10 +63,12 @@ class Settings(BaseSettings):
     # diferentes (a coluna é UNIQUE em fila_workers).
     FILA_WORKER_ID: str = ""
 
-    # Pool síncrono = 1: um lançamento síncrono roda de cada vez e os
-    # seguintes esperam em ordem. Assíncrono = 4, independente.
-    FILA_POOL_SINCRONO: int = 1
-    FILA_POOL_ASSINCRONO: int = 4
+    # Quantas threads cada pool tem. Obrigatórias, sem padrão no código: o
+    # número vem 100 % do .env, e valor ausente ou menor que 1 recusa o boot
+    # em vez de ser corrigido em silêncio. Com FILA_POOL_SINCRONO=1 um
+    # lançamento síncrono roda de cada vez e os seguintes esperam em ordem.
+    FILA_POOL_SINCRONO: int
+    FILA_POOL_ASSINCRONO: int
     # Sem LISTEN/NOTIFY (pooler de transação do Supabase): o pickup é por poll.
     FILA_POLL_SINCRONO_SEGUNDOS: int = 1
     FILA_POLL_ASSINCRONO_SEGUNDOS: int = 5
@@ -101,6 +105,25 @@ class Settings(BaseSettings):
     @classmethod
     def _sem_barra_final(cls, valor: str) -> str:
         return valor.rstrip("/")
+
+    @field_validator("FILA_POOL_SINCRONO", "FILA_POOL_ASSINCRONO", "ERP_MAX_CONEXOES")
+    @classmethod
+    def _pelo_menos_um(cls, valor: int, info) -> int:
+        if valor < 1:
+            raise ValueError(f"{info.field_name} precisa ser >= 1 (veio {valor})")
+        return valor
+
+    @model_validator(mode="after")
+    def _reserva_cabe_no_teto(self) -> "Settings":
+        # A classe assíncrona enxerga (TETO - RESERVA) conexões: reserva igual
+        # ou maior que o teto a deixaria sem conexão nenhuma ao ERP.
+        reserva = self.ERP_CONEXOES_RESERVADAS_SINCRONO
+        if not 0 <= reserva < self.ERP_MAX_CONEXOES:
+            raise ValueError(
+                f"ERP_CONEXOES_RESERVADAS_SINCRONO precisa estar entre 0 e "
+                f"ERP_MAX_CONEXOES - 1 ({self.ERP_MAX_CONEXOES - 1}); veio {reserva}"
+            )
+        return self
 
 
 @lru_cache

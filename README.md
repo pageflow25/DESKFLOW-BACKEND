@@ -51,6 +51,7 @@ Cada `tipo_codigo` tem um controller em `app/controllers/`:
 | `produto.importar` | `GET /api/v1/caracteristicasproduto` | sim |
 | `pcp.orcamento.enviar` | `POST /api/v1/orcamento` | não |
 | `pcp.aprovacao.enviar` | `GET /api/v1/proposta` + `POST /api/v1/proposta/aprovar` | não |
+| `precificacao.custo.buscar` | `POST /api/v1/orcamento` — o mesmo handler de `pcp.orcamento.enviar`, classe síncrona (custo da Calculadora de Orçamento do PageFlow) | não |
 | `pcp.download_arquivos` | Vercel Blob → `DOWNLOAD_BASE_PATH` (só registrado com a pasta configurada) | sim |
 
 Cada execução termina num destes desfechos: `concluido`, `falhou` (o destino
@@ -61,14 +62,19 @@ assíncrono; o resultado vem pelo webhook).
 
 ### Orçamentos do PCP
 
-O SQL é escolhido pela **origem** do lote (`orcamento_api_lotes.origem`) e,
-na origem escola, pelo modo de agrupamento:
+O SQL é escolhido só pela **origem** do lote (`orcamento_api_lotes.origem`):
 
-| Origem / modo | SQL | Orçamentos | Itens |
+| Origem | SQL | Orçamentos | Itens |
 |---|---|---|---|
-| escola, `unidade` (normal) | `sql/orcamento_unidade.sql` | 1 por unidade escolar | 1 por pedido (`codigo_externo` = id do `pedido_distribuicoes`) |
-| escola, `escola` | `sql/orcamento_agrupado.sql` | 1 por turma (pedidos sem turma formam um) | soma as unidades do mesmo item (`codigo_externo` = ids separados por vírgula) |
+| escola | `sql/orcamento_agrupado.sql` (SQL Agrupado) | 1 por turma (pedidos sem turma formam um) | soma as unidades do mesmo item (`codigo_externo` = ids separados por vírgula) |
 | **integração** | `sql/orcamento_integracao.sql` | 1 por pedido do parceiro (`integra_pedidos`) | 1 por produto (`codigo_externo` = id do `integra_pedido_produtos`) |
+
+Até 2026-10-07 a origem escola tinha também o `sql/orcamento_unidade.sql` (1
+orçamento por unidade, 1 item por pedido), escolhido pelo modo de agrupamento
+marcado no "Enviar". O modo saiu do sistema — tela, payload e banco — e o
+Agrupado ficou como o único. Orçamento antigo do modo unidade com pedidos de
+mais de uma turma não é migrado: se reenviado, falha explicando que não pode
+ser enviado como está (não há ação na tela que o redivida).
 
 Quem divide o lote em orçamentos é o PageFlow, no clique "Enviar". O
 DESKFLOW2.0 roda o SQL só com os ids daquele orçamento. Antes de mandar ao
@@ -86,14 +92,13 @@ vêm os itens. O consumidor não precisa saber mais que isso:
   lista certa (`pedido_distribuicao_ids` ou `integra_pedido_produto_ids`);
 - o cabeçalho (cliente/vendedor/forma) vem da requisição, como sempre — na
   integração o PageFlow o copiou do cadastro da integração, não da unidade;
-- `modo_agrupamento` é NULL num lote de integração (a divisão é fixa);
 - a estrutura do item (componentes, perguntas, tarefas) vem do **catálogo
   vivo** (`catalogo_bremen_modelos` e filhas), não de especificação de pedido.
   O snapshot do modelo existe no banco mas está vazio e não é lido: mudar o
   modelo no catálogo muda o que vai ao ERP nos envios seguintes;
 - `altura`/`largura` saem como estão em
   `catalogo_bremen_modelo_componentes` (já em **centímetros**) — ao contrário
-  dos SQLs de escola, que leem milímetros e dividem por 10;
+  do SQL de escola, que lê milímetros e divide por 10;
 - capa e miolo são decididos por `bremen_componentes.is_capa/is_miolo`.
 
 **Downloads de lote de integração**: os arquivos não estão em
@@ -104,9 +109,21 @@ de fora). A pasta de destino é
 escola, e a linha de `downloads_bremen` (que o PageFlow grava a partir do
 resultado) vai com `integra_pedido_produto_id` e `arquivo_pdf_id` NULL.
 
-**Síncrono ou assíncrono** é decidido pelo PageFlow ao enfileirar: com
-`url_webhook` no payload a chamada vai assíncrona e o item fica
-`aguardando_callback`; sem ela, vai síncrona e a resposta do POST é o resultado.
+**Síncrono ou assíncrono** segue a **classe do tipo** (a da tela de configuração da
+fila do PageFlow), e a `url_webhook` do payload tem que concordar com ela
+(`pcp_validator.modo_da_chamada`, 2026-10-07):
+
+| Classe | `url_webhook` | Resultado |
+|---|---|---|
+| `sincrono` | ausente | chamada síncrona: a resposta do POST é o resultado |
+| `sincrono` | presente | falha definitiva `WEBHOOK_EM_TIPO_SINCRONO`, nenhuma chamada sai |
+| `assincrono` | presente | chamada assíncrona: o item fica `aguardando_callback` |
+| `assincrono` | ausente | falha definitiva `ASSINCRONO_SEM_WEBHOOK`, nenhuma chamada sai |
+
+Vale para os tipos que podem usar webhook (`pcp.orcamento.enviar`,
+`pcp.aprovacao.enviar` e `precificacao.custo.buscar`). Os outros tipos
+assíncronos nunca mandam URL. Antes o modo saía só da URL, e um produtor que a
+mandasse ou esquecesse por engano trocava o modo sem ninguém ver.
 
 ## Ciclos do worker
 
@@ -116,8 +133,8 @@ o próximo tenta de novo.
 
 | Ciclo | Intervalo | O que faz |
 |---|---|---|
-| fila síncrona | `FILA_POLL_SINCRONO_SEGUNDOS` (1 s) | claim e execução no pool síncrono (1 por vez, em ordem) |
-| fila assíncrona | `FILA_POLL_ASSINCRONO_SEGUNDOS` (5 s) | claim e execução no pool assíncrono (4 em paralelo) |
+| fila síncrona | `FILA_POLL_SINCRONO_SEGUNDOS` (1 s) | claim e execução no pool síncrono (`FILA_POOL_SINCRONO` threads; com `1`, um por vez, em ordem) |
+| fila assíncrona | `FILA_POLL_ASSINCRONO_SEGUNDOS` (5 s) | claim e execução no pool assíncrono (`FILA_POOL_ASSINCRONO` threads em paralelo) |
 | reaper | `FILA_REAPER_SEGUNDOS` (30 s) | devolve itens com lease vencido |
 | heartbeat | `FILA_HEARTBEAT_SEGUNDOS` (30 s) | registra o worker vivo em `fila_workers` |
 
@@ -272,6 +289,17 @@ arquivo (ex.: `testing`), defina `DESKFLOW2_ENV_FILE=.env.testing`. Arquivos
 | `DATABASE_URL` | o mesmo Postgres do PageFlow |
 | `ERP_BASE_URL` | base da API do Wingraph |
 | `ERP_USER` / `ERP_PASSWORD` | credenciais do ERP |
+| `FILA_POOL_SINCRONO` | threads do pool síncrono (>= 1). `1` = um lançamento síncrono de cada vez, em ordem |
+| `FILA_POOL_ASSINCRONO` | threads do pool assíncrono (>= 1) |
+| `ERP_MAX_CONEXOES` | teto de conexões simultâneas ao ERP (>= 1) |
+| `ERP_CONEXOES_RESERVADAS_SINCRONO` | conexões reservadas ao pool síncrono (0 a `ERP_MAX_CONEXOES - 1`); o assíncrono enxerga o teto menos a reserva |
+
+As quatro últimas não têm padrão no código: o número de threads e de conexões
+vem 100 % do `.env`. Ausente ou fora da faixa, o worker não sobe — o erro do
+boot diz qual chave. Para não haver disputa de conexão entre os pools, mantenha
+`FILA_POOL_SINCRONO <= ERP_CONEXOES_RESERVADAS_SINCRONO` e
+`FILA_POOL_ASSINCRONO <= ERP_MAX_CONEXOES - ERP_CONEXOES_RESERVADAS_SINCRONO`.
+O pool do banco se ajusta sozinho (`DB_POOL_SIZE=0`).
 
 ### Opcionais
 
@@ -288,12 +316,9 @@ arquivo (ex.: `testing`), defina `DESKFLOW2_ENV_FILE=.env.testing`. Arquivos
 | `ERP_503_MAX_WAIT_SECONDS` | `300` | janela para repetir 503 e falha de conexão |
 | `ERP_503_RETRY_BASE_SECONDS` | `5` | espera inicial entre tentativas |
 | `ERP_503_RETRY_MAX_INTERVAL_SECONDS` | `30` | espera máxima entre tentativas |
-| `ERP_MAX_CONEXOES` | `6` | teto de conexões simultâneas ao ERP |
-| `ERP_CONEXOES_RESERVADAS_SINCRONO` | `2` | conexões reservadas ao pool síncrono |
 | `FILA_ATIVA` | `true` | `false` faz o `worker` sair sem iniciar |
 | `FILA_DESTINO` | `erp_wingraph` | destino cujos itens este worker executa |
 | `FILA_WORKER_ID` | `<host>:<pid>` | id do worker (único em `fila_workers`) |
-| `FILA_POOL_SINCRONO` / `FILA_POOL_ASSINCRONO` | `1` / `4` | tamanho de cada pool |
 | `FILA_POLL_SINCRONO_SEGUNDOS` / `FILA_POLL_ASSINCRONO_SEGUNDOS` | `1` / `5` | intervalo do poll |
 | `FILA_LOTE_CLAIM` | `10` | teto de itens por claim |
 | `FILA_LEASE_MARGEM_SEGUNDOS` | `30` | lease = timeout do tipo + margem |
@@ -314,6 +339,10 @@ DATABASE_URL=postgresql://usuario:senha@host:5432/pageflow
 ERP_BASE_URL=https://erp.exemplo.com.br
 ERP_USER=usuario
 ERP_PASSWORD=senha
+FILA_POOL_SINCRONO=1
+FILA_POOL_ASSINCRONO=4
+ERP_MAX_CONEXOES=6
+ERP_CONEXOES_RESERVADAS_SINCRONO=2
 DOWNLOAD_BASE_PATH=\\servidor\producao
 BLOB_READ_WRITE_TOKEN=token
 ```

@@ -1,6 +1,7 @@
 -- Aprovação de UM orçamento do PCP (POST /api/v1/proposta/aprovar).
 --
--- Monta o `data` do corpo — { id_orcamento, gerar_op, itens[] } — para UMA
+-- Monta o `data` do corpo — { id_orcamento, gerar_op, gerar_op_por_entrega,
+-- itens[] } — para UMA
 -- orcamento_api_aprovacoes. O `identifier` e o modo assíncrono
 -- (`url_webhook`) são postos pelo handler (handlers/pcp/aprovacao_enviar.py),
 -- como no orçamento.
@@ -21,23 +22,27 @@
 -- vieram — a mesma fonte que o PageFlow usa (`orcamento.resposta_api.data.itens`
 -- na aprovação manual, `retorno.itens` na automática, que é o mesmo corpo).
 --
--- `data_entrega` de cada item ('YYYY-MM-DD' + 'T18:00:00.000-03:00'):
---   1. `orcamento_api_orcamentos.data_saida` — a data de SAÍDA escolhida no
---      "Enviar", nas duas origens (igual para todos os itens);
---   2. fallback de lote de escola anterior a 2026-09-24 (orçamento sem
---      data_saida): MIN(pedido_distribuicoes.data_saida) dos pedidos do item;
---   3. por último MIN(pedido_formularios.data_entrega).
---   Item sem nenhuma das três vai só com { id }.
+-- `data_previsao_expedicao` e `data_entrega` de cada item ('YYYY-MM-DD' +
+-- 'T20:59:00.000-03:00', o horário fixo; as colunas do orçamento são DATE):
+--   - saída: `orcamento_api_orcamentos.data_saida`;
+--   - entrega: `orcamento_api_orcamentos.data_entrega`.
+-- Não há fallback entre essas datas nem para datas dos pedidos.
+-- Item sem alguma das datas vai com o respectivo campo omitido.
 --
 -- `entregas[]` (só em lote com `orcamento_api_lotes.entregas_fiscais`): as
 -- `pedido_distribuicao_entregas` dos pedidos do item, agrupadas por papel
 -- (venda = movimenta_estoque false, remessa = true) e por cliente, endereço,
 -- contato, natureza, transportadora, data e valor unitário, somando a
 -- quantidade congelada no envio. Venda primeiro, depois remessa, cada papel na
--- ordem em que apareceu (pedido, movimenta_estoque). Datas: venda =
--- orçamento.data_entrega (fallback formulário); remessa = orçamento.data_saida
--- (fallback distribuição). Entrega sem data é descartada (o PageFlow bloqueia
--- a aprovação nesse caso, então aqui ela não deveria chegar).
+-- ordem em que apareceu (pedido, movimenta_estoque). A data das entregas usa
+-- `orcamento_api_orcamentos.data_entrega`. Entrega sem data é descartada
+-- (o PageFlow bloqueia a aprovação nesse caso, então aqui ela não deveria chegar).
+--
+-- `gerar_op_por_entrega`: decisão do "Enviar" do PCP gravada no LOTE
+-- (`orcamento_api_lotes.gerar_op_distribuida`, independente do `gerar_op`).
+-- Aprovação sem lote, ou lote anterior à coluna, vai `false`. Nome do campo
+-- pela doc do Wingraph ("uma OP diferente para cada entrega aprovada"); até
+-- 2026-11-03 ia como `gerarOpDistribuida`, que não consta na API.
 --
 -- Parâmetro: :aprovacao_id (orcamento_api_aprovacoes.id). Devolve 1 linha com
 -- o `data` (json), ou nenhuma se a aprovação não existir.
@@ -51,7 +56,8 @@ WITH aprovacao AS (
         o.resposta_api,
         o.data_saida AS orcamento_data_saida,
         o.data_entrega AS orcamento_data_entrega,
-        COALESCE(l.entregas_fiscais, false) AS entregas_fiscais
+        COALESCE(l.entregas_fiscais, false) AS entregas_fiscais,
+        COALESCE(l.gerar_op_distribuida, false) AS gerar_op_distribuida
     FROM orcamento_api_aprovacoes a
     JOIN orcamento_api_orcamentos o
         ON o.id = a.orcamento_api_orcamento_id
@@ -84,18 +90,11 @@ itens_erp AS (
 datas_item AS (
     SELECT
         ir.id_item_orcamento,
-        COALESCE(
-            MIN(ap.orcamento_data_saida)::date,
-            MIN(pd.data_saida)::date,
-            MIN(f.data_entrega)::date
-        ) AS dia
+        MIN(ap.orcamento_data_saida)::date AS dia_saida,
+        MIN(ap.orcamento_data_entrega)::date AS dia_entrega
     FROM orcamento_api_itens_retorno ir
     JOIN aprovacao ap
         ON ap.orcamento_id = ir.orcamento_api_orcamento_id
-    LEFT JOIN pedido_distribuicoes pd
-        ON pd.id = ir.pedido_distribuicao_id
-    LEFT JOIN pedido_formularios f
-        ON f.id = pd.formulario_id
     WHERE ir.id_item_orcamento IS NOT NULL
     GROUP BY ir.id_item_orcamento
 ),
@@ -112,11 +111,8 @@ linhas_entrega AS (
         e.id_transportadora,
         e.valor_unitario,
         COALESCE(i.quantidade_no_envio, pd.quantidade) AS quantidade,
-        CASE
-            WHEN e.movimenta_estoque
-                THEN COALESCE(ap.orcamento_data_saida::date, pd.data_saida::date)
-            ELSE COALESCE(ap.orcamento_data_entrega::date, f.data_entrega::date)
-        END AS dia,
+        ap.orcamento_data_entrega::date AS dia_entrega,
+        ap.orcamento_data_saida::date AS dia_saida,
         ROW_NUMBER() OVER (
             PARTITION BY ir.id_item_orcamento
             ORDER BY pd.id, e.movimenta_estoque
@@ -126,8 +122,6 @@ linhas_entrega AS (
         ON ir.orcamento_api_orcamento_id = ap.orcamento_id
     JOIN pedido_distribuicoes pd
         ON pd.id = ir.pedido_distribuicao_id
-    LEFT JOIN pedido_formularios f
-        ON f.id = pd.formulario_id
     LEFT JOIN orcamento_api_itens i
         ON i.id = ir.orcamento_api_item_id
     JOIN pedido_distribuicao_entregas e
@@ -144,7 +138,7 @@ entregas_agrupadas AS (
         MIN(ordem) AS ordem,
         json_strip_nulls(
             json_build_object(
-                'data_entrega', to_char(dia, 'YYYY-MM-DD'),
+                'data_entrega', to_char(dia_entrega, 'YYYY-MM-DD') || 'T20:59:00.000-03:00',
                 'quantidade', SUM(quantidade),
                 'id_cliente', id_cliente,
                 'id_endereco', id_endereco,
@@ -155,9 +149,9 @@ entregas_agrupadas AS (
             )
         ) AS entrega
     FROM linhas_entrega
-    WHERE dia IS NOT NULL
+    WHERE dia_entrega IS NOT NULL
     GROUP BY id_item_orcamento, movimenta_estoque, id_cliente, id_endereco, id_contato,
-             id_nat_operacao, id_transportadora, dia, valor_unitario
+             id_nat_operacao, id_transportadora, dia_entrega, valor_unitario
 ),
 
 entregas_item AS (
@@ -175,7 +169,8 @@ itens AS (
             json_strip_nulls(
                 json_build_object(
                     'id', ie.id_item_orcamento,
-                    'data_entrega', to_char(di.dia, 'YYYY-MM-DD'),
+                    'data_previsao_expedicao', to_char(di.dia_saida, 'YYYY-MM-DD') || 'T20:59:00.000-03:00',
+                    'data_entrega', to_char(di.dia_entrega, 'YYYY-MM-DD') || 'T20:59:00.000-03:00',
                     'entregas', en.entregas
                 )
             )
@@ -192,6 +187,7 @@ SELECT
     json_build_object(
         'id_orcamento', ap.id_orcamento,
         'gerar_op', COALESCE(ap.gerar_op, false),
+        'gerar_op_por_entrega', ap.gerar_op_distribuida,
         'itens', COALESCE(it.itens, '[]'::json)
     ) AS data
 FROM aprovacao ap

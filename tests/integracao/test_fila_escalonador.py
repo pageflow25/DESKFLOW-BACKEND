@@ -107,6 +107,8 @@ class TestEscalonador(TesteDeFila):
             "cliente.sincronizar_pagina",
             "pcp.aprovacao.enviar",
             "pcp.orcamento.enviar",
+            # Custo da Calculadora de Orçamento: o handler de orçamento, classe síncrona.
+            "precificacao.custo.buscar",
             "produto.importar",
         ])
         self.assertIsNone(registry.obter("pcp.download_arquivos"))

@@ -9,12 +9,15 @@ mensagem E o codigo, porque as recusas daqui nao sao todas iguais:
 `SEM_ID_ORCAMENTO` e `SEM_ITENS_APROVADOS` sao distinguiveis de um payload
 generico malformado, e o operador precisa dessa diferenca.
 
-`modo_envio_de` e `url_webhook_de` moram aqui, e nao em
-`controllers/pcp/resposta_assincrona.py`, porque leem o PAYLOAD. O que ficou la e `desfecho_do_ack`, que le a RESPOSTA.
+`modo_envio_de`, `url_webhook_de` e `modo_da_chamada` moram aqui, e nao em
+`controllers/pcp/resposta_assincrona.py`, porque leem o PAYLOAD (e a classe do item). O que ficou la e
+`desfecho_do_ack`, que le a RESPOSTA.
 """
 
+from decimal import Decimal, InvalidOperation
 from typing import Any, Optional, Tuple
 
+from ....fila.catalogo import CLASSE_ASSINCRONO, CLASSE_SINCRONO
 from ....repositorios.pcp import ORIGEM_ESCOLA, ORIGEM_INTEGRACAO, OrcamentoReivindicado
 from ....utils.conversao import inteiro_positivo
 from ...payload_invalido import PayloadInvalido
@@ -23,7 +26,9 @@ MODO_SINCRONO = "sincrono"
 MODO_ASSINCRONO = "assincrono"
 
 ORIGENS = (ORIGEM_ESCOLA, ORIGEM_INTEGRACAO)
-MODOS_AGRUPAMENTO = ("unidade", "escola")
+
+# Tamanho de `orcamento_api_itens.complemento_nome_arquivo` no PageFlow.
+LIMITE_COMPLEMENTO_NOME_ARQUIVO = 60
 
 
 def url_webhook_de(payload: Optional[dict]) -> Optional[str]:
@@ -36,8 +41,45 @@ def modo_envio_de(payload: Optional[dict]) -> str:
     return MODO_ASSINCRONO if url_webhook_de(payload) else MODO_SINCRONO
 
 
+def modo_da_chamada(classe: str, payload: Optional[dict]) -> Tuple[Optional[str], Optional[PayloadInvalido]]:
+    """O modo da chamada ao ERP, conferido nos DOIS sinais (2026-10-07).
+
+    A classe do tipo (a da tela de configuração da fila) diz o modo; a `url_webhook` do payload tem
+    que concordar com ela:
+
+    | classe     | url_webhook | resultado                                  |
+    |------------|-------------|--------------------------------------------|
+    | sincrono   | ausente     | síncrono                                   |
+    | sincrono   | presente    | recusa `WEBHOOK_EM_TIPO_SINCRONO`          |
+    | assincrono | presente    | assíncrono                                 |
+    | assincrono | ausente     | recusa `ASSINCRONO_SEM_WEBHOOK`            |
+
+    Antes o modo saía só da URL: um produtor que a mandasse (ou esquecesse) por engano trocava o modo
+    sem ninguém ver — e um envio assíncrono num tipo síncrono deixa o usuário da tela esperando um
+    webhook que pode levar horas. Divergência agora é falha DEFINITIVA, visível na tela da fila, e
+    nenhuma chamada sai. Só vale para os tipos que podem usar webhook (os POSTs do PCP); os demais
+    tipos assíncronos nunca mandam URL.
+    """
+    tem_url = url_webhook_de(payload) is not None
+    if classe == CLASSE_SINCRONO:
+        if tem_url:
+            return None, PayloadInvalido(
+                "Tipo de classe síncrona recebeu url_webhook: a tela está esperando o resultado na hora, "
+                "e o ERP o devolveria pelo webhook. Confira o produtor no PageFlow.",
+                "WEBHOOK_EM_TIPO_SINCRONO")
+        return MODO_SINCRONO, None
+    if classe == CLASSE_ASSINCRONO:
+        if not tem_url:
+            return None, PayloadInvalido(
+                "Tipo de classe assíncrona sem url_webhook: o ERP não teria para onde devolver o resultado. "
+                "Confira BACKEND_PUBLIC_BASE_URL no PageFlow.",
+                "ASSINCRONO_SEM_WEBHOOK")
+        return MODO_ASSINCRONO, None
+    return None, PayloadInvalido(f"Classe de fila desconhecida: {classe!r}.", "CLASSE_DESCONHECIDA")
+
+
 def _data_entrega_valida(valor: Any) -> bool:
-    """`DD/MM/YYYY`, que é o formato que os três SQLs colocam em `obs_producao`.
+    """`DD/MM/YYYY`, que é o formato que os SQLs de orçamento colocam em `obs_producao`.
 
     A checagem é de forma, não de calendário: o que se quer evitar é texto
     arbitrário do payload viajando para dentro da observação de produção.
@@ -49,6 +91,74 @@ def _data_entrega_valida(valor: Any) -> bool:
     return (len(dia), len(mes), len(ano)) == (2, 2, 4) and all(p.isdigit() for p in partes)
 
 
+def _complemento_valido(texto: Any) -> bool:
+    """Uma linha só, não vazia, até 60 caracteres: é o que o PageFlow grava, e o
+    texto vai para dentro do título do item no ERP."""
+    if not isinstance(texto, str) or not texto.strip():
+        return False
+    if any(ord(caractere) < 32 or ord(caractere) == 127 for caractere in texto):
+        return False
+    return len(texto.strip()) <= LIMITE_COMPLEMENTO_NOME_ARQUIVO
+
+
+def _complementos_nome_arquivo(
+    bruto: Any, ids: list,
+) -> Tuple[Optional[dict], Optional[PayloadInvalido]]:
+    """`complementos_nome_arquivo` do payload (desde 2026-10-21): `{id: texto}`
+    só com pedidos de formulário enviado parcialmente. Ausente — item enfileirado
+    antes do campo existir — vale `{}`, o nome original. Um id fora de
+    `ids_origem` ou um texto malformado é erro do produtor, e recusar é melhor que
+    mandar ao ERP um título que ninguém pediu."""
+    if bruto is None:
+        return {}, None
+    if not isinstance(bruto, dict):
+        return None, PayloadInvalido(
+            f"`complementos_nome_arquivo` precisa ser um objeto {{id: texto}}; veio {bruto!r}.")
+    complementos = {}
+    for chave, texto in bruto.items():
+        id_ = inteiro_positivo(chave)
+        if id_ is None or id_ not in ids:
+            return None, PayloadInvalido(
+                f"`complementos_nome_arquivo` tem id fora de `ids_origem`: {chave!r}.")
+        if not _complemento_valido(texto):
+            return None, PayloadInvalido(
+                f"`complementos_nome_arquivo` do id {id_} precisa ser texto de uma linha, "
+                f"com até {LIMITE_COMPLEMENTO_NOME_ARQUIVO} caracteres; veio {texto!r}.")
+        complementos[id_] = texto.strip()
+    return complementos, None
+
+
+def _valores_fechados_unitario(
+    bruto: Any, ids: list,
+) -> Tuple[Optional[dict], Optional[PayloadInvalido]]:
+    """`valores_fechados_unitario` do payload (desde 2026-11-05): `{id: "12.3400"}`
+    só com os pedidos que vão ao ERP com o preço fechado da Calculadora. Ausente —
+    item enfileirado antes do campo existir — vale `{}`: tudo pela lista. Id fora
+    de `ids_origem` ou valor que não é um decimal maior que zero é erro do
+    produtor: mandar ao ERP um preço que ninguém fechou é pior que recusar."""
+    if bruto is None:
+        return {}, None
+    if not isinstance(bruto, dict):
+        return None, PayloadInvalido(
+            f"`valores_fechados_unitario` precisa ser um objeto {{id: valor}}; veio {bruto!r}.")
+    valores = {}
+    for chave, valor in bruto.items():
+        id_ = inteiro_positivo(chave)
+        if id_ is None or id_ not in ids:
+            return None, PayloadInvalido(
+                f"`valores_fechados_unitario` tem id fora de `ids_origem`: {chave!r}.")
+        try:
+            decimal = Decimal(str(valor))
+        except (InvalidOperation, ValueError):
+            decimal = None
+        if isinstance(valor, bool) or decimal is None or not decimal.is_finite() or decimal <= 0:
+            return None, PayloadInvalido(
+                f"`valores_fechados_unitario` do id {id_} precisa ser um decimal maior que zero; "
+                f"veio {valor!r}.")
+        valores[id_] = str(decimal)
+    return valores, None
+
+
 def orcamento_do_payload(
     payload: Optional[dict],
 ) -> Tuple[Optional[OrcamentoReivindicado], Optional[PayloadInvalido]]:
@@ -56,7 +166,7 @@ def orcamento_do_payload(
     `montar_payload_orcamento` já sabe consumir.
 
     Valida E constrói no mesmo lugar, de propósito. Reaproveitar a dataclass do
-    caminho antigo é o que mantém uma representação só: é ela que os três SQLs e
+    caminho antigo é o que mantém uma representação só: é ela que os SQLs e
     as duas validações de `servicos/pcp/payload.py` enxergam, e uma segunda cópia dos
     mesmos campos seria a chance perfeita de os dois caminhos divergirem.
     """
@@ -73,11 +183,9 @@ def orcamento_do_payload(
             f"Origem do orçamento desconhecida: {payload.get('origem')!r} "
             f"(esperado um de {list(ORIGENS)}).")
 
-    modo_agrupamento = payload.get("modo_agrupamento")
-    if origem == ORIGEM_ESCOLA and modo_agrupamento not in MODOS_AGRUPAMENTO:
-        return None, PayloadInvalido(
-            f"Origem escola exige `modo_agrupamento` em {list(MODOS_AGRUPAMENTO)}; "
-            f"veio {modo_agrupamento!r}.")
+    # `modo_agrupamento` NÃO é lido: saiu em 2026-10-07, e a origem escola tem
+    # um SQL só (o Agrupado). Item antigo da fila que ainda o carregue passa —
+    # recusá-lo seria falha DEFINITIVA para um envio que continua válido.
 
     brutos = payload.get("ids_origem")
     if not isinstance(brutos, list) or not brutos:
@@ -92,6 +200,14 @@ def orcamento_do_payload(
         return None, PayloadInvalido(
             f"`data_entrega` precisa vir como DD/MM/YYYY; veio {data_entrega!r}.")
 
+    complementos, invalido = _complementos_nome_arquivo(payload.get("complementos_nome_arquivo"), ids)
+    if invalido is not None:
+        return None, invalido
+
+    valores_fechados, invalido = _valores_fechados_unitario(payload.get("valores_fechados_unitario"), ids)
+    if invalido is not None:
+        return None, invalido
+
     de_integracao = origem == ORIGEM_INTEGRACAO
     return OrcamentoReivindicado(
         id=orcamento_id,
@@ -99,9 +215,6 @@ def orcamento_do_payload(
         lote_id=inteiro_positivo(payload.get("lote_id")),
         modo_envio=modo_envio_de(payload),
         url_webhook=url_webhook_de(payload),
-        # O modo só existe na origem escola; na integração a divisão é fixa
-        # (1 orçamento por pedido do parceiro) e o SQL é escolhido pela origem.
-        modo_agrupamento=None if de_integracao else modo_agrupamento,
         cliente_id=inteiro_positivo(payload.get("cliente_id")),
         vendedor_id=inteiro_positivo(payload.get("vendedor_id")),
         forma_pagamento=inteiro_positivo(payload.get("forma_pagamento")),
@@ -109,6 +222,8 @@ def orcamento_do_payload(
         origem=origem,
         integra_pedido_produto_ids=ids if de_integracao else [],
         data_entrega=data_entrega,
+        complementos_nome_arquivo=complementos,
+        valores_fechados_unitario=valores_fechados,
     ), None
 
 
@@ -118,7 +233,8 @@ def aprovacao_do_payload(
     """O `aprovacao_id` de `pcp.aprovacao.enviar`.
 
     É só dele que o handler precisa: o corpo da aprovação sai de
-    `sql/aprovacao.sql`, que lê o orçamento, o `id_orcamento`, o `gerar_op` e
+    `sql/aprovacao.sql`, que lê o orçamento, o `id_orcamento`, o `gerar_op`, o
+    `gerar_op_por_entrega` (do lote) e
     os itens a partir da aprovação. `id_orcamento` e `itens_aprovados` ainda
     vêm no payload (o PageFlow os manda para a tela da fila), mas não são lidos
     — quem é conferido é o resultado do SQL, em `aprovacao_dos_dados`.
@@ -135,7 +251,7 @@ def aprovacao_dos_dados(
 ) -> Tuple[Optional[dict], Optional[PayloadInvalido]]:
     """Confere o `data` montado por `sql/aprovacao.sql`.
 
-    Devolve `{id_orcamento, itens, gerar_op}`. As três recusas são definitivas:
+    Devolve `{id_orcamento, itens, gerar_op, gerar_op_por_entrega}`. As três recusas são definitivas:
     aprovação inexistente, orçamento sem `id_orcamento` (quem o grava é o
     retorno do orçamento, não aparece com o tempo) e nenhum item a aprovar.
     """
@@ -160,6 +276,7 @@ def aprovacao_dos_dados(
         "id_orcamento": id_orcamento,
         "itens": itens,
         "gerar_op": bool(dados.get("gerar_op")),
+        "gerar_op_por_entrega": bool(dados.get("gerar_op_por_entrega")),
     }, None
 
 

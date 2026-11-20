@@ -16,7 +16,7 @@ import threading
 import time
 from typing import Optional
 
-from ..integracoes.erp import ErpIndisponivel, ResultadoIncerto, modo_fila
+from ..integracoes.erp import ErpIndisponivel, FalhaLogin, ResultadoIncerto, modo_fila
 from . import repositorio
 from .catalogo import Catalogo, CLASSE_SINCRONO, EXECUTANDO, RESERVADO
 from .modelos import Desfecho, Estado, ItemReivindicado, Preparo
@@ -215,6 +215,12 @@ class Motor:
         except ErpIndisponivel as exc:
             # Certeza de que o destino não processou.
             return Desfecho.retentar(str(exc), "DESTINO_INDISPONIVEL")
+        except FalhaLogin as exc:
+            # Também é certeza: o login sai ANTES da chamada (token vencido) ou
+            # depois de um 401, que é o ERP recusando sem processar. Sem este
+            # ramo a exceção caía no genérico abaixo e o tipo não idempotente
+            # ia para `incerto` sem nenhuma escrita ter saído.
+            return Desfecho.retentar(str(exc), "ERP_LOGIN")
         except ResultadoIncerto as exc:
             if idempotente:
                 return Desfecho.retentar(str(exc), "RESULTADO_INCERTO_IDEMPOTENTE")

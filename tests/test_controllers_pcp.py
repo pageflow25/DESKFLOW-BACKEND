@@ -14,6 +14,7 @@ quebrar sem ninguém notar:
   resultado incerto não pode virar retentativa automática.
 """
 
+import json
 import os
 import tempfile
 import unittest
@@ -31,6 +32,7 @@ from app.controllers import (
     HandlerPcpAprovacaoEnviar,
     HandlerPcpDownloadArquivos,
     HandlerPcpOrcamentoEnviar,
+    HandlerPrecificacaoCustoBuscar,
 )
 from app.servicos.pcp.payload import _consulta
 from tests.apoio import MotorFalso, configuracao
@@ -88,9 +90,9 @@ class ConexaoFalsa:
         )
 
 
-def _item(payload, *, tipo="pcp.orcamento.enviar", tentativa=1, max_tentativas=5):
+def _item(payload, *, tipo="pcp.orcamento.enviar", classe="assincrono", tentativa=1, max_tentativas=5):
     return ItemReivindicado(
-        id=7, tipo_codigo=tipo, classe="assincrono", destino="erp_wingraph", prioridade=500,
+        id=7, tipo_codigo=tipo, classe=classe, destino="erp_wingraph", prioridade=500,
         origem="pcp", status_id=3, grupo_id=None, ordem_no_grupo=None,
         correlation_id=uuid.uuid4(), chave_bloqueio=None, chave_idempotencia=None,
         payload=payload, payload_enviado=None, tentativa=tentativa, max_tentativas=max_tentativas,
@@ -123,7 +125,6 @@ def _payload_orcamento(**sobrescritas):
         "lote_id": 12,
         "requisicao_id": 40,
         "origem": "escola",
-        "modo_agrupamento": "unidade",
         "cliente_id": 10,
         "vendedor_id": 20,
         "forma_pagamento": 3,
@@ -140,14 +141,14 @@ def _envelope_orcamento(**dados):
 
 
 class TestOrcamentoPreparo(unittest.TestCase):
-    def test_origem_escola_modo_unidade_usa_o_sql_de_unidade(self):
+    def test_origem_escola_usa_o_sql_agrupado(self):
         roteador, _ = _roteador(POST=httpx.Response(200, json=_envelope_orcamento(id_requisicao=9)))
         conexao = ConexaoFalsa(linhas=[LINHA_SQL])
 
         preparo = HandlerPcpOrcamentoEnviar(_erp(roteador)).preparar(conexao, _item(_payload_orcamento()))
 
         declaracao, parametros = conexao.executados[0]
-        self.assertEqual(str(declaracao), str(_consulta("orcamento_unidade.sql", "pedido_distribuicao_ids")))
+        self.assertEqual(str(declaracao), str(_consulta("orcamento_agrupado.sql", "pedido_distribuicao_ids")))
         self.assertEqual(parametros["pedido_distribuicao_ids"], [101, 102])
         self.assertEqual(parametros["data_entrega"], "15/10/2026")
         # O corpo real vai para `payload_enviado`, sem a url_webhook: ela carrega
@@ -156,22 +157,64 @@ class TestOrcamentoPreparo(unittest.TestCase):
         self.assertTrue(preparo.payload_enviado["assincrono"])
         self.assertEqual(preparo.payload_enviado["url_webhook"], "[omitida]")
 
-    def test_origem_escola_modo_escola_usa_o_sql_de_escola(self):
+    def test_item_antigo_com_modo_agrupamento_e_aceito_e_vai_para_o_agrupado(self):
+        # Itens enfileirados antes de 2026-10-07 ainda trazem o campo, inclusive
+        # `unidade`. Recusá-los seria falha DEFINITIVA para um envio válido.
         roteador, _ = _roteador(POST=httpx.Response(200, json=_envelope_orcamento(id_requisicao=9)))
         conexao = ConexaoFalsa(linhas=[LINHA_SQL])
 
         HandlerPcpOrcamentoEnviar(_erp(roteador)).preparar(
-            conexao, _item(_payload_orcamento(modo_agrupamento="escola")))
+            conexao, _item(_payload_orcamento(modo_agrupamento="unidade")))
 
         self.assertEqual(str(conexao.executados[0][0]),
                          str(_consulta("orcamento_agrupado.sql", "pedido_distribuicao_ids")))
+
+    def test_complementos_do_envio_parcial_vao_ao_sql(self):
+        roteador, _ = _roteador(POST=httpx.Response(200, json=_envelope_orcamento(id_requisicao=9)))
+        conexao = ConexaoFalsa(linhas=[LINHA_SQL])
+
+        HandlerPcpOrcamentoEnviar(_erp(roteador)).preparar(conexao, _item(_payload_orcamento(
+            complementos_nome_arquivo={"102": " 2ª remessa "})))
+
+        _, parametros = conexao.executados[0]
+        self.assertEqual(json.loads(parametros["complementos_nome_arquivo"]), {"102": "2ª remessa"})
+
+    def test_preco_fechado_do_pageflow_vai_ao_sql(self):
+        roteador, _ = _roteador(POST=httpx.Response(200, json=_envelope_orcamento(id_requisicao=9)))
+        conexao = ConexaoFalsa(linhas=[LINHA_SQL])
+
+        HandlerPcpOrcamentoEnviar(_erp(roteador)).preparar(conexao, _item(_payload_orcamento(
+            valores_fechados_unitario={"102": "12.3450"})))
+
+        _, parametros = conexao.executados[0]
+        self.assertEqual(json.loads(parametros["valores_fechados_unitario"]), {"102": "12.3450"})
+
+    def test_item_sem_preco_fechado_vai_pela_lista(self):
+        # Itens enfileirados antes de 2026-11-05 não trazem o campo.
+        roteador, _ = _roteador(POST=httpx.Response(200, json=_envelope_orcamento(id_requisicao=9)))
+        conexao = ConexaoFalsa(linhas=[LINHA_SQL])
+
+        HandlerPcpOrcamentoEnviar(_erp(roteador)).preparar(conexao, _item(_payload_orcamento()))
+
+        _, parametros = conexao.executados[0]
+        self.assertIsNone(parametros["valores_fechados_unitario"])
+
+    def test_item_sem_o_campo_vai_com_o_nome_original(self):
+        # Itens enfileirados antes de 2026-10-21 não trazem o campo.
+        roteador, _ = _roteador(POST=httpx.Response(200, json=_envelope_orcamento(id_requisicao=9)))
+        conexao = ConexaoFalsa(linhas=[LINHA_SQL])
+
+        HandlerPcpOrcamentoEnviar(_erp(roteador)).preparar(conexao, _item(_payload_orcamento()))
+
+        _, parametros = conexao.executados[0]
+        self.assertIsNone(parametros["complementos_nome_arquivo"])
 
     def test_origem_integracao_usa_o_sql_de_integracao_e_o_outro_parametro(self):
         roteador, _ = _roteador(POST=httpx.Response(200, json=_envelope_orcamento(id_requisicao=9)))
         conexao = ConexaoFalsa(linhas=[LINHA_SQL])
 
         HandlerPcpOrcamentoEnviar(_erp(roteador)).preparar(conexao, _item(_payload_orcamento(
-            origem="integracao", modo_agrupamento=None)))
+            origem="integracao")))
 
         declaracao, parametros = conexao.executados[0]
         self.assertEqual(str(declaracao),
@@ -183,7 +226,7 @@ class TestOrcamentoPreparo(unittest.TestCase):
         conexao = ConexaoFalsa(linhas=[LINHA_SQL])
 
         preparo = HandlerPcpOrcamentoEnviar(_erp(roteador)).preparar(
-            conexao, _item(_payload_orcamento(url_webhook=None)))
+            conexao, _item(_payload_orcamento(url_webhook=None), classe="sincrono"))
 
         self.assertNotIn("assincrono", preparo.payload_enviado)
         self.assertNotIn("url_webhook", preparo.payload_enviado)
@@ -212,11 +255,30 @@ class TestOrcamentoPayloadInvalido(unittest.TestCase):
     def test_origem_desconhecida(self):
         self._falha(_payload_orcamento(origem="parceiro"), "Origem do orçamento desconhecida")
 
-    def test_origem_escola_sem_modo_de_agrupamento(self):
-        self._falha(_payload_orcamento(modo_agrupamento=None), "modo_agrupamento")
-
     def test_data_entrega_fora_do_formato(self):
         self._falha(_payload_orcamento(data_entrega="2026-10-15"), "DD/MM/YYYY")
+
+    def test_complementos_que_nao_sao_objeto(self):
+        self._falha(_payload_orcamento(complementos_nome_arquivo=["2ª remessa"]), "complementos_nome_arquivo")
+
+    def test_complemento_de_id_fora_do_orcamento(self):
+        self._falha(_payload_orcamento(complementos_nome_arquivo={"999": "2ª remessa"}), "fora de `ids_origem`")
+
+    def test_complemento_longo_vazio_ou_com_quebra_de_linha(self):
+        for texto in ("x" * 61, "   ", "a\nb", 12):
+            with self.subTest(texto=texto):
+                self._falha(_payload_orcamento(complementos_nome_arquivo={"101": texto}), "60 caracteres")
+
+    def test_preco_fechado_que_nao_e_objeto(self):
+        self._falha(_payload_orcamento(valores_fechados_unitario=["1.0"]), "valores_fechados_unitario")
+
+    def test_preco_fechado_de_id_fora_do_orcamento(self):
+        self._falha(_payload_orcamento(valores_fechados_unitario={"999": "1.0"}), "fora de `ids_origem`")
+
+    def test_preco_fechado_que_nao_e_decimal_positivo(self):
+        for valor in ("0", "-1", "abc", "NaN", "Infinity", None, True):
+            with self.subTest(valor=valor):
+                self._falha(_payload_orcamento(valores_fechados_unitario={"101": valor}), "maior que zero")
 
     def test_id_que_nao_e_id(self):
         self._falha(_payload_orcamento(ids_origem=[101, "x"]), "não é id")
@@ -241,10 +303,10 @@ class TestOrcamentoPayloadInvalido(unittest.TestCase):
 
 
 class TestOrcamentoInterpretacao(unittest.TestCase):
-    def _desfecho(self, resposta, payload=None):
+    def _desfecho(self, resposta, payload=None, classe="assincrono"):
         roteador, vistos = _roteador(POST=resposta)
         handler = HandlerPcpOrcamentoEnviar(_erp(roteador))
-        item = _item(payload or _payload_orcamento())
+        item = _item(payload or _payload_orcamento(), classe=classe)
         preparo = handler.preparar(ConexaoFalsa(linhas=[LINHA_SQL]), item)
         return handler.interpretar(item, preparo.chamar()), vistos
 
@@ -267,7 +329,7 @@ class TestOrcamentoInterpretacao(unittest.TestCase):
     def test_resposta_sincrona_com_id_orcamento_conclui(self):
         desfecho, _ = self._desfecho(
             httpx.Response(200, json=_envelope_orcamento(id_orcamento=555)),
-            payload=_payload_orcamento(url_webhook=None))
+            payload=_payload_orcamento(url_webhook=None), classe="sincrono")
 
         self.assertIs(desfecho.estado, Estado.CONCLUIDO)
         self.assertEqual(desfecho.resultado["id_orcamento"], 555)
@@ -284,7 +346,7 @@ class TestOrcamentoInterpretacao(unittest.TestCase):
     def test_sucesso_sem_id_orcamento_e_incerto(self):
         desfecho, _ = self._desfecho(
             httpx.Response(200, json={"success": True, "data": {}}),
-            payload=_payload_orcamento(url_webhook=None))
+            payload=_payload_orcamento(url_webhook=None), classe="sincrono")
 
         self.assertIs(desfecho.estado, Estado.INCERTO)
         self.assertEqual(desfecho.erro_codigo, "ERP_SUCESSO_SEM_ID")
@@ -333,6 +395,66 @@ class TestNaoIdempotenteNaoRetentaSozinho(unittest.TestCase):
         self.assertEqual(desfecho.erro_codigo, "RESULTADO_INCERTO")
         self.assertEqual(len(vistos), 1, "a chamada não pode ser repetida")
 
+    def test_login_recusado_retenta_sem_post_e_nao_fica_incerto(self):
+        # Senha errada: o login falha ANTES do POST. Nada saiu, então repetir é
+        # seguro — `incerto` aqui mandaria à decisão humana um orçamento que
+        # nunca chegou ao ERP.
+        vistos = []
+
+        def roteador(request):
+            vistos.append(request)
+            if request.url.path == "/api/v1/auth":
+                return httpx.Response(401, json={"success": False, "message": "senha inválida"})
+            raise AssertionError(f"chamada inesperada: {request.method} {request.url}")
+
+        handler = HandlerPcpOrcamentoEnviar(_erp(roteador))
+        item = _item(_payload_orcamento())
+        preparo = handler.preparar(ConexaoFalsa(linhas=[LINHA_SQL]), item)
+
+        desfecho = self._motor(_catalogo("pcp.orcamento.enviar"))._chamar(
+            item, handler, preparo, 30.0)
+
+        self.assertIs(desfecho.estado, Estado.RETENTAR)
+        self.assertEqual(desfecho.erro_codigo, "ERP_LOGIN")
+        self.assertEqual([r.url.path for r in vistos], ["/api/v1/auth"], "nenhum POST de orçamento sai")
+
+    def test_login_sem_conexao_tambem_retenta(self):
+        def roteador(request):
+            raise httpx.ConnectError("sem rota", request=request)
+
+        handler = HandlerPcpOrcamentoEnviar(_erp(roteador))
+        item = _item(_payload_orcamento())
+        preparo = handler.preparar(ConexaoFalsa(linhas=[LINHA_SQL]), item)
+
+        desfecho = self._motor(_catalogo("pcp.orcamento.enviar"))._chamar(
+            item, handler, preparo, 30.0)
+
+        self.assertIs(desfecho.estado, Estado.RETENTAR)
+        self.assertEqual(desfecho.erro_codigo, "ERP_LOGIN")
+
+    def test_relogin_recusado_depois_de_401_retenta(self):
+        # 401 no POST é o ERP recusando sem processar; se o novo login também
+        # falha, continua sendo certeza de que nada foi gravado.
+        logins = []
+
+        def roteador(request):
+            if request.url.path == "/api/v1/auth":
+                logins.append(request)
+                if len(logins) == 1:
+                    return httpx.Response(200, json={"sucess": True, "data": {"token": "tok-1"}})
+                return httpx.Response(401, json={"success": False, "message": "senha inválida"})
+            return httpx.Response(401, json={"success": False, "message": "token expirado"})
+
+        handler = HandlerPcpOrcamentoEnviar(_erp(roteador))
+        item = _item(_payload_orcamento())
+        preparo = handler.preparar(ConexaoFalsa(linhas=[LINHA_SQL]), item)
+
+        desfecho = self._motor(_catalogo("pcp.orcamento.enviar"))._chamar(
+            item, handler, preparo, 30.0)
+
+        self.assertIs(desfecho.estado, Estado.RETENTAR)
+        self.assertEqual(desfecho.erro_codigo, "ERP_LOGIN")
+
     def test_verificacao_do_pcp_nao_decide_e_o_item_segue_incerto(self):
         # Enquanto a Bremen não confirmar a consulta por codigo_externo, o
         # incerto vai para decisão humana em vez de virar retentativa.
@@ -366,6 +488,7 @@ def _payload_aprovacao(**sobrescritas):
 DADOS_APROVACAO = {
     "id_orcamento": 555,
     "gerar_op": True,
+    "gerar_op_por_entrega": False,
     "itens": [{"id": 1, "data_entrega": "2026-10-20T18:00:00.000-03:00"}, {"id": 2}],
 }
 
@@ -380,7 +503,7 @@ def _proposta(status_por_item):
 
 
 class TestAprovacao(unittest.TestCase):
-    def _executar(self, payload, *, get=None, post=None, conexao=None):
+    def _executar(self, payload, *, get=None, post=None, conexao=None, classe="assincrono"):
         por_metodo = {}
         if get is not None:
             por_metodo["GET"] = get
@@ -388,7 +511,7 @@ class TestAprovacao(unittest.TestCase):
             por_metodo["POST"] = post
         roteador, vistos = _roteador(**por_metodo)
         handler = HandlerPcpAprovacaoEnviar(_erp(roteador))
-        item = _item(payload, tipo="pcp.aprovacao.enviar")
+        item = _item(payload, tipo="pcp.aprovacao.enviar", classe=classe)
         preparo = handler.preparar(conexao or _conexao_aprovacao(), item)
         return handler.interpretar(item, preparo.chamar()), vistos, preparo
 
@@ -413,13 +536,15 @@ class TestAprovacao(unittest.TestCase):
         self.assertFalse(desfecho.resultado["ja_aprovada"])
         self.assertEqual([requisicao.method for requisicao in vistos], ["GET", "POST"])
         self.assertEqual(preparo.payload_enviado["data"]["gerar_op"], True)
+        self.assertIs(preparo.payload_enviado["data"]["gerar_op_por_entrega"], False)
         self.assertEqual(preparo.payload_enviado["url_webhook"], "[omitida]")
 
     def test_resposta_sincrona_com_lista_de_propostas_conclui(self):
         desfecho, _, _ = self._executar(
             _payload_aprovacao(url_webhook=None),
             get=httpx.Response(200, json=_proposta({1: "Aberta", 2: "Aberta"})),
-            post=httpx.Response(200, json={"success": True, "data": [{"id_proposta": 9, "ops": []}]}))
+            post=httpx.Response(200, json={"success": True, "data": [{"id_proposta": 9, "ops": []}]}),
+            classe="sincrono")
 
         self.assertIs(desfecho.estado, Estado.CONCLUIDO)
         self.assertEqual(desfecho.resultado["modo_envio"], "sincrono")
@@ -517,6 +642,28 @@ class TestAprovacao(unittest.TestCase):
         self.assertFalse(dados["gerar_op"])
         self.assertEqual(dados["itens"][0]["entregas"], [{"quantidade": 3, "id_cliente": 1}])
         self.assertIn("/proposta/aprovar", str(vistos[-1].url))
+
+    def test_gerar_op_distribuida_do_lote_vai_no_corpo_independente_do_gerar_op(self):
+        conexao = _conexao_aprovacao(gerar_op=False, gerar_op_por_entrega=True)
+        _, _, preparo = self._executar(
+            _payload_aprovacao(),
+            get=httpx.Response(200, json=_proposta({1: "Aberta", 2: "Aberta"})),
+            post=httpx.Response(200, json={"success": True, "data": {"id_requisicao": 81}}),
+            conexao=conexao)
+
+        dados = preparo.payload_enviado["data"]
+        self.assertIs(dados["gerar_op_por_entrega"], True)
+        self.assertIs(dados["gerar_op"], False)
+
+    def test_sem_gerar_op_distribuida_no_sql_vai_false(self):
+        dados_sem_campo = {k: v for k, v in DADOS_APROVACAO.items() if k != "gerar_op_por_entrega"}
+        _, _, preparo = self._executar(
+            _payload_aprovacao(),
+            get=httpx.Response(200, json=_proposta({1: "Aberta", 2: "Aberta"})),
+            post=httpx.Response(200, json={"success": True, "data": {"id_requisicao": 82}}),
+            conexao=ConexaoFalsa(linhas=[dados_sem_campo]))
+
+        self.assertIs(preparo.payload_enviado["data"]["gerar_op_por_entrega"], False)
 
     def test_erp_recusa_a_aprovacao(self):
         desfecho, _, _ = self._executar(
@@ -627,12 +774,89 @@ class TestDownloadArquivos(unittest.TestCase):
         self.assertEqual(conexao.executados, [], "sem aprovacao_id não se consulta nada")
 
 
+class TestModoDaChamada(unittest.TestCase):
+    """Classe do item x url_webhook (2026-10-07): os dois sinais têm que concordar. Divergência é
+    falha DEFINITIVA antes de qualquer SQL ou chamada — o modo nunca é escolhido em silêncio."""
+
+    def _orcamento(self, classe, url_webhook):
+        roteador, vistos = _roteador(POST=httpx.Response(200, json=_envelope_orcamento(id_orcamento=555)))
+        handler = HandlerPcpOrcamentoEnviar(_erp(roteador))
+        item = _item(_payload_orcamento(url_webhook=url_webhook), classe=classe)
+        conexao = ConexaoFalsa(linhas=[LINHA_SQL])
+        preparo = handler.preparar(conexao, item)
+        return handler.interpretar(item, preparo.chamar()), vistos, conexao, preparo
+
+    def test_sincrono_sem_url_chama_na_hora(self):
+        desfecho, vistos, _, preparo = self._orcamento("sincrono", None)
+
+        self.assertIs(desfecho.estado, Estado.CONCLUIDO)
+        self.assertEqual(desfecho.resultado["modo_envio"], "sincrono")
+        self.assertNotIn("assincrono", preparo.payload_enviado)
+        self.assertEqual(len(vistos), 1)
+
+    def test_sincrono_com_url_e_recusado_sem_sql_nem_chamada(self):
+        desfecho, vistos, conexao, _ = self._orcamento("sincrono", WEBHOOK)
+
+        self.assertIs(desfecho.estado, Estado.FALHOU)
+        self.assertEqual(desfecho.erro_codigo, "WEBHOOK_EM_TIPO_SINCRONO")
+        self.assertEqual(conexao.executados, [])
+        self.assertEqual(vistos, [])
+
+    def test_assincrono_com_url_manda_o_webhook(self):
+        _, _, _, preparo = self._orcamento("assincrono", WEBHOOK)
+
+        self.assertTrue(preparo.payload_enviado["assincrono"])
+        self.assertEqual(preparo.payload_enviado["url_webhook"], "[omitida]")
+
+    def test_assincrono_sem_url_e_recusado_sem_sql_nem_chamada(self):
+        desfecho, vistos, conexao, _ = self._orcamento("assincrono", None)
+
+        self.assertIs(desfecho.estado, Estado.FALHOU)
+        self.assertEqual(desfecho.erro_codigo, "ASSINCRONO_SEM_WEBHOOK")
+        self.assertEqual(conexao.executados, [])
+        self.assertEqual(vistos, [])
+
+    def test_aprovacao_aplica_a_mesma_regra(self):
+        for classe, url, codigo in (("sincrono", WEBHOOK, "WEBHOOK_EM_TIPO_SINCRONO"),
+                                    ("assincrono", None, "ASSINCRONO_SEM_WEBHOOK")):
+            with self.subTest(classe=classe):
+                roteador, vistos = _roteador()
+                handler = HandlerPcpAprovacaoEnviar(_erp(roteador))
+                item = _item(_payload_aprovacao(url_webhook=url), tipo="pcp.aprovacao.enviar", classe=classe)
+                conexao = _conexao_aprovacao()
+
+                desfecho = handler.interpretar(item, handler.preparar(conexao, item).chamar())
+
+                self.assertIs(desfecho.estado, Estado.FALHOU)
+                self.assertEqual(desfecho.erro_codigo, codigo)
+                self.assertEqual(conexao.executados, [])
+                self.assertEqual(vistos, [], "nem a consulta prévia pode sair")
+
+    def test_custo_da_calculadora_conclui_sincrono_com_o_mesmo_corpo(self):
+        roteador, vistos = _roteador(POST=httpx.Response(200, json=_envelope_orcamento(id_orcamento=19656)))
+        handler = HandlerPrecificacaoCustoBuscar(_erp(roteador))
+        item = _item(_payload_orcamento(url_webhook=None), tipo="precificacao.custo.buscar", classe="sincrono")
+
+        desfecho = handler.interpretar(item, handler.preparar(ConexaoFalsa(linhas=[LINHA_SQL]), item).chamar())
+
+        self.assertIs(desfecho.estado, Estado.CONCLUIDO)
+        self.assertEqual(desfecho.resultado["id_orcamento"], 19656)
+        self.assertEqual(desfecho.resultado["modo_envio"], "sincrono")
+        self.assertEqual(len(vistos), 1)
+
+
 class TestRegistroDosTiposDePcp(unittest.TestCase):
     def test_os_dois_tipos_de_escrita_sempre_entram(self):
         registry = registry_padrao(object())
 
         self.assertIsInstance(registry.obter("pcp.orcamento.enviar"), HandlerPcpOrcamentoEnviar)
         self.assertIsInstance(registry.obter("pcp.aprovacao.enviar"), HandlerPcpAprovacaoEnviar)
+
+    def test_custo_da_calculadora_usa_o_handler_de_orcamento_com_codigo_proprio(self):
+        handler = registry_padrao(object()).obter("precificacao.custo.buscar")
+
+        self.assertIsInstance(handler, HandlerPrecificacaoCustoBuscar)
+        self.assertIsInstance(handler, HandlerPcpOrcamentoEnviar)
 
     def test_download_entra_so_com_baixador_e_pasta(self):
         sem_pasta = registry_padrao(object(), baixador=BaixadorFalso(), pasta_download="")
