@@ -1,14 +1,9 @@
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-*.pyc
-
-# Virtual environments
 .venv/
-venv/
+__pycache__/
+*.pyc
 .env
+.env.*
+!.env.example
 
 # Node
 node_modules/
@@ -24,11 +19,11 @@ Thumbs.db
 
 # Logs
 *.log
+logs/
 
 # Misc
 .env.local
 antigo.env
 # tem orcamentos
 temp_orcamentos/
-
-logs/
+dados/
