@@ -1,0 +1,88 @@
+"""`produto.importar` — GET /api/v1/caracteristicasproduto. Idempotente.
+
+Este é o ponto de corte que mais ganha com a fila, e não por desempenho: era o
+único dos cinco que chamava o ERP sem auditoria nenhuma. Passando por aqui ele
+ganha timeline, solicitante, tentativas e reprocesso.
+
+O handler faz SÓ a busca. A persistência em cascata (item, componentes,
+perguntas, respostas) fica no projetor do PageFlow, com a mesma
+`persistirProdutoDoErp` do caminho direto — a separação existe justamente para
+não haver duas implementações da gravação.
+
+Formato do payload: `{id_produto: <int>, id_categoria: <int>, origem_erp: 2}`.
+Formato do resultado, lido por `services/fila/projetores/produto.importar.js`:
+`{"produto": <o objeto data[0] da resposta>}`.
+
+`id_categoria` não vai ao ERP, mas é validado aqui de propósito: sem ele o
+projetor lança na hora de aplicar, com o item já `concluido` e a chamada já
+gasta. Validando no preparo, o erro aparece antes de qualquer I/O, como falha
+definitiva e sem consumir tentativa.
+"""
+
+from typing import Any, Optional
+
+from ...fila.modelos import Desfecho, ItemReivindicado, Preparo
+from ...integracoes.erp import envelope_json, registros_do_envelope, sucesso_erp
+from ...utils.conversao import inteiro_positivo
+from ..payload_invalido import PayloadInvalido
+from ..resposta_erp import classificar_falha
+from .validators import produto_validator
+from .validators.produto_validator import origem_do_payload
+
+TIPO = "produto.importar"
+
+
+
+class HandlerProdutoImportar:
+    tipo = TIPO
+
+    def __init__(self, erp):
+        self._erp = erp
+
+    def preparar(self, conn, item: ItemReivindicado) -> Preparo:
+        payload = item.payload or {}
+
+        campos, invalido = produto_validator.validar_importar(payload)
+        if invalido is not None:
+            return invalido.preparo()
+        id_produto = campos["id_produto"]
+
+        origem = origem_do_payload(payload)
+        return Preparo(
+            payload_enviado={
+                "metodo": "GET",
+                "caminho": "/api/v1/caracteristicasproduto",
+                "params": {"id": id_produto, "origem": origem},
+            },
+            chamar=lambda: self._erp.buscar_caracteristicas_produto(id_produto, origem),
+        )
+
+    def interpretar(self, item: ItemReivindicado, bruto: Any) -> Desfecho:
+        if isinstance(bruto, PayloadInvalido):
+            return bruto.desfecho()
+
+        dados = envelope_json(bruto)
+        if bruto.status_code >= 400 or not sucesso_erp(dados):
+            return classificar_falha(bruto, dados, mutacao=False)
+
+        payload = item.payload or {}
+        id_produto = inteiro_positivo(payload.get("id_produto"))
+        registros = registros_do_envelope(dados)
+        if not registros:
+            # O ERP respondeu a busca e não conhece o produto. Repetir não muda
+            # o resultado: falha definitiva, com o motivo na tela.
+            return Desfecho.falhou(
+                f"ERP respondeu sucesso sem características para o produto {id_produto}.",
+                "ERP_PRODUTO_SEM_CARACTERISTICAS",
+            )
+
+        return Desfecho.concluido({
+            "produto": registros[0],
+            "id_produto": id_produto,
+            "id_categoria": inteiro_positivo(payload.get("id_categoria")),
+            "origem_erp": origem_do_payload(payload),
+        })
+
+    def verificar(self, conn, item: ItemReivindicado) -> Optional[Desfecho]:
+        """Leitura idempotente: o motor retenta sozinho, não há o que verificar."""
+        return None

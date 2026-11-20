@@ -1,0 +1,190 @@
+"""Monta o corpo do POST /api/v1/orcamento de um orçamento do PCP.
+
+O SQL é escolhido só pela ORIGEM do lote:
+  - escola     -> `sql/orcamento_agrupado.sql` (o SQL Agrupado: um orçamento
+                  com todas as turmas, 1 item por item de carrinho e turma,
+                  somando as unidades que pedem o mesmo item);
+  - integração -> `sql/orcamento_integracao.sql`.
+
+Até 2026-10-07 a origem escola tinha DOIS SQLs, escolhidos pelo modo de
+agrupamento que o usuário marcava no "Enviar" (`unidade` ou `escola`). O modo
+saiu do sistema inteiro — tela, payload e banco —, e o Agrupado (o antigo
+"modo escola") ficou como o único. O campo `modo_agrupamento` que um item
+antigo da fila ainda carregue no payload é ignorado.
+
+Ele roda só com os ids daquele orçamento e o resultado é conferido antes de ir
+ao ERP: um item que o SQL descarta (sem arquivo, sem especificação, produto
+fora do catálogo, quantidade zero) ficaria fora do orçamento sem ninguém
+perceber. A conferência é pelo `codigo_externo`, que carrega os ids de ORIGEM
+— pedido de escola ou produto de pedido de integração, conforme o lote.
+"""
+
+import json
+from functools import lru_cache
+from pathlib import Path
+
+from sqlalchemy import Integer, bindparam, text
+from sqlalchemy.dialects.postgresql import ARRAY
+
+from ...repositorios.pcp import ORIGEM_INTEGRACAO, OrcamentoReivindicado
+from ...utils.conversao import remover_nulos
+
+# `app/sql/`, a partir de `app/servicos/pcp/`: tres niveis acima
+# do arquivo. Era dois antes de este modulo descer para `servicos/pcp/`.
+PASTA_SQL = Path(__file__).resolve().parents[2] / "sql"
+ARQUIVO_AGRUPADO = "orcamento_agrupado.sql"
+ARQUIVO_INTEGRACAO = "orcamento_integracao.sql"
+
+# Nome do parâmetro de lista em cada SQL (array de verdade no bind).
+PARAMETRO_IDS_ESCOLA = "pedido_distribuicao_ids"
+PARAMETRO_IDS_INTEGRACAO = "integra_pedido_produto_ids"
+
+
+class PayloadIncompleto(Exception):
+    """O orçamento não pode ser montado com os dados do banco."""
+
+
+def _arquivo_e_parametro(orcamento: OrcamentoReivindicado):
+    """(arquivo SQL, nome do parâmetro de ids) para a origem do orçamento."""
+    if orcamento.origem == ORIGEM_INTEGRACAO:
+        return ARQUIVO_INTEGRACAO, PARAMETRO_IDS_INTEGRACAO
+    return ARQUIVO_AGRUPADO, PARAMETRO_IDS_ESCOLA
+
+
+@lru_cache
+def _consulta(arquivo: str, parametro_ids: str):
+    sql = (PASTA_SQL / arquivo).read_text(encoding="utf-8-sig")
+    return text(sql).bindparams(bindparam(parametro_ids, type_=ARRAY(Integer)))
+
+
+def ids_do_codigo_externo(codigo_externo) -> set:
+    if codigo_externo is None:
+        return set()
+    return {int(parte) for parte in str(codigo_externo).split(",") if parte.strip().isdigit()}
+
+
+def validar_cabecalho(orcamento: OrcamentoReivindicado) -> None:
+    """Cliente, vendedor e forma de pagamento são obrigatórios nas duas origens.
+
+    Muda só de ONDE o PageFlow os copiou: do cadastro da unidade escolar
+    (origem escola) ou do cadastro da integração (origem integração). A
+    mensagem aponta para o cadastro certo.
+    """
+    faltando_cabecalho = [
+        campo for campo, valor in (
+            ("cliente", orcamento.cliente_id),
+            ("vendedor", orcamento.vendedor_id),
+            ("forma de pagamento", orcamento.forma_pagamento),
+        ) if valor is None
+    ]
+    if faltando_cabecalho:
+        cadastro = "da integração" if orcamento.origem == ORIGEM_INTEGRACAO else "da unidade"
+        origem = "Integração" if orcamento.origem == ORIGEM_INTEGRACAO else "Unidade"
+        raise PayloadIncompleto(
+            f"{origem} sem {', '.join(faltando_cabecalho)} cadastrado(s) para o orçamento — "
+            f"corrija o cadastro {cadastro} e reenvie"
+        )
+
+
+def validar_itens(payload: dict, orcamento: OrcamentoReivindicado) -> None:
+    """Todo id de origem do orçamento tem de aparecer em algum `codigo_externo`,
+    e nenhum id de fora pode aparecer. Vale igual nas duas origens: só muda o
+    que o id significa (pedido de escola ou produto de pedido de integração).
+    """
+    itens = (payload.get("data") or {}).get("itens") or []
+    if not itens:
+        raise PayloadIncompleto("Nenhum item do orçamento pôde ser montado")
+
+    rotulo = "produtos" if orcamento.origem == ORIGEM_INTEGRACAO else "pedidos"
+    motivo = (
+        "(sem modelo de catálogo Bremen ou pedido removido)"
+        if orcamento.origem == ORIGEM_INTEGRACAO
+        else "(sem arquivo/especificação, produto fora do catálogo Bremen ou quantidade zero)"
+    )
+
+    esperados = set(orcamento.ids_origem)
+    montados = set()
+    for item in itens:
+        montados |= ids_do_codigo_externo(item.get("codigo_externo"))
+
+    faltando = sorted(esperados - montados)
+    sobrando = sorted(montados - esperados)
+    if faltando or sobrando:
+        partes = []
+        if faltando:
+            partes.append(f"{rotulo} sem item no orçamento: {faltando} {motivo}")
+        if sobrando:
+            partes.append(f"{rotulo} que não são deste orçamento: {sobrando}")
+        raise PayloadIncompleto("Orçamento incompleto — " + "; ".join(partes))
+
+
+def _mensagem_divisao_divergente(orcamento: OrcamentoReivindicado, quantidade: int) -> str:
+    """Por que um orçamento do PageFlow virou mais de um no SQL.
+
+    Na origem escola não deveria acontecer: desde 2026-10-20 o SQL Agrupado
+    devolve UMA linha com todas as turmas (antes era uma por turma, e os
+    orçamentos do antigo modo `unidade` que misturavam turmas falhavam aqui —
+    agora eles montam normalmente). A conferência fica como defesa contra o SQL
+    mudar sem o PageFlow acompanhar.
+    """
+    if orcamento.origem == ORIGEM_INTEGRACAO:
+        return (
+            f"Os itens do orçamento geraram {quantidade} orçamentos na divisão de integração "
+            "— a divisão do PageFlow e a do SQL não bateram"
+        )
+    return (
+        f"Os itens do orçamento geraram {quantidade} orçamentos no SQL Agrupado, que deveria "
+        "montar um só — a divisão do PageFlow e a do SQL não bateram"
+    )
+
+
+def _complementos_json(complementos: dict):
+    if not complementos:
+        return None
+    return json.dumps({str(id_): texto for id_, texto in complementos.items()}, ensure_ascii=False)
+
+
+def _valores_fechados_json(valores: dict):
+    if not valores:
+        return None
+    return json.dumps({str(id_): str(valor) for id_, valor in valores.items()})
+
+
+def montar_payload_orcamento(conn, orcamento: OrcamentoReivindicado, identifier: str) -> dict:
+    ids = list(orcamento.ids_origem)
+    if not ids:
+        raise PayloadIncompleto("Orçamento sem pedidos vinculados")
+    validar_cabecalho(orcamento)
+
+    arquivo, parametro_ids = _arquivo_e_parametro(orcamento)
+    parametros = {
+        parametro_ids: ids,
+        "id_cliente": orcamento.cliente_id,
+        "id_vendedor": orcamento.vendedor_id,
+        "id_forma_pagamento": None if orcamento.forma_pagamento is None else str(orcamento.forma_pagamento),
+        # Os TRÊS SQLs declaram :data_entrega desde 2026-09-24: a data escolhida
+        # no "Enviar" passou a valer também na origem escola, onde manda sobre a
+        # do formulário. Vem None nos lotes de escola que já estavam na fila, e
+        # aí o COALESCE do SQL cai de volta em form.data_entrega.
+        "data_entrega": orcamento.data_entrega,
+        # Só o SQL Agrupado (origem escola) o declara; o de integração o ignora.
+        # Vai como texto JSON `{"<id>": "texto"}`, que o SQL lê com `->>`; None
+        # quando não há complemento, e aí todo título sai com o nome original.
+        "complementos_nome_arquivo": _complementos_json(orcamento.complementos_nome_arquivo),
+        # Também só do SQL Agrupado: `{"<id>": "12.3400"}` com o preço fechado
+        # que o PageFlow decidiu; None = todos os pedidos pela lista do ERP.
+        "valores_fechados_unitario": _valores_fechados_json(orcamento.valores_fechados_unitario),
+    }
+    linhas = conn.execute(_consulta(arquivo, parametro_ids), parametros).scalars().all()
+
+    if not linhas:
+        raise PayloadIncompleto(
+            f"Nenhum item montado para {sorted(ids)} "
+            "(sem arquivo/especificação ou produto fora do catálogo Bremen)"
+        )
+    if len(linhas) > 1:
+        raise PayloadIncompleto(_mensagem_divisao_divergente(orcamento, len(linhas)))
+
+    payload = remover_nulos(linhas[0])
+    validar_itens(payload, orcamento)
+    return {"identifier": identifier, **payload}
