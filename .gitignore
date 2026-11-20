@@ -27,6 +27,8 @@ Thumbs.db
 
 # Misc
 .env.local
-
+antigo.env
 # tem orcamentos
 temp_orcamentos/
+
+logs/
