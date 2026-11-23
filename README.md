@@ -104,9 +104,9 @@ vêm os itens. O consumidor não precisa saber mais que isso:
 **Downloads de lote de integração**: os arquivos não estão em
 `pedido_arquivos_pdf` — são URLs no próprio produto (`arquivo_pdf` e, quando
 existirem, `design_capa_frente`/`design_capa_verso`; mockups e etiqueta ficam
-de fora). A pasta de destino é
-`<DOWNLOAD_BASE_PATH>/<integração> - <numero_pedido>/<op>/`, no lugar da
-escola, e a linha de `downloads_bremen` (que o PageFlow grava a partir do
+de fora). A pasta de destino é `<DOWNLOAD_BASE_PATH>/<op>/`, igual à de
+escola (desde 2026-11-23 nenhuma das duas tem pasta de escola/integração
+antes da OP), e a linha de `downloads_bremen` (que o PageFlow grava a partir do
 resultado) vai com `integra_pedido_produto_id` e `arquivo_pdf_id` NULL.
 
 **Síncrono ou assíncrono** segue a **classe do tipo** (a da tela de configuração da

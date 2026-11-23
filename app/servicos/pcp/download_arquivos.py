@@ -4,18 +4,19 @@ Só para aprovações concluídas de lotes que pediram "baixar arquivos na pasta
 da OP" (decisão do clique "Enviar"). Para cada OP da aprovação:
   - os arquivos vêm de orcamento_api_itens_retorno (id_op + origem do item):
       * lote de ESCOLA    -> pedido_distribuicao_arquivos -> pedido_arquivos_pdf
-        (Vercel Blob), e a pasta raiz é o nome da escola;
+        (Vercel Blob);
       * lote de INTEGRAÇÃO -> URLs no próprio integra_pedido_produtos
         (`arquivo_pdf` e, quando existirem, `design_capa_frente`/`design_capa_verso`;
-        mockups e etiqueta ficam de fora), e a pasta raiz é
-        "<integração> - <numero_pedido>";
-  - são baixados DIRETO em DOWNLOAD_BASE_PATH/<pasta raiz>/<op>/, como no
-    DeskFlow antigo, para a pasta e os arquivos herdarem as permissões do
-    compartilhamento da produção. Não há pasta temporária: a que existia
-    (tempfile.mkdtemp) nascia com ACL só do usuário do serviço no Windows, e o
-    rename levava essa ACL para a pasta da OP. Cada arquivo é escrito como
-    "<nome>.part" na própria pasta da OP e renomeado ao terminar, então um
-    arquivo pela metade nunca conta como baixado;
+        mockups e etiqueta ficam de fora);
+  - cada OP vai direto para DOWNLOAD_BASE_PATH/<id_op>, sem pasta de
+    escola/integração antes;
+  - são baixados DIRETO na pasta da OP, como no DeskFlow antigo, para a pasta
+    e os arquivos herdarem as permissões do compartilhamento da produção. Não
+    há pasta temporária: a que existia (tempfile.mkdtemp) nascia com ACL só do
+    usuário do serviço no Windows, e o rename levava essa ACL para a pasta da
+    OP. Cada arquivo é escrito como "<nome>.part" na própria pasta da OP e
+    renomeado ao terminar, então um arquivo pela metade nunca conta como
+    baixado;
   - arquivo que já está na pasta final (tamanho > 0) não é baixado de novo, o
     que torna seguro repetir depois de uma falha;
   - cada origem x arquivo ganha uma linha de `downloads_bremen` PRONTA, que
@@ -158,11 +159,8 @@ def baixar_arquivos_das_ops(baixador: BaixadorArquivos, pasta_base: str, arquivo
 
 
 def baixar_op(baixador: BaixadorArquivos, base: str, id_op: int, linhas: list):
-    # Primeiro nível da pasta: a escola (lote de escola) ou
-    # "<integração> - <numero_pedido>" (lote de integração). O SQL já
-    # resolve qual dos dois e devolve em `pasta`.
-    pasta_raiz = sanitizar_nome(linhas[0].get("pasta") or linhas[0].get("escola_nome"), "Sem nome")
-    pasta_final = os.path.join(base, pasta_raiz, str(id_op))
+    # A pasta da OP fica direto na base, sem pasta de escola/integração antes.
+    pasta_final = os.path.join(base, str(id_op))
     if not dentro_da_base(base, pasta_final):
         return 0, [f"OP {id_op}: caminho fora da pasta base"], []
 

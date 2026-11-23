@@ -728,8 +728,8 @@ class TestDownloadArquivos(unittest.TestCase):
         self.assertEqual(desfecho.resultado["total_arquivos"], 2)
         self.assertEqual(desfecho.resultado["erros"], [])
         self.assertEqual(publicados, [
-            os.path.join("Escola Teste", "5001", "capa.pdf"),
-            os.path.join("Escola Teste", "5001", "miolo.pdf"),
+            os.path.join("5001", "capa.pdf"),
+            os.path.join("5001", "miolo.pdf"),
         ])
         # A gravação de `downloads_bremen` deixou de ser do worker: as linhas
         # saem no resultado para o PageFlow inserir.
@@ -753,7 +753,7 @@ class TestDownloadArquivos(unittest.TestCase):
         self.assertIs(desfecho.estado, Estado.RETENTAR)
         self.assertEqual(desfecho.erro_codigo, "DOWNLOAD_PARCIAL")
         # O que desceu fica publicado: retentar completa, não recomeça.
-        self.assertEqual(publicados, [os.path.join("Escola Teste", "5001", "miolo.pdf")])
+        self.assertEqual(publicados, [os.path.join("5001", "miolo.pdf")])
 
     def test_falha_parcial_na_ultima_tentativa_fecha_com_a_lista_de_erros(self):
         desfecho, _, _, _ = self._executar(

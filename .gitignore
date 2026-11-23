@@ -2,7 +2,28 @@
 __pycache__/
 *.pyc
 .env
-logs/
-dados/
 .env.*
 !.env.example
+
+# Node
+node_modules/
+dist/
+
+# IDEs
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Misc
+.env.local
+antigo.env
+# tem orcamentos
+temp_orcamentos/
+dados/

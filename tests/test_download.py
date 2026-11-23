@@ -88,13 +88,13 @@ class TestBaixarDireto(unittest.TestCase):
             total, erros, _ = baixar_arquivos_das_ops(BaixadorFalso(), base, [linha(4777, 10, 1, "miolo.pdf")])
 
             self.assertEqual((total, erros), (1, []))
-            # Na base só fica a pasta da escola: nenhuma pasta temporária.
-            self.assertEqual(os.listdir(base), ["Colégio_ Exemplo_Centro"])
-            self.assertEqual(os.listdir(os.path.join(base, "Colégio_ Exemplo_Centro", "4777")), ["miolo.pdf"])
+            # Na base só fica a pasta da OP: nem escola antes, nem pasta temporária.
+            self.assertEqual(os.listdir(base), ["4777"])
+            self.assertEqual(os.listdir(os.path.join(base, "4777")), ["miolo.pdf"])
 
     def test_pasta_existente_recebe_os_arquivos_sem_perder_os_antigos(self):
         with tempfile.TemporaryDirectory() as base:
-            pasta = os.path.join(base, "Colégio_ Exemplo_Centro", "4777")
+            pasta = os.path.join(base, "4777")
             os.makedirs(pasta)
             with open(os.path.join(pasta, "antigo.pdf"), "wb") as arquivo:
                 arquivo.write(b"1")
