@@ -54,11 +54,10 @@ class OrcamentoReivindicado:
     pedido_distribuicao_ids: list
     origem: str = ORIGEM_ESCOLA
     integra_pedido_produto_ids: list = field(default_factory=list)
-    # Nas DUAS origens desde 2026-09-24: a data de entrega que o usuário
-    # escolheu no "Enviar", já como 'DD/MM/YYYY', para entrar no `obs_producao`
-    # do item (os dois SQLs de orçamento). Na origem escola ela MANDA sobre a
-    # `pedido_formularios.data_entrega`; vem None nos lotes de escola que já
-    # estavam na fila, e aí o SQL cai de volta na data do formulário.
+    # A data de entrega que o usuário escolheu no "Enviar", já como
+    # 'DD/MM/YYYY'. Vem nas duas origens, mas desde 2026-11-23 só o SQL de
+    # INTEGRAÇÃO a põe no `obs_producao` do item: o de escola passou a mandar
+    # um JSON com os dados do formulário, unidade, turma e arquivos.
     # Não é a data que vai ao ERP como data do item — essa é a `data_saida`,
     # que o PageFlow manda na APROVAÇÃO.
     data_entrega: Optional[str] = None

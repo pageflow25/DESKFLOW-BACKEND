@@ -162,10 +162,8 @@ def montar_payload_orcamento(conn, orcamento: OrcamentoReivindicado, identifier:
         "id_cliente": orcamento.cliente_id,
         "id_vendedor": orcamento.vendedor_id,
         "id_forma_pagamento": None if orcamento.forma_pagamento is None else str(orcamento.forma_pagamento),
-        # Os TRÊS SQLs declaram :data_entrega desde 2026-09-24: a data escolhida
-        # no "Enviar" passou a valer também na origem escola, onde manda sobre a
-        # do formulário. Vem None nos lotes de escola que já estavam na fila, e
-        # aí o COALESCE do SQL cai de volta em form.data_entrega.
+        # Só o SQL de integração o declara (entra no `obs_producao` em texto);
+        # desde 2026-11-23 o Agrupado manda JSON no `obs_producao` e o ignora.
         "data_entrega": orcamento.data_entrega,
         # Só o SQL Agrupado (origem escola) o declara; o de integração o ignora.
         # Vai como texto JSON `{"<id>": "texto"}`, que o SQL lê com `->>`; None

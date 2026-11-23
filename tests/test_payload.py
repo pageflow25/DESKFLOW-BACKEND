@@ -90,31 +90,49 @@ class TestPayload(unittest.TestCase):
 
 
 
-class TestDataDeEntregaNoSqlAgrupado(unittest.TestCase):
-    """A data escolhida no \"Enviar\" manda no obs_producao também na escola.
+class TestObsProducaoJsonNoSqlAgrupado(unittest.TestCase):
+    """O `obs_producao` do item de escola é um JSON em texto (2026-11-23).
 
-    Desde 2026-09-24 o modal da cascata pede as duas datas e o PageFlow as
-    grava em orcamento_api_orcamentos. O SQL de escola (o Agrupado) a recebe
-    em :data_entrega e a prefere à do formulário — com COALESCE, para os
-    lotes que já estavam na fila (coluna nula) seguirem montando igual.
+    Uma chave por tabela de origem, só com os dados do próprio item. Vai como
+    texto porque o Wingraph declara o campo como string. Que as tabelas e
+    colunas existem é conferido pelo PREPARE de tests/integracao.
     """
 
-    def _corpo(self, arquivo):
-        sql = (modulo_payload.PASTA_SQL / arquivo).read_text(encoding="utf-8-sig")
+    def _corpo(self):
+        sql = (modulo_payload.PASTA_SQL / ARQUIVO_AGRUPADO).read_text(encoding="utf-8-sig")
         # Só o SQL de verdade: comentário citando a coluna daria falso positivo.
         return chr(10).join(
             linha for linha in sql.splitlines() if not linha.lstrip().startswith("--")
         )
 
-    def test_o_sql_declara_e_prefere_a_data_do_orcamento(self):
-        corpo = self._corpo(ARQUIVO_AGRUPADO)
-        self.assertIn(":data_entrega", corpo)
+    def test_o_obs_producao_vai_como_texto_json(self):
+        corpo = self._corpo()
+        self.assertIn("))::text AS obs_producao", corpo)
+        self.assertIn("'obs_producao', ip.obs_producao,", corpo)
+
+    def test_o_json_tem_uma_chave_por_tabela_de_origem(self):
+        corpo = self._corpo()
+        for chave in ("'pedido_formularios'", "'escola_unidades'", "'escola_turmas'", "'pedido_arquivos_pdf'"):
+            self.assertIn(chave, corpo)
+        for campo in ("'id', form.id", "'nome', form.nome", "'email', form.email", "'criado_em', form.criado_em",
+                      "'titulo', form.titulo", "'area', t.area", "'arquivo', ap.arquivo"):
+            self.assertIn(campo, corpo)
+
+    def test_unidade_e_objeto_quando_unica_e_lista_quando_varias(self):
         self.assertIn(
-            "'Data de Entrega: ' || COALESCE(p.data_entrega, ip.data_entrega_pedido, '-')",
-            corpo,
+            "CASE WHEN ui.quantidade_unidades = 1 THEN ui.unidades -> 0 ELSE ui.unidades END",
+            self._corpo(),
         )
 
-    def test_a_data_vai_ao_sql(self):
+    def test_o_texto_antigo_saiu(self):
+        corpo = self._corpo()
+        self.assertNotIn("Data de Entrega", corpo)
+        self.assertNotIn(":data_entrega", corpo)
+        self.assertNotIn("form.observacoes", corpo)
+
+    def test_a_data_continua_indo_ao_sql(self):
+        # Os parâmetros são os mesmos nas duas origens; só o SQL de integração
+        # ainda usa a data, e o SQLAlchemy ignora parâmetro que o SQL não declara.
         conn = ConexaoFalsa([corpo_sql("1,2,3")])
         montar_payload_orcamento(conn, orcamento(data_entrega="01/12/2026"), "PageFlow")
         self.assertEqual(conn.parametros["data_entrega"], "01/12/2026")
