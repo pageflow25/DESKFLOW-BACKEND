@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.2](https://github.com/pageflow25/DESKFLOW-BACKEND/compare/v2.0.1...v2.0.2) (2026-11-23)
+
+
+### Correções
+
+* **pcp:** salvar arquivo da OP com a extensão do conteúdo real ([29bfd2e](https://github.com/pageflow25/DESKFLOW-BACKEND/commit/29bfd2ebb3612d6bec1a476df568c0939cc41257))
+* **pcp:** salvar arquivo da OP com a extensão do conteúdo real ([bdf6563](https://github.com/pageflow25/DESKFLOW-BACKEND/commit/bdf6563be28ebadea1a5418c3558941d3e0cfad7))
+
 ## [2.0.1](https://github.com/pageflow25/DESKFLOW-BACKEND/compare/v2.0.0...v2.0.1) (2026-11-23)
 
 
