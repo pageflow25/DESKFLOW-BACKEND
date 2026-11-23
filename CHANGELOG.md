@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.1.0](https://github.com/pageflow25/DESKFLOW-BACKEND/compare/v2.0.2...v2.1.0) (2026-11-23)
+
+
+### Funcionalidades
+
+* **pcp:** id do formulário no obs_producao do item de escola ([cc6b308](https://github.com/pageflow25/DESKFLOW-BACKEND/commit/cc6b308f40c7f17ebe057b333b3536aa77217a01))
+
+
+### Refatorações
+
+* **pcp:** atualizar comentários e lógica sobre a data de entrega e obs_producao ([521d634](https://github.com/pageflow25/DESKFLOW-BACKEND/commit/521d634833b1413492bf4b718df8f809a6038b81))
+
 ## [2.0.2](https://github.com/pageflow25/DESKFLOW-BACKEND/compare/v2.0.1...v2.0.2) (2026-11-23)
 
 
