@@ -4,11 +4,11 @@ Só para aprovações concluídas de lotes que pediram "baixar arquivos na pasta
 da OP" (decisão do clique "Enviar"). Para cada OP da aprovação:
   - os arquivos vêm de orcamento_api_itens_retorno (id_op + origem do item):
       * lote de ESCOLA    -> pedido_distribuicao_arquivos -> pedido_arquivos_pdf
-        (Vercel Blob), e a pasta raiz é o nome da escola;
+        (Vercel Blob);
       * lote de INTEGRAÇÃO -> URLs no próprio integra_pedido_produtos
         (`arquivo_pdf` e, quando existirem, `design_capa_frente`/`design_capa_verso`;
-        mockups e etiqueta ficam de fora), e a pasta raiz é
-        "<integração> - <numero_pedido>";
+        mockups e etiqueta ficam de fora);
+  - cada OP vai direto para DOWNLOAD_BASE_PATH/<id_op>;
   - são baixados numa pasta temporária dentro de DOWNLOAD_BASE_PATH e só
     depois publicados em DOWNLOAD_BASE_PATH/<pasta raiz>/<op>/, para a
     produção nunca ver uma pasta pela metade;
@@ -180,11 +180,8 @@ def baixar_arquivos_das_ops(baixador: BaixadorArquivos, pasta_base: str, arquivo
 
 def baixar_op(baixador: BaixadorArquivos, base: str, temporaria: str, id_op: int, linhas: list,
               dormir: Callable[[float], None] = time.sleep):
-    # Primeiro nível da pasta: a escola (lote de escola) ou
-    # "<integração> - <numero_pedido>" (lote de integração). O SQL já
-    # resolve qual dos dois e devolve em `pasta`.
-    pasta_raiz = sanitizar_nome(linhas[0].get("pasta") or linhas[0].get("escola_nome"), "Sem nome")
-    pasta_final = os.path.join(base, pasta_raiz, str(id_op))
+    # A pasta da OP fica direto na base, sem pasta de escola/integração antes.
+    pasta_final = os.path.join(base, str(id_op))
     if not dentro_da_base(base, pasta_final):
         return 0, [f"OP {id_op}: caminho fora da pasta base"], []
 
