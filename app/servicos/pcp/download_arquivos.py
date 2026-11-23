@@ -17,8 +17,11 @@ da OP" (decisão do clique "Enviar"). Para cada OP da aprovação:
     OP. Cada arquivo é escrito como "<nome>.part" na própria pasta da OP e
     renomeado ao terminar, então um arquivo pela metade nunca conta como
     baixado;
-  - arquivo que já está na pasta final (tamanho > 0) não é baixado de novo, o
-    que torna seguro repetir depois de uma falha;
+  - a extensão final segue o CONTEÚDO baixado (PDF/PNG/JPG/TIFF), não o nome
+    que o SQL monta: design de capa em PNG não vira ".pdf" corrompido;
+  - arquivo que já está na pasta final (tamanho > 0, com o nome original ou
+    com a extensão corrigida) não é baixado de novo, o que torna seguro
+    repetir depois de uma falha;
   - cada origem x arquivo ganha uma linha de `downloads_bremen` PRONTA, que
     sai no resultado do item da fila — quem grava é o PageFlow.
 
@@ -27,6 +30,7 @@ Quem orquestra é o handler `pcp.download_arquivos`
 arquivo até a pasta da OP.
 """
 
+import logging
 import os
 import re
 import time
@@ -36,7 +40,63 @@ from urllib.parse import urlparse
 
 import httpx
 
+logger = logging.getLogger(__name__)
+
 HOST_VERCEL_BLOB = "public.blob.vercel-storage.com"
+
+# O nome do arquivo vem do SQL com extensão fixa (".pdf"), mas o conteúdo é o
+# que a URL devolver: na integração o design da capa costuma ser PNG/JPG (a
+# própria doc da API usa .png de exemplo). Salvar PNG como ".pdf" faz o arquivo
+# parecer corrompido na produção. A extensão final segue o conteúdo real.
+ASSINATURAS = (
+    (b"%PDF-", ".pdf"),
+    (b"\x89PNG\r\n\x1a\n", ".png"),
+    (b"\xff\xd8\xff", ".jpg"),
+    (b"II*\x00", ".tif"),
+    (b"MM\x00*", ".tif"),
+)
+EXTENSOES_CONHECIDAS = sorted({extensao for _, extensao in ASSINATURAS})
+SINONIMOS_EXTENSAO = {".jpeg": ".jpg", ".tiff": ".tif"}
+
+
+def extensao_pelo_conteudo(caminho: str) -> Optional[str]:
+    """Extensão pelos primeiros bytes do arquivo; None se o tipo não é conhecido."""
+    with open(caminho, "rb") as arquivo:
+        inicio = arquivo.read(16)
+    for assinatura, extensao in ASSINATURAS:
+        if inicio.startswith(assinatura):
+            return extensao
+    return None
+
+
+def corrigir_extensao(caminho: str) -> str:
+    """Renomeia o arquivo para a extensão do conteúdo real e devolve o caminho
+    final. Conteúdo desconhecido mantém o nome (com aviso no log); nunca
+    sobrescreve outro arquivo da pasta."""
+    real = extensao_pelo_conteudo(caminho)
+    base, atual = os.path.splitext(caminho)
+    if real is None:
+        logger.warning("Arquivo %s com conteúdo de tipo desconhecido; nome mantido", caminho)
+        return caminho
+    if SINONIMOS_EXTENSAO.get(atual.lower(), atual.lower()) == real:
+        return caminho
+    novo = base + real
+    if os.path.exists(novo):
+        logger.warning("Arquivo %s é %s, mas %s já existe; nome mantido", caminho, real, novo)
+        return caminho
+    os.replace(caminho, novo)
+    logger.info("Arquivo %s é %s pelo conteúdo; salvo como %s", caminho, real, novo)
+    return novo
+
+
+def arquivo_ja_baixado(final: str) -> Optional[str]:
+    """Caminho do arquivo já presente na pasta da OP (tamanho > 0), com o nome
+    original ou com a extensão corrigida em um download anterior."""
+    base, _ = os.path.splitext(final)
+    for caminho in [final] + [base + extensao for extensao in EXTENSOES_CONHECIDAS]:
+        if os.path.isfile(caminho) and os.path.getsize(caminho) > 0:
+            return caminho
+    return None
 
 
 def sanitizar_nome(nome: str, padrao: str) -> str:
@@ -173,13 +233,15 @@ def baixar_op(baixador: BaixadorArquivos, base: str, id_op: int, linhas: list):
     arquivos = list(unicos.values())
     nomes = dict(zip((chave_arquivo(a) for a in arquivos), nomes_unicos(arquivos)))
 
-    erros, tamanhos, pendentes = [], {}, []
+    erros, tamanhos, caminhos, pendentes = [], {}, {}, []
     for arquivo in arquivos:
         chave = chave_arquivo(arquivo)
         nome = nomes[chave]
         final = os.path.join(pasta_final, nome)
-        if os.path.isfile(final) and os.path.getsize(final) > 0:
-            tamanhos[chave] = os.path.getsize(final)
+        existente = arquivo_ja_baixado(final)
+        if existente:
+            tamanhos[chave] = os.path.getsize(existente)
+            caminhos[chave] = existente
             continue
         if not arquivo.get("url"):
             erros.append(f"OP {id_op}: {nome} sem URL do arquivo")
@@ -194,7 +256,9 @@ def baixar_op(baixador: BaixadorArquivos, base: str, id_op: int, linhas: list):
     for chave, nome, url, final in pendentes:
         try:
             tamanhos[chave] = baixador.baixar(url, final)
-        except (RuntimeError, ValueError) as exc:
+            caminhos[chave] = corrigir_extensao(final)
+        except (RuntimeError, ValueError, OSError) as exc:
+            tamanhos.pop(chave, None)
             erros.append(f"OP {id_op}: {nome} — {exc}")
 
     # Arco exclusivo em downloads_bremen: um lado por linha, nunca os dois
@@ -206,7 +270,7 @@ def baixar_op(baixador: BaixadorArquivos, base: str, id_op: int, linhas: list):
             "id_ops": id_op,
             "arquivo_pdf_id": linha.get("arquivo_pdf_id"),
             "tipo_arquivo": linha.get("tipo_arquivo"),
-            "caminho_local": os.path.join(pasta_final, nomes[chave_arquivo(linha)]),
+            "caminho_local": caminhos[chave_arquivo(linha)],
             "tamanho": tamanhos[chave_arquivo(linha)],
         }
         for linha in linhas
