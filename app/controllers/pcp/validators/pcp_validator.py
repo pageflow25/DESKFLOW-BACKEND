@@ -79,7 +79,7 @@ def modo_da_chamada(classe: str, payload: Optional[dict]) -> Tuple[Optional[str]
 
 
 def _data_entrega_valida(valor: Any) -> bool:
-    """`DD/MM/YYYY`, que é o formato que os SQLs de orçamento colocam em `obs_producao`.
+    """`DD/MM/YYYY`, que é o formato que o SQL de integração coloca em `obs_producao`.
 
     A checagem é de forma, não de calendário: o que se quer evitar é texto
     arbitrário do payload viajando para dentro da observação de produção.

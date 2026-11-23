@@ -22,10 +22,21 @@
 --     quantidade e se soma no item.
 -- O histórico de cada regra está no git log deste arquivo.
 --
+-- `obs_producao` do item (desde 2026-11-23): um JSON SERIALIZADO EM TEXTO — o
+-- campo é string no Wingraph — com os dados do próprio item, uma chave por
+-- tabela de origem:
+--   {"pedido_formularios": {"nome", "email", "criado_em", "titulo"},
+--    "escola_unidades": {"nome"},
+--    "escola_turmas": {"nome", "area"},           -- só item de turma
+--    "pedido_arquivos_pdf": [{"componente", "arquivo"}, ...]}
+-- `escola_unidades` é objeto quando o item é de uma unidade só (todo item de
+-- turma) e LISTA de objetos quando o item sem turma junta várias unidades.
+-- `pedido_arquivos_pdf` traz um por componente com arquivo (capa, miolo),
+-- na ordem dos `componentes`. Substituiu o texto livre (observações + data de
+-- entrega + título): a data de entrega do orçamento não entra mais aqui.
+--
 -- Parâmetros: :pedido_distribuicao_ids (int[]), :id_cliente, :id_vendedor,
--- :id_forma_pagamento, :data_entrega (texto 'DD/MM/YYYY' do orçamento, vindo do
--- claim — ver repositorios/fila.py; NULL nos lotes anteriores a 2026-09-24, que
--- caem na data do formulário), :complementos_nome_arquivo (texto JSON
+-- :id_forma_pagamento, :complementos_nome_arquivo (texto JSON
 -- {"<id do pedido>": "complemento"}; NULL sem envio parcial),
 -- :valores_fechados_unitario (texto JSON {"<id do pedido>": "12.3400"}; NULL ou
 -- sem o id = o pedido vai pela lista de preço do ERP). Devolve 1 linha
@@ -37,7 +48,6 @@ WITH parametros AS (
         CAST(:id_cliente AS int) AS id_cliente,
         CAST(:id_vendedor AS int) AS id_vendedor,
         CAST(:id_forma_pagamento AS text) AS id_forma_pagamento,
-        CAST(:data_entrega AS text) AS data_entrega,
         CAST(:complementos_nome_arquivo AS jsonb) AS complementos_nome_arquivo,
         CAST(:valores_fechados_unitario AS jsonb) AS valores_fechados_unitario
 ),
@@ -49,7 +59,8 @@ distribuicoes AS (
         dm.formulario_id,
         dm.pedido_item_carrinho_id,
         dm.quantidade,
-        dm.id_turma
+        dm.id_turma,
+        dm.unidade_escolar_id
     FROM pedido_distribuicoes dm
     CROSS JOIN parametros p
     WHERE dm.id = ANY(p.pedido_distribuicao_ids)
@@ -177,7 +188,20 @@ precos_fechados AS (
     HAVING BOOL_AND(p.valores_fechados_unitario ->> d.distribuicao_id::text IS NOT NULL)
 ),
 
--- O item pronto para o JSON: cabeçalho, título e textos do formulário.
+-- Unidades de cada item, para o `obs_producao`. Item de turma tem uma só (a
+-- turma é de uma unidade); item sem turma junta as unidades que pediram.
+unidades_item AS (
+    SELECT
+        d.pedido_item_carrinho_id,
+        d.id_turma,
+        COUNT(*) AS quantidade_unidades,
+        json_agg(json_build_object('nome', u.nome) ORDER BY u.nome, u.id) AS unidades
+    FROM (SELECT DISTINCT pedido_item_carrinho_id, id_turma, unidade_escolar_id FROM distribuicoes) d
+    JOIN escola_unidades u ON u.id = d.unidade_escolar_id
+    GROUP BY d.pedido_item_carrinho_id, d.id_turma
+),
+
+-- O item pronto para o JSON: cabeçalho, título e o `obs_producao`.
 itens_produto AS (
     SELECT
         i.id_turma,
@@ -198,14 +222,34 @@ itens_produto AS (
             END,
             'Produto ' || r.id_produto || s.sufixo
         ) AS titulo,
-        form.observacoes AS obs_producao,
-        TO_CHAR(form.data_entrega, 'DD/MM/YYYY') AS data_entrega_pedido,
-        form.titulo AS form_titulo
+        -- Texto, não objeto: o Wingraph declara `obs_producao` como string.
+        json_strip_nulls(json_build_object(
+            'pedido_formularios', json_build_object(
+                'nome', form.nome,
+                'email', form.email,
+                'criado_em', form.criado_em,
+                'titulo', form.titulo
+            ),
+            'escola_unidades', CASE WHEN ui.quantidade_unidades = 1 THEN ui.unidades -> 0 ELSE ui.unidades END,
+            'escola_turmas', CASE WHEN t.id IS NOT NULL THEN json_build_object('nome', t.nome, 'area', t.area) END,
+            'pedido_arquivos_pdf', (
+                SELECT json_agg(
+                    json_build_object('componente', m.componente_descricao, 'arquivo', ap.arquivo)
+                    ORDER BY m.ordem_componente NULLS LAST, m.is_miolo, m.id_componente, m.arquivo_pdf_id
+                )
+                FROM materiais m
+                JOIN pedido_arquivos_pdf ap ON ap.id = m.arquivo_pdf_id
+                WHERE m.distribuicao_id = i.distribuicao_referencia
+            )
+        ))::text AS obs_producao
     FROM itens i
     CROSS JOIN LATERAL (SELECT COALESCE(' - ' || i.complemento_nome_arquivo, '') AS sufixo) s
     JOIN resumo_item r ON r.distribuicao_id = i.distribuicao_referencia
     JOIN pedido_formularios form ON form.id = i.formulario_id
     LEFT JOIN escola_turmas t ON t.id = i.id_turma
+    LEFT JOIN unidades_item ui
+        ON ui.pedido_item_carrinho_id = i.pedido_item_carrinho_id
+       AND ui.id_turma IS NOT DISTINCT FROM i.id_turma
     LEFT JOIN precos_fechados pf
         ON pf.pedido_item_carrinho_id = i.pedido_item_carrinho_id
        AND pf.id_turma IS NOT DISTINCT FROM i.id_turma
@@ -272,15 +316,7 @@ SELECT json_strip_nulls(json_build_object(
                     'id_produto', ip.id_produto,
                     'titulo', ip.titulo,
                     'codigo_externo', ip.codigo_externo,
-                    'obs_producao', CONCAT_WS(
-                        CHR(10) || CHR(10),
-                        ip.obs_producao,
-                        CONCAT_WS(
-                            CHR(10),
-                            'Data de Entrega: ' || COALESCE(p.data_entrega, ip.data_entrega_pedido, '-'),
-                            'Título: ' || COALESCE(ip.form_titulo, '-')
-                        )
-                    ),
+                    'obs_producao', ip.obs_producao,
                     'quantidade', ip.quantidade_total,
                     -- Com preço fechado, vai ele e a lista do ERP não é usada.
                     'usar_listapreco', CASE WHEN ip.valor_total_fechado IS NULL THEN 1 ELSE 0 END,
