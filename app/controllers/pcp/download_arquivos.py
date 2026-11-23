@@ -21,8 +21,7 @@ Resultado: `{sucesso, total_arquivos, erros: [], arquivos: [...]}`.
 """
 
 import logging
-import time
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 from ...fila.modelos import Desfecho, ItemReivindicado, Preparo
 from ...repositorios import pcp as repositorio_pcp
@@ -63,11 +62,9 @@ class Baixados:
 class HandlerPcpDownloadArquivos:
     tipo = TIPO
 
-    def __init__(self, baixador: BaixadorArquivos, pasta_base: str,
-                 dormir: Callable[[float], None] = time.sleep):
+    def __init__(self, baixador: BaixadorArquivos, pasta_base: str):
         self._baixador = baixador
         self._pasta_base = pasta_base
-        self._dormir = dormir
 
     def preparar(self, conn, item: ItemReivindicado) -> Preparo:
         aprovacao_id, invalido = pcp_validator.download_do_payload(item.payload)
@@ -92,7 +89,7 @@ class HandlerPcpDownloadArquivos:
         if not arquivos:
             return SemArquivos()
         total, erros, linhas = baixar_arquivos_das_ops(
-            self._baixador, self._pasta_base, arquivos, str(aprovacao_id), self._dormir)
+            self._baixador, self._pasta_base, arquivos)
         logger.info("Aprovação #%s: %s arquivo(s) na pasta da OP, %s erro(s)",
                     aprovacao_id, total, len(erros))
         return Baixados(total, erros, linhas)

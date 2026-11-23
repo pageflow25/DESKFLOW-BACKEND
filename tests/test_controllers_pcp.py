@@ -710,7 +710,7 @@ class TestDownloadArquivos(unittest.TestCase):
         item = _item(payload or {"aprovacao_id": 900, "orcamento_id": 700, "id_orcamento": 555},
                      tipo="pcp.download_arquivos", tentativa=tentativa, max_tentativas=max_tentativas)
         with tempfile.TemporaryDirectory() as base:
-            handler = HandlerPcpDownloadArquivos(baixador, base, dormir=lambda _: None)
+            handler = HandlerPcpDownloadArquivos(baixador, base)
             conexao = ConexaoFalsa(mapeadas=linhas)
             preparo = handler.preparar(conexao, item)
             desfecho = handler.interpretar(item, preparo.chamar())

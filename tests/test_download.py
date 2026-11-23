@@ -6,9 +6,9 @@ import httpx
 
 from app.servicos.pcp.download_arquivos import (
     BaixadorArquivos,
+    baixar_arquivos_das_ops,
     dentro_da_base,
     nomes_unicos,
-    publicar_arquivos,
     sanitizar_nome,
 )
 from tests.apoio import configuracao
@@ -78,28 +78,41 @@ class TestBaixador(unittest.TestCase):
             destino = os.path.join(pasta, "a.pdf")
             with self.assertRaises(RuntimeError):
                 baixador.baixar("https://x.public.blob.vercel-storage.com/a.pdf", destino)
-            self.assertFalse(os.path.exists(destino))
+            self.assertEqual(os.listdir(pasta), [])
         self.assertEqual(chamadas["n"], 2)
 
 
-class TestPublicar(unittest.TestCase):
+class TestBaixarDireto(unittest.TestCase):
+    def test_baixa_direto_na_pasta_da_op_sem_pasta_temporaria(self):
+        with tempfile.TemporaryDirectory() as base:
+            total, erros, _ = baixar_arquivos_das_ops(BaixadorFalso(), base, [linha(4777, 10, 1, "miolo.pdf")])
+
+            self.assertEqual((total, erros), (1, []))
+            # Na base só fica a pasta da escola: nenhuma pasta temporária.
+            self.assertEqual(os.listdir(base), ["Colégio_ Exemplo_Centro"])
+            self.assertEqual(os.listdir(os.path.join(base, "Colégio_ Exemplo_Centro", "4777")), ["miolo.pdf"])
+
     def test_pasta_existente_recebe_os_arquivos_sem_perder_os_antigos(self):
-        with tempfile.TemporaryDirectory() as raiz:
-            stage, final = os.path.join(raiz, "stage"), os.path.join(raiz, "final")
-            os.makedirs(stage)
-            os.makedirs(final)
-            with open(os.path.join(final, "antigo.pdf"), "wb") as arquivo:
+        with tempfile.TemporaryDirectory() as base:
+            pasta = os.path.join(base, "Colégio_ Exemplo_Centro", "4777")
+            os.makedirs(pasta)
+            with open(os.path.join(pasta, "antigo.pdf"), "wb") as arquivo:
                 arquivo.write(b"1")
-            with open(os.path.join(stage, "novo.pdf"), "wb") as arquivo:
-                arquivo.write(b"2")
 
-            publicar_arquivos(stage, final, dormir=lambda s: None)
+            baixar_arquivos_das_ops(BaixadorFalso(), base, [linha(4777, 10, 1, "novo.pdf")])
 
-            self.assertEqual(sorted(os.listdir(final)), ["antigo.pdf", "novo.pdf"])
+            self.assertEqual(sorted(os.listdir(pasta)), ["antigo.pdf", "novo.pdf"])
 
-
-
-
+    def test_baixador_escreve_part_e_renomeia_no_fim(self):
+        baixador = BaixadorArquivos(
+            configuracao(),
+            http=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, content=b"%PDF"))),
+            dormir=lambda s: None,
+        )
+        with tempfile.TemporaryDirectory() as pasta:
+            destino = os.path.join(pasta, "a.pdf")
+            self.assertEqual(baixador.baixar("https://x.public.blob.vercel-storage.com/a.pdf", destino), 4)
+            self.assertEqual(os.listdir(pasta), ["a.pdf"])
 
 
 if __name__ == "__main__":

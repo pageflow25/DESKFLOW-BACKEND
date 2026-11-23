@@ -9,9 +9,13 @@ da OP" (decisão do clique "Enviar"). Para cada OP da aprovação:
         (`arquivo_pdf` e, quando existirem, `design_capa_frente`/`design_capa_verso`;
         mockups e etiqueta ficam de fora), e a pasta raiz é
         "<integração> - <numero_pedido>";
-  - são baixados numa pasta temporária dentro de DOWNLOAD_BASE_PATH e só
-    depois publicados em DOWNLOAD_BASE_PATH/<pasta raiz>/<op>/, para a
-    produção nunca ver uma pasta pela metade;
+  - são baixados DIRETO em DOWNLOAD_BASE_PATH/<pasta raiz>/<op>/, como no
+    DeskFlow antigo, para a pasta e os arquivos herdarem as permissões do
+    compartilhamento da produção. Não há pasta temporária: a que existia
+    (tempfile.mkdtemp) nascia com ACL só do usuário do serviço no Windows, e o
+    rename levava essa ACL para a pasta da OP. Cada arquivo é escrito como
+    "<nome>.part" na própria pasta da OP e renomeado ao terminar, então um
+    arquivo pela metade nunca conta como baixado;
   - arquivo que já está na pasta final (tamanho > 0) não é baixado de novo, o
     que torna seguro repetir depois de uma falha;
   - cada origem x arquivo ganha uma linha de `downloads_bremen` PRONTA, que
@@ -22,19 +26,14 @@ Quem orquestra é o handler `pcp.download_arquivos`
 arquivo até a pasta da OP.
 """
 
-import logging
 import os
 import re
-import shutil
-import tempfile
 import time
 from collections import OrderedDict
 from typing import Callable, Optional
 from urllib.parse import urlparse
 
 import httpx
-
-logger = logging.getLogger(__name__)
 
 HOST_VERCEL_BLOB = "public.blob.vercel-storage.com"
 
@@ -100,45 +99,30 @@ class BaixadorArquivos:
         return {}
 
     def baixar(self, url: str, destino: str) -> int:
+        """Baixa em "<destino>.part", na mesma pasta do destino (herda as
+        permissões dela), e só renomeia para o nome final quando completo."""
         headers = self._headers(url)
+        parcial = destino + ".part"
         ultimo_erro = None
         for tentativa in range(1, self._tentativas + 1):
             try:
                 with self._http.stream("GET", url, headers=headers) as resposta:
                     resposta.raise_for_status()
-                    with open(destino, "wb") as arquivo:
+                    with open(parcial, "wb") as arquivo:
                         for pedaco in resposta.iter_bytes():
                             arquivo.write(pedaco)
-                tamanho = os.path.getsize(destino)
+                tamanho = os.path.getsize(parcial)
                 if tamanho <= 0:
                     raise ValueError("arquivo vazio")
+                os.replace(parcial, destino)
                 return tamanho
             except (httpx.HTTPError, OSError, ValueError) as exc:
                 ultimo_erro = exc
-                if os.path.exists(destino):
-                    os.remove(destino)
+                if os.path.exists(parcial):
+                    os.remove(parcial)
                 if tentativa < self._tentativas:
                     self._dormir(3 * tentativa)
         raise RuntimeError(f"falha ao baixar ({ultimo_erro})")
-
-
-def publicar_arquivos(pasta_stage: str, pasta_final: str, dormir: Callable[[float], None] = time.sleep) -> None:
-    """Pasta nova: rename atômico (repetido, porque compartilhamento de rede às
-    vezes nega na primeira). Pasta existente, ou rename recusado: move arquivo
-    a arquivo sem apagar o que já estava lá."""
-    if not os.path.exists(pasta_final):
-        for tentativa in range(1, 4):
-            try:
-                os.rename(pasta_stage, pasta_final)
-                return
-            except FileExistsError:
-                break
-            except OSError as exc:
-                logger.warning("Rename de %s recusado (%s), tentativa %s/3", pasta_final, exc, tentativa)
-                dormir(0.5 * tentativa)
-    os.makedirs(pasta_final, exist_ok=True)
-    for nome in sorted(os.listdir(pasta_stage)):
-        shutil.move(os.path.join(pasta_stage, nome), os.path.join(pasta_final, nome))
 
 
 MENSAGEM_SEM_ARQUIVOS = (
@@ -147,8 +131,7 @@ MENSAGEM_SEM_ARQUIVOS = (
 )
 
 
-def baixar_arquivos_das_ops(baixador: BaixadorArquivos, pasta_base: str, arquivos: list,
-                            rotulo: str, dormir: Callable[[float], None] = time.sleep):
+def baixar_arquivos_das_ops(baixador: BaixadorArquivos, pasta_base: str, arquivos: list):
     """Baixa os arquivos de TODAS as OPs de uma aprovação e devolve
     `(total, erros, linhas_bremen)`.
 
@@ -165,21 +148,16 @@ def baixar_arquivos_das_ops(baixador: BaixadorArquivos, pasta_base: str, arquivo
     for linha in arquivos:
         por_op.setdefault(linha["id_op"], []).append(linha)
 
-    temporaria = tempfile.mkdtemp(prefix=f".deskflow2-{rotulo}-", dir=base)
-    try:
-        for id_op, linhas in por_op.items():
-            total_op, erros_op, linhas_op = baixar_op(baixador, base, temporaria, id_op, linhas, dormir)
-            total += total_op
-            erros.extend(erros_op)
-            linhas_bremen.extend(linhas_op)
-    finally:
-        shutil.rmtree(temporaria, ignore_errors=True)
+    for id_op, linhas in por_op.items():
+        total_op, erros_op, linhas_op = baixar_op(baixador, base, id_op, linhas)
+        total += total_op
+        erros.extend(erros_op)
+        linhas_bremen.extend(linhas_op)
 
     return total, erros, linhas_bremen
 
 
-def baixar_op(baixador: BaixadorArquivos, base: str, temporaria: str, id_op: int, linhas: list,
-              dormir: Callable[[float], None] = time.sleep):
+def baixar_op(baixador: BaixadorArquivos, base: str, id_op: int, linhas: list):
     # Primeiro nível da pasta: a escola (lote de escola) ou
     # "<integração> - <numero_pedido>" (lote de integração). O SQL já
     # resolve qual dos dois e devolve em `pasta`.
@@ -197,9 +175,7 @@ def baixar_op(baixador: BaixadorArquivos, base: str, temporaria: str, id_op: int
     arquivos = list(unicos.values())
     nomes = dict(zip((chave_arquivo(a) for a in arquivos), nomes_unicos(arquivos)))
 
-    pasta_stage = os.path.join(temporaria, str(id_op))
-    os.makedirs(pasta_stage, exist_ok=True)
-    erros, tamanhos = [], {}
+    erros, tamanhos, pendentes = [], {}, []
     for arquivo in arquivos:
         chave = chave_arquivo(arquivo)
         nome = nomes[chave]
@@ -210,17 +186,18 @@ def baixar_op(baixador: BaixadorArquivos, base: str, temporaria: str, id_op: int
         if not arquivo.get("url"):
             erros.append(f"OP {id_op}: {nome} sem URL do arquivo")
             continue
+        pendentes.append((chave, nome, arquivo["url"], final))
+
+    if pendentes:
         try:
-            tamanhos[chave] = baixador.baixar(arquivo["url"], os.path.join(pasta_stage, nome))
+            os.makedirs(pasta_final, exist_ok=True)
+        except OSError as exc:
+            return 0, erros + [f"OP {id_op}: falha ao criar a pasta — {exc}"], []
+    for chave, nome, url, final in pendentes:
+        try:
+            tamanhos[chave] = baixador.baixar(url, final)
         except (RuntimeError, ValueError) as exc:
             erros.append(f"OP {id_op}: {nome} — {exc}")
-
-    if os.listdir(pasta_stage):
-        os.makedirs(os.path.dirname(pasta_final), exist_ok=True)
-        try:
-            publicar_arquivos(pasta_stage, pasta_final, dormir)
-        except OSError as exc:
-            return 0, erros + [f"OP {id_op}: falha ao publicar a pasta — {exc}"], []
 
     # Arco exclusivo em downloads_bremen: um lado por linha, nunca os dois
     # (CHECK ck_downloads_bremen_origem).

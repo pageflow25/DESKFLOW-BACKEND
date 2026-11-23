@@ -153,8 +153,11 @@ onde ele não funciona. O pickup é por poll curto.
   está em voo.
 - **Token fora da tela.** O `url_webhook` (que carrega o token) nunca é
   gravado em `payload_enviado`.
-- **Download publicado inteiro.** O download é montado numa pasta temporária
-  e só publicado no fim. Repetir o download baixa só o que falta.
+- **Download direto na pasta da OP.** Sem pasta temporária: pasta e arquivos
+  herdam as permissões do compartilhamento da produção (a antiga, de
+  `tempfile.mkdtemp`, nascia restrita ao usuário do serviço no Windows). Cada
+  arquivo é escrito como `<nome>.part` e renomeado no fim; repetir o download
+  baixa só o que falta.
 
 ## Estrutura do projeto
 

@@ -277,9 +277,7 @@ class TestDownloadIntegracao(unittest.TestCase):
         baixador = baixador or BaixadorFalso()
         base = tempfile.mkdtemp()
 
-        total, erros, linhas_bremen = baixar_arquivos_das_ops(
-            baixador, base, arquivos, "aprovacao 900", dormir=lambda _s: None,
-        )
+        total, erros, linhas_bremen = baixar_arquivos_das_ops(baixador, base, arquivos)
 
         resultado = {"sucesso": not erros, "total_arquivos": total, "erros": erros}
         return resultado, linhas_bremen, base, baixador
