@@ -25,7 +25,7 @@
 -- `obs_producao` do item (desde 2026-11-23): um JSON SERIALIZADO EM TEXTO — o
 -- campo é string no Wingraph — com os dados do próprio item, uma chave por
 -- tabela de origem:
---   {"pedido_formularios": {"nome", "email", "criado_em", "titulo"},
+--   {"pedido_formularios": {"id", "nome", "email", "criado_em", "titulo"},
 --    "escola_unidades": {"nome"},
 --    "escola_turmas": {"nome", "area"},           -- só item de turma
 --    "pedido_arquivos_pdf": [{"componente", "arquivo"}, ...]}
@@ -225,6 +225,7 @@ itens_produto AS (
         -- Texto, não objeto: o Wingraph declara `obs_producao` como string.
         json_strip_nulls(json_build_object(
             'pedido_formularios', json_build_object(
+                'id', form.id,
                 'nome', form.nome,
                 'email', form.email,
                 'criado_em', form.criado_em,

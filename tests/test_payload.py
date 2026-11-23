@@ -114,7 +114,7 @@ class TestObsProducaoJsonNoSqlAgrupado(unittest.TestCase):
         corpo = self._corpo()
         for chave in ("'pedido_formularios'", "'escola_unidades'", "'escola_turmas'", "'pedido_arquivos_pdf'"):
             self.assertIn(chave, corpo)
-        for campo in ("'nome', form.nome", "'email', form.email", "'criado_em', form.criado_em",
+        for campo in ("'id', form.id", "'nome', form.nome", "'email', form.email", "'criado_em', form.criado_em",
                       "'titulo', form.titulo", "'area', t.area", "'arquivo', ap.arquivo"):
             self.assertIn(campo, corpo)
 
