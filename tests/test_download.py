@@ -7,6 +7,7 @@ import httpx
 from app.servicos.pcp.download_arquivos import (
     BaixadorArquivos,
     baixar_arquivos_das_ops,
+    corrigir_extensao,
     dentro_da_base,
     nomes_unicos,
     sanitizar_nome,
@@ -113,6 +114,84 @@ class TestBaixarDireto(unittest.TestCase):
             destino = os.path.join(pasta, "a.pdf")
             self.assertEqual(baixador.baixar("https://x.public.blob.vercel-storage.com/a.pdf", destino), 4)
             self.assertEqual(os.listdir(pasta), ["a.pdf"])
+
+
+PNG = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+JPG = b"\xff\xd8\xff\xe0\x00\x10JFIF"
+
+
+class BaixadorDeConteudo:
+    """Grava o conteúdo configurado por URL (padrão: PDF)."""
+
+    def __init__(self, conteudos=None):
+        self.conteudos = conteudos or {}
+        self.urls = []
+
+    def baixar(self, url, destino):
+        self.urls.append(url)
+        with open(destino, "wb") as arquivo:
+            arquivo.write(self.conteudos.get(url, b"%PDF-1.4 teste"))
+        return os.path.getsize(destino)
+
+
+class TestExtensaoPeloConteudo(unittest.TestCase):
+    """OP 178630: design de capa em PNG chegava como "<id>_capa_frente.pdf" e
+    a produção via o arquivo como PDF corrompido."""
+
+    def _baixar(self, base, nome, conteudo, baixador=None):
+        url = "https://parceiro.example/capa"
+        baixador = baixador or BaixadorDeConteudo({url: conteudo})
+        arquivo = linha(178630, 10, 1, nome, url=url)
+        resultado = baixar_arquivos_das_ops(baixador, base, [arquivo])
+        return resultado, baixador
+
+    def test_png_com_nome_pdf_e_salvo_como_png(self):
+        with tempfile.TemporaryDirectory() as base:
+            (total, erros, linhas), _ = self._baixar(base, "4364_capa_frente.pdf", PNG)
+
+            self.assertEqual((total, erros), (1, []))
+            pasta = os.path.join(base, "178630")
+            self.assertEqual(os.listdir(pasta), ["4364_capa_frente.png"])
+            self.assertEqual(linhas[0]["caminho_local"], os.path.join(pasta, "4364_capa_frente.png"))
+            self.assertEqual(linhas[0]["tamanho"], len(PNG))
+
+    def test_jpg_com_nome_pdf_e_salvo_como_jpg(self):
+        with tempfile.TemporaryDirectory() as base:
+            self._baixar(base, "4364_capa_verso.pdf", JPG)
+            self.assertEqual(os.listdir(os.path.join(base, "178630")), ["4364_capa_verso.jpg"])
+
+    def test_pdf_e_sinonimos_mantem_o_nome(self):
+        with tempfile.TemporaryDirectory() as base:
+            self._baixar(base, "4364_miolo.pdf", b"%PDF-1.3")
+            self._baixar(base, "foto.jpeg", JPG)
+            self.assertEqual(sorted(os.listdir(os.path.join(base, "178630"))), ["4364_miolo.pdf", "foto.jpeg"])
+
+    def test_conteudo_desconhecido_mantem_o_nome(self):
+        with tempfile.TemporaryDirectory() as base:
+            with self.assertLogs("app.servicos.pcp.download_arquivos", level="WARNING"):
+                (total, erros, _), _ = self._baixar(base, "capa.pdf", b"<html>erro</html>")
+            self.assertEqual((total, erros), (1, []))
+            self.assertEqual(os.listdir(os.path.join(base, "178630")), ["capa.pdf"])
+
+    def test_repetir_nao_baixa_de_novo_o_arquivo_ja_corrigido(self):
+        with tempfile.TemporaryDirectory() as base:
+            self._baixar(base, "4364_capa_frente.pdf", PNG)
+            (total, erros, linhas), baixador = self._baixar(base, "4364_capa_frente.pdf", PNG)
+
+            self.assertEqual((total, erros, baixador.urls), (1, [], []))
+            self.assertTrue(linhas[0]["caminho_local"].endswith("4364_capa_frente.png"))
+
+    def test_nao_sobrescreve_arquivo_existente_com_a_extensao_corrigida(self):
+        with tempfile.TemporaryDirectory() as pasta:
+            caminho = os.path.join(pasta, "capa.pdf")
+            with open(caminho, "wb") as arquivo:
+                arquivo.write(PNG)
+            with open(os.path.join(pasta, "capa.png"), "wb") as arquivo:
+                arquivo.write(b"outro")
+
+            self.assertEqual(corrigir_extensao(caminho), caminho)
+            with open(os.path.join(pasta, "capa.png"), "rb") as arquivo:
+                self.assertEqual(arquivo.read(), b"outro")
 
 
 if __name__ == "__main__":
