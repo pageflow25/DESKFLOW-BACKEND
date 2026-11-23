@@ -104,9 +104,9 @@ vêm os itens. O consumidor não precisa saber mais que isso:
 **Downloads de lote de integração**: os arquivos não estão em
 `pedido_arquivos_pdf` — são URLs no próprio produto (`arquivo_pdf` e, quando
 existirem, `design_capa_frente`/`design_capa_verso`; mockups e etiqueta ficam
-de fora). A pasta de destino é
-`<DOWNLOAD_BASE_PATH>/<integração> - <numero_pedido>/<op>/`, no lugar da
-escola, e a linha de `downloads_bremen` (que o PageFlow grava a partir do
+de fora). A pasta de destino é `<DOWNLOAD_BASE_PATH>/<op>/`, igual à de
+escola (desde 2026-11-23 nenhuma das duas tem pasta de escola/integração
+antes da OP), e a linha de `downloads_bremen` (que o PageFlow grava a partir do
 resultado) vai com `integra_pedido_produto_id` e `arquivo_pdf_id` NULL.
 
 **Síncrono ou assíncrono** segue a **classe do tipo** (a da tela de configuração da
@@ -153,8 +153,11 @@ onde ele não funciona. O pickup é por poll curto.
   está em voo.
 - **Token fora da tela.** O `url_webhook` (que carrega o token) nunca é
   gravado em `payload_enviado`.
-- **Download publicado inteiro.** O download é montado numa pasta temporária
-  e só publicado no fim. Repetir o download baixa só o que falta.
+- **Download direto na pasta da OP.** Sem pasta temporária: pasta e arquivos
+  herdam as permissões do compartilhamento da produção (a antiga, de
+  `tempfile.mkdtemp`, nascia restrita ao usuário do serviço no Windows). Cada
+  arquivo é escrito como `<nome>.part` e renomeado no fim; repetir o download
+  baixa só o que falta.
 
 ## Estrutura do projeto
 

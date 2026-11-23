@@ -265,8 +265,8 @@ class TestDownloadIntegracao(unittest.TestCase):
     antigo, que baixava E gravava no banco. A classe saiu; o que sobrou e
     `baixar_arquivos_das_ops`, usada pelo handler `pcp.download_arquivos`. Os
     casos sao os mesmos, e continuam valendo a pena porque os testes do handler
-    cobrem so a pasta de ESCOLA — o layout `<integracao> - <pedido>` e coberto
-    aqui e em lugar nenhum mais.
+    cobrem so a origem ESCOLA. Desde 2026-11-23 a OP vai direto em
+    `<base>/<op>/` nas duas origens (sem pasta de integracao antes).
 
     A diferenca real: as linhas de `downloads_bremen` agora SAEM PRONTAS no
     retorno, em vez de serem gravadas aqui. Quem grava e o PageFlow, a partir do
@@ -277,9 +277,7 @@ class TestDownloadIntegracao(unittest.TestCase):
         baixador = baixador or BaixadorFalso()
         base = tempfile.mkdtemp()
 
-        total, erros, linhas_bremen = baixar_arquivos_das_ops(
-            baixador, base, arquivos, "aprovacao 900", dormir=lambda _s: None,
-        )
+        total, erros, linhas_bremen = baixar_arquivos_das_ops(baixador, base, arquivos)
 
         resultado = {"sucesso": not erros, "total_arquivos": total, "erros": erros}
         return resultado, linhas_bremen, base, baixador
@@ -296,8 +294,8 @@ class TestDownloadIntegracao(unittest.TestCase):
         self.assertTrue(resultado["sucesso"])
         self.assertEqual(resultado["total_arquivos"], 3)
         self.assertEqual(len(baixador.urls), 3)
-        # Pasta: <base>/<integração - pedido>/<op>/ — a escola não entra aqui.
-        pasta = os.path.join(base, "Parceiro X - ORD-42", "5000")
+        # Pasta: <base>/<op>/ — sem pasta de integração antes.
+        pasta = os.path.join(base, "5000")
         self.assertTrue(os.path.isdir(pasta))
         self.assertEqual(
             sorted(os.listdir(pasta)),
@@ -345,13 +343,13 @@ class TestDownloadIntegracao(unittest.TestCase):
         self.assertEqual(len(resultado["erros"]), 1)
         self.assertEqual([linha["tipo_arquivo"] for linha in gravadas], ["miolo"])
 
-    def test_nome_de_pasta_com_caractere_proibido_e_sanitizado(self):
+    def test_campo_pasta_do_sql_nao_entra_no_caminho(self):
         arquivo = linha_integracao(5000, 9001, "miolo", "https://x.public.blob.vercel-storage.com/a.pdf")
         arquivo["pasta"] = "Parceiro/X: ..\\teste"
         _resultado, _gravadas, base, _baixador = self._baixar([arquivo])
 
-        # Um nível só, sem subir de pasta.
-        self.assertTrue(os.path.isdir(os.path.join(base, "Parceiro_X_ .._teste", "5000")))
+        # A OP fica direto na base: o nome vindo do SQL não vira pasta.
+        self.assertEqual(os.listdir(base), ["5000"])
 
 
 if __name__ == "__main__":
