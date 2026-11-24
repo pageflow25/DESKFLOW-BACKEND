@@ -223,6 +223,8 @@ itens AS (
                         'largura', cbmc.largura_padrao,
                         'corfrente', cbmc.corfrente,
                         'corverso', cbmc.corverso,
+                        'gramaturasubstratoimpressao', bg.gramatura,
+                        'idgruposubstratoimpressao', cbmc.id_substrato,
                         -- (d) capa/miolo pelas flags do componente Bremen.
                         -- Capa = 2 páginas (frente e verso); miolo = as páginas
                         -- do PDF que o parceiro informou. Componente que não é
@@ -247,6 +249,8 @@ itens AS (
             ON pc.modelo_componente_id = cbmc.id
         LEFT JOIN tarefas_componente tc
             ON tc.modelo_componente_id = cbmc.id
+        LEFT JOIN bremen_gramatura bg
+            ON bg.id = cbmc.id_gramatura_padrao
         WHERE cbmc.modelo_id = pr.modelo_id
           AND cbmc.ativo = TRUE
     ) c ON TRUE
