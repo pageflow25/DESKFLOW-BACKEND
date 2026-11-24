@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.1](https://github.com/pageflow25/DESKFLOW-BACKEND/compare/v2.1.0...v2.1.1) (2026-11-24)
+
+
+### Correções
+
+* **sql:** adicionar gramatura e id do grupo de substrato na integraçã… ([f412882](https://github.com/pageflow25/DESKFLOW-BACKEND/commit/f4128821f177d209b172b20288327f313956f2a1))
+* **sql:** adicionar gramatura e id do grupo de substrato na integração de orçamento ([de7029c](https://github.com/pageflow25/DESKFLOW-BACKEND/commit/de7029cfc8805d238b2d83b95a7ed18e6ffbb4f8))
+
 ## [2.1.0](https://github.com/pageflow25/DESKFLOW-BACKEND/compare/v2.0.2...v2.1.0) (2026-11-23)
 
 
